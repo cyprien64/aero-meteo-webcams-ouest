@@ -54,6 +54,21 @@ Le PDF contient :
 - fiche par terrain extraite de la VAC (altitude, pistes, tour de piste, fréquences, espaces, obstacles, carburant, consignes) ;
 - les cartes VAC officielles jointes à la fin (extension Chrome ; sur le site web, liens vers les VAC car le SIA bloque le téléchargement direct).
 
+## Navigation : points VFR, météo en route, coupe verticale, export
+- **Points de report VFR** (export XML du SIA, Licence Ouverte — `data/vfr_points.json`, regénérable avec `scripts/build_vfr.py`) :
+  point de sortie / d'entrée automatique ou au choix, utilisables comme points tournants (ex. `BP-N`), calque sur la carte.
+- **Météo le long de la route** à l'heure de passage (Open-Meteo) : nuages bas, base estimée, visibilité, pluie, orages, rafales → avis VFR vert / orange / rouge.
+- **Coupe verticale** : relief, altitude de croisière, CTR/TMA/zones traversées, conflits signalés.
+- **Export** GPX (SkyDemon, Garmin…) et Garmin `.fpl` (ForeFlight, Garmin Pilot).
+- **Calques** : CTR/TMA/CTA et SIV avec fréquences, zones P/R/D, RTBA actives du jour, points VFR.
+- **Tablette hors ligne** : le site s'installe comme une application (« Ajouter à l'écran d'accueil ») ; le dernier briefing (PDF + Excel) reste consultable sans réseau.
+
+## Surveillance automatique
+- `data/live/status.json` : état de chaque source à chaque collecte ; `scripts/health.py` fait échouer le workflow
+  (→ e-mail de GitHub) si les NOTAM ou les METAR ne se mettent plus à jour.
+- Contrôle hebdomadaire des webcams (`cams_status.json`) : les webcams en panne sont grisées sur la carte.
+- Commit automatique de maintien pour éviter la suspension des tâches planifiées après 60 jours.
+
 ## Escale : carburant, paiement, taxe d'atterrissage
 Dans la fiche de chaque aérodrome (et dans les briefings départ / arrivée du PDF) :
 - **carburants disponibles et moyens de paiement**, extraits automatiquement de la VAC officielle (rubrique AVT), avec l'exploitant et son téléphone ;

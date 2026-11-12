@@ -107,7 +107,9 @@
     metar: L.layerGroup(), apt: L.layerGroup(), camAero: L.layerGroup(), cam: L.layerGroup(),
     obs: L.layerGroup(), wind: L.layerGroup(), radar: L.layerGroup(),
     notam: L.layerGroup(), supaip: L.layerGroup(),
+    asp: L.layerGroup(), siv: L.layerGroup(), zones: L.layerGroup(), rtba: L.layerGroup(), vfr: L.layerGroup(),
   };
+  let AIR = null, airLoading = null;   // calques espaces aériens (chargés à la demande)
   const searchIndex = []; // {label, sub, lat, lon, action}
   const SOURCES = window.SOURCES || [];
   const fcstByIcao = {};
@@ -128,7 +130,7 @@
       layer = layers.wind;
       icon = divIcon(`<svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5" fill="#7fffd4" stroke="#003a5c" stroke-width="2"/></svg>`, [18, 18], [9, 9]);
     } else continue;
-    const mk = L.marker([s.la, s.lo], { icon, title: '', riseOnHover: true })
+    const mk = s._mk = L.marker([s.la, s.lo], { icon, title: '', riseOnHover: true })
       .bindTooltip(tipHtml(s.n, s.img), { className: 'tip', direction: 'top', offset: [0, -10] })
       .on('click', () => openWin(s.u, s.w, s.h));
     mk.addTo(layer);
@@ -291,6 +293,7 @@
     if (k in layerState) cb.checked = layerState[k];
     const apply = () => {
       if (cb.checked) layers[k].addTo(map); else map.removeLayer(layers[k]);
+      if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers();
       layerState[k] = cb.checked; store.set('layers', layerState);
       if (k === 'radar') {
         $('#radar-ctrl').hidden = !cb.checked;
@@ -482,6 +485,18 @@
     try { const loc = JSON.parse(localStorage.getItem('aww.fee.' + icao) || 'null'); if (loc && loc.tarif) return { ...loc, source: 'saisie personnelle' }; } catch { /* ignore */ }
     return FEES[icao] && FEES[icao].tarif ? FEES[icao] : null;
   }
+  async function loadCamStatus() {
+    try {
+      const st = await getLive('cams_status.json');
+      const dead = st.dead || {}, when = (st.checked || '').slice(0, 10);
+      for (const s of SOURCES) {
+        if (s.t !== 'cam' || !s._mk || !dead[s.u]) continue;
+        s._mk.setIcon(divIcon(svgCam('#8a8f94'), [22, 22], [11, 11]));
+        s._mk.setOpacity(0.6);
+        s._mk.setTooltipContent(tipHtml(s.n + ` — hors service lors du contrôle du ${when} (${dead[s.u]})`, null));
+      }
+    } catch (e) { /* pas encore de contrôle */ }
+  }
   async function loadEscale() {
     try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); }
     try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
@@ -622,6 +637,7 @@
     try {
       SUP = (await getLive('supaip.json')).data || [];
       drawSup();
+      drawAirLayers();
       st.push(`${SUP.length} SUP AIP`);
     } catch (e) { console.warn('sup', e); st.push('SUP AIP indisponibles'); }
     $('#status2').textContent = st.join(' · ') + (NOTAM.generated ? ` (collecte ${fmtT(NOTAM.generated)})` : '');
@@ -632,6 +648,56 @@
   $('#btn-notam-list').addEventListener('click', showNotamList);
   $('#btn-sup-list').addEventListener('click', showSupList);
 
+  // ---------- Calques espaces aériens, zones, RTBA du jour, points VFR ----------
+  function loadAirLayers() {
+    if (!airLoading) airLoading = (async () => {
+      const [asp, zones, vfr] = await Promise.all([
+        getLive('airspaces.json').catch(() => ({ data: [] })),
+        getLive('zones.json').catch(() => ({ data: [] })),
+        fetch('data/vfr_points.json').then((r) => r.json()).catch(() => ({ data: {} })),
+      ]);
+      AIR = { asp: asp.data || [], zones: zones.data || [], vfr: vfr.data || {}, vfrDate: vfr.effDate };
+      drawAirLayers();
+    })();
+    return airLoading;
+  }
+  function rtbaToday() {
+    const out = {}, now = new Date(), day0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    for (const n of (NOTAM && NOTAM.fir) || []) {
+      const t = (n.e || '') + ' ' + (n.efr || '');
+      if (!/RTBA/.test(t)) continue;
+      if (n.from && Date.parse(n.from) > day0 + 864e5) continue;
+      const re = /ZONE\s+(R\s?\d+\s?[A-Z]?\d?)\s+([A-Z' .-]+?)\s+((?:\d{4}-\d{4}:ACTIVE\s*)+)/g;
+      let m; while ((m = re.exec(t))) { const k = m[1].replace(/\s/g, ''); out[k] = [...new Set([...(out[k] || []), ...m[3].match(/\d{4}-\d{4}/g)])]; }
+    }
+    return out;
+  }
+  function drawAirLayers() {
+    if (!AIR) return;
+    ['asp', 'siv', 'zones', 'rtba', 'vfr'].forEach((k) => layers[k].clearLayers());
+    for (const s of AIR.asp) {
+      const siv = s.kind === 'SIV';
+      L.polygon(s.poly, { color: siv ? '#81c784' : s.kind === 'CTR' ? '#1e88e5' : '#64b5f6', weight: siv ? 1 : 1.3, dashArray: siv ? '2 4' : '6 4', fillOpacity: s.kind === 'CTR' ? .06 : .02, interactive: true })
+        .bindTooltip(`<b>${esc(s.name)}</b> (classe ${esc(s.cls)})<br>${esc(s.lower)} – ${esc(s.upper)}<br>${esc(s.call)} <b>${esc(s.freq)}</b>`, { className: 'tip', sticky: true })
+        .addTo(siv ? layers.siv : layers.asp);
+    }
+    const act = rtbaToday();
+    for (const z of AIR.zones) {
+      const key = z.id.replace(/\s/g, ''), slots = act[key];
+      const col = z.type === 'P' ? '#d81b60' : z.type === 'D' ? '#fb8c00' : '#8e24aa';
+      const tip = `<b>${esc(z.id)} ${esc(z.name)}</b><br>${esc(z.lower)} – ${esc(z.upper)}${slots ? `<br><b style="color:#ff6b6b">RTBA active aujourd'hui : ${esc(slots.join(', '))} UTC</b>` : ''}<br><span style="opacity:.75">${esc((z.rmk || '').slice(0, 180))}</span>`;
+      if (z.rtba && slots) L.polygon(z.poly, { color: '#ff3b30', weight: 2, fillColor: '#ff3b30', fillOpacity: .22 }).bindTooltip(tip, { className: 'tip', sticky: true }).addTo(layers.rtba);
+      L.polygon(z.poly, { color: col, weight: 1, fillOpacity: z.type === 'P' ? .18 : .07 }).bindTooltip(tip, { className: 'tip', sticky: true }).addTo(layers.zones);
+    }
+    for (const [ad, pts] of Object.entries(AIR.vfr)) {
+      for (const p of pts) {
+        L.marker([p.la, p.lo], { icon: L.divIcon({ className: 'mk', iconSize: [10, 10], iconAnchor: [5, 5], html: `<div style="position:relative"><svg width="10" height="10"><path d="M5 0l5 10H0z" fill="#fff" stroke="#003a5c"/></svg><span class="vfr-label" style="position:absolute;left:11px;top:-2px">${esc(p.id)}</span></div>` }) })
+          .bindTooltip(`<b>${ad.slice(2)}-${esc(p.id)}</b> (${ad})<br>${esc(p.desc)}<br><span style="opacity:.7">Points SIA ${esc(AIR.vfrDate || '')} — vérifier sur la VAC</span>`, { className: 'tip', direction: 'top' })
+          .addTo(layers.vfr);
+      }
+    }
+  }
+
   // ---------- API interne pour le module de préparation de vol (flightprep.js) ----------
   window.AWW = {
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
@@ -641,11 +707,50 @@
     detailBody, detail,
   };
 
+  // ---------- Application hors ligne (tablette) : service worker + dernier briefing ----------
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw', e));
+  }
+  async function showLastBriefing() {
+    if (!window.caches) return;
+    const c = await caches.open('aww-briefings');
+    const keys = await c.keys();
+    const metaR = await c.match('meta.json');
+    const meta = metaR ? await metaR.json() : {};
+    const items = [];
+    for (const k of keys) {
+      const n = new URL(k.url).pathname.split('/').pop();
+      if (n === 'meta.json') continue;
+      items.push(n);
+    }
+    showList('Dernier briefing', items.length ? `<p class="meta">Enregistré le ${esc(meta.date || '?')} — consultable sans réseau.</p>`
+      + items.map((n) => `<p><button class="btn" data-lastfile="${esc(n)}">${n.endsWith('.pdf') ? '📄' : '📊'} ${esc(n)}</button></p>`).join('')
+      : '<p class="meta">Aucun briefing enregistré.</p>');
+    detailBody.querySelectorAll('[data-lastfile]').forEach((b) => b.addEventListener('click', async () => {
+      const r = await c.match(b.dataset.lastfile); if (!r) return;
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a'); a.href = url; a.download = b.dataset.lastfile; a.target = '_blank'; document.body.appendChild(a); a.click(); a.remove();
+    }));
+  }
+  window.AWW_saveBriefing = async (name, blob) => {
+    try {
+      if (!window.caches) return;
+      const c = await caches.open('aww-briefings');
+      if (name.endsWith('.pdf')) { for (const k of await c.keys()) await c.delete(k); }
+      await c.put(name, new Response(blob));
+      await c.put('meta.json', new Response(JSON.stringify({ date: new Date().toLocaleString('fr-FR') })));
+      $('#btn-last').hidden = false;
+    } catch (e) { console.warn('cache briefing', e); }
+  };
+  $('#btn-last').addEventListener('click', showLastBriefing);
+  if (window.caches) caches.open('aww-briefings').then((c) => c.keys()).then((k) => { if (k.length) $('#btn-last').hidden = false; }).catch(() => {});
+
   // ---------- Démarrage ----------
   drawAerodromes();
   loadMetarTaf();
   loadPiouPiou();
   loadNotamSup();
   loadEscale();
+  loadCamStatus();
   setInterval(() => { loadMetarTaf(); loadPiouPiou(); loadNotamSup(); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
 })();

@@ -5,6 +5,11 @@
   <title>Aéro Météo Webcams — Pyrénées → Bretagne</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="icons/icon48.png">
+  <link rel="manifest" href="app.webmanifest">
+  <meta name="theme-color" content="#006699">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Aéro Ouest">
+  <link rel="apple-touch-icon" href="icons/icon192.png">
   <link rel="stylesheet" href="lib/leaflet/leaflet.css">
   <link rel="stylesheet" href="map.css">
 </head>
@@ -25,6 +30,7 @@
 
     <div id="panel-body">
       <button id="btn-prep" class="prep-btn">✈️ Préparer un vol (briefing PDF)</button>
+      <button id="btn-last" class="btn" style="width:100%;margin-top:6px" hidden>📂 Dernier briefing (disponible hors ligne)</button>
       <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
       <ul id="results"></ul>
 
@@ -46,6 +52,13 @@
           <option value="115">FL115</option><option value="999">tous</option></select></label>
       </div>
       <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
+
+      <h2>Espaces aériens</h2>
+      <label><input type="checkbox" data-layer="asp"> <span class="sw sw-asp"></span> CTR / TMA / CTA (fréquences)</label>
+      <label><input type="checkbox" data-layer="siv"> <span class="sw sw-siv"></span> SIV (fréquences Info)</label>
+      <label><input type="checkbox" data-layer="zones"> <span class="sw sw-zones"></span> Zones P / R / D</label>
+      <label><input type="checkbox" data-layer="rtba" checked> <span class="sw sw-rtba"></span> RTBA actives aujourd'hui</label>
+      <label><input type="checkbox" data-layer="vfr"> <span class="sw sw-vfr"></span> Points de report VFR</label>
       <div class="tools">
         <button id="btn-notam-list">⚠️ Liste NOTAM</button>
         <button id="btn-sup-list">📄 Liste SUP AIP</button>

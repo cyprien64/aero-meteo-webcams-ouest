@@ -28,7 +28,7 @@ jobs:
       - name: Dépendance (lecture des cartes VAC)
         run: python3 -m pip install --quiet pypdf
 
-      - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones et VAC (SIA)
+      - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
         env:
           FALLBACK_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: python3 scripts/collect.py
@@ -41,3 +41,29 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # Échoue si NOTAM / METAR ne se mettent plus à jour -> GitHub envoie un e-mail d'échec
+      - name: Contrôle de fraîcheur des données
+        run: python3 scripts/health.py
+
+  # GitHub suspend les tâches planifiées d'un dépôt public sans activité depuis 60 jours :
+  # un commit vide est poussé si le dernier commit date de plus de 45 jours.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit de maintien si nécessaire
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Maintien de la collecte automatique (keepalive)"
+            git push
+          else
+            echo "Dernier commit récent : rien à faire."
+          fi

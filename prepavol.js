@@ -116,7 +116,37 @@
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
     if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
+    await loadVfr();
   }
+  // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
+  let VFR = null;
+  async function loadVfr() {
+    if (!VFR) VFR = await fetch('data/vfr_points.json').then((r) => r.json()).catch(() => ({ data: {} }));
+    return VFR;
+  }
+  function vfrOf(icao) { return (VFR && VFR.data && VFR.data[icao]) || []; }
+  function resolvePt(id) {
+    const a = A.aptByIcao[id];
+    if (a) return { id, la: a.la, lo: a.lo, name: a.name, kind: 'ad', ad: id };
+    const m = id.match(/^(?:LF)?([A-Z]{2})-([A-Z0-9]{1,5})$/);
+    if (m) {
+      const ad = 'LF' + m[1], p = vfrOf(ad).find((x) => x.id === m[2]);
+      if (p) return { id: `${m[1]}-${p.id}`, la: p.la, lo: p.lo, name: `${p.id} (${p.desc})`, desc: p.desc, kind: 'vfr', ad };
+    }
+    return null;
+  }
+  function bestVfr(ad, other, isExit) {   // point qui rallonge le moins le trajet
+    const pts = vfrOf(ad).filter((p) => !/HEL|hélicoptère|réservé/i.test(p.desc));
+    if (!pts.length || !other) return null;
+    const a = A.aptByIcao[ad];
+    let best = null, bd = Infinity;
+    for (const p of pts) {
+      const d = distNm([a.la, a.lo], [p.la, p.lo]) + distNm([p.la, p.lo], other);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best ? `${ad.slice(2)}-${best.id}` : null;
+  }
+  window.AWW_VFR = { loadVfr, vfrOf };
   const hpaFor = (ft) => [[1000, 975], [1800, 950], [2600, 925], [3300, 900], [5000, 850], [6500, 800], [99999, 700]].find(([f]) => ft <= f)[1];
   async function windsAloft(points, ft, when) {
     const lv = hpaFor(ft), day = when.toISOString().slice(0, 10);
@@ -293,7 +323,9 @@
       <div class="prep-form">
         <label>Départ<input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
         <label>Arrivée<input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
-        <label class="full">Points tournants (codes OACI, optionnel)<input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX LFBI"></label>
+        <label class="full">Points tournants (terrains OACI ou points VFR comme BP-N, optionnel)<input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX BI-N"></label>
+        <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
+        <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Dégagement<input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
         <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
         <label>Avion<select id="pf-reg">${FLEET.map((a) => `<option value="${a.reg}" ${a.reg === reg ? 'selected' : ''}>${a.reg} — ${esc(TYPES[a.type].label)}</option>`).join('')}</select></label>
@@ -339,6 +371,17 @@
     $('#pf-pdf').addEventListener('click', () => run('pdf'));
     $('#pf-xlsx').addEventListener('click', () => run('xlsx'));
     ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-wps'].forEach((s) => $(s).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+    const fillVfr = (sel, ad, keep) => {
+      const pts = vfrOf(ad);
+      $(sel).innerHTML = `<option value="auto">${pts.length ? 'Auto (le plus direct)' : 'Aucun point publié'}</option><option value="none">Aucun (direct)</option>`
+        + pts.map((p) => `<option value="${ad.slice(2)}-${p.id}">${esc(p.id)} — ${esc(p.desc.slice(0, 50))}</option>`).join('');
+      if (keep && [...$(sel).options].some((o) => o.value === keep)) $(sel).value = keep;
+    };
+    loadVfr().then(() => { fillVfr('#pf-exit', $('#pf-dep').value, f.exit); fillVfr('#pf-entry', $('#pf-arr').value, f.entry); });
+    $('#pf-dep').addEventListener('change', (e) => fillVfr('#pf-exit', e.target.value));
+    $('#pf-arr').addEventListener('change', (e) => fillVfr('#pf-entry', e.target.value));
+    $('#pf-dep').addEventListener('input', (e) => { if (A.aptByIcao[e.target.value]) fillVfr('#pf-exit', e.target.value); });
+    $('#pf-arr').addEventListener('input', (e) => { if (A.aptByIcao[e.target.value]) fillVfr('#pf-entry', e.target.value); });
   }
   $('#btn-prep').addEventListener('click', openForm);
 
@@ -349,6 +392,7 @@
       time: v('#pf-time'), reg: v('#pf-reg'), regime: +v('#pf-regime'), ft: +v('#pf-ft'), res: +v('#pf-res'),
       m1: +v('#pf-m1'), m2: +v('#pf-m2'), m3: +v('#pf-m3'), m4: +v('#pf-m4'), fuel: +v('#pf-fuel'), aux: +v('#pf-aux') || 0,
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
+      exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
     };
     store.set('form', { ...f, time: undefined });
     const base = FLEET.find((x) => x.reg === f.reg) || FLEET[0];
@@ -359,22 +403,31 @@
     return { ...f, ac, T, rg, tas: rg.tas, ff: rg.ff };
   }
 
-  let routeLayer = null;
+  let routeLayer = null, lastBrief = null;
   async function run(makePdf) {
     const prog = $('#pf-prog'), out = $('#pf-out');
     try {
       const f = readForm();
       if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
-      const userIds = [f.dep, ...f.wps.split(/[\s,;]+/).filter(Boolean), f.arr];
-      const bad = userIds.filter((id) => !A.aptByIcao[id]);
-      if (bad.length) throw new Error(`Terrain inconnu : ${bad.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
+      if (!A.aptByIcao[f.dep] || !A.aptByIcao[f.arr]) throw new Error(`Terrain inconnu : ${[f.dep, f.arr].filter((x) => !A.aptByIcao[x]).join(', ')} (zone couverte : Pyrénées → Bretagne).`);
       if (f.alt && !A.aptByIcao[f.alt]) throw new Error(`Dégagement inconnu : ${f.alt}`);
       prog.textContent = 'Chargement des données AIP, espaces aériens…';
       await loadAip();
+      const wps = f.wps.split(/[\s,;]+/).filter(Boolean).map((id) => (resolvePt(id) || { id, bad: true }));
+      const bad = wps.filter((w) => w.bad).map((w) => w.id);
+      if (bad.length) throw new Error(`Point inconnu : ${bad.join(', ')} (terrain OACI de la zone ou point VFR publié, ex. BP-N).`);
+      const firstNext = wps[0] ? [wps[0].la, wps[0].lo] : [A.aptByIcao[f.arr].la, A.aptByIcao[f.arr].lo];
+      const lastPrev = wps.length ? [wps[wps.length - 1].la, wps[wps.length - 1].lo] : [A.aptByIcao[f.dep].la, A.aptByIcao[f.dep].lo];
+      const exit = f.exit === 'none' ? null : f.exit === 'auto' ? bestVfr(f.dep, firstNext, true) : f.exit;
+      const entry = f.entry === 'none' ? null : f.entry === 'auto' ? bestVfr(f.arr, lastPrev, false) : f.entry;
+      const userIds = [f.dep, exit, ...wps.map((w) => w.id), entry, f.arr].filter(Boolean);
       prog.textContent = 'Calcul de la route, du vent et du relief…';
       const b = await compute(f, userIds);
       drawRoute(b);
       out.innerHTML = summaryHtml(b);
+      $('#pf-gpx').addEventListener('click', () => exportGpx(b));
+      $('#pf-fpl').addEventListener('click', () => exportFpl(b));
+      lastBrief = b;
       prog.textContent = '';
       if (makePdf === 'pdf' || makePdf === true) {
         prog.textContent = 'Génération du PDF…';
@@ -414,7 +467,7 @@
   }
 
   async function compute(f, userIds) {
-    const userPts = userIds.map((id) => [A.aptByIcao[id].la, A.aptByIcao[id].lo]);
+    const userPts = userIds.map((id) => { const r = resolvePt(id); return [r.la, r.lo]; });
     PROJ_LAT = userPts.reduce((s, p) => s + p[0], 0) / userPts.length;
     const depT = new Date(f.time);
     if (isNaN(depT)) throw new Error('Heure de départ invalide.');
@@ -447,7 +500,7 @@
     }
     const routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
     const pts = routed.pts, ids = routed.ids;
-    const adIds = [...new Set([...userIds, f.alt].filter(Boolean))];
+    const adIds = [...new Set([...userIds, f.alt].filter((id) => id && A.aptByIcao[id]))];
     const varDeg = (() => {
       const v = [vacOf(f.dep), vacOf(f.arr)].map((x) => x && x.var).filter((x) => typeof x === 'number');
       return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
@@ -460,18 +513,21 @@
     else { try { winds = await windsAloft(mids, f.ft, depT); } catch (e) { windErr = 'Vent en altitude indisponible (' + e.message + ').'; } }
 
     // --- Relief : altitude de sécurité par branche (relief max ±5 NM + 1000 ft)
-    let safe = null, elevErr = null;
+    let safe = null, elevErr = null, profile = [];
     try {
-      const samples = [], owner = [];
+      const samples = [], owner = [], centre = [];
+      let accNm = 0;
       for (let i = 0; i < pts.length - 1; i++) {
         const dst = distNm(pts[i], pts[i + 1]), tc = bearing(pts[i], pts[i + 1]);
         const n = Math.max(2, Math.ceil(dst / 3));
         for (let k = 0; k <= n; k++) {
           const c = destPt(pts[i], tc, dst * k / n);
-          for (const off of [-5, -2.5, 0, 2.5, 5]) { samples.push(off ? destPt(c, tc + 90, off) : c); owner.push(i); }
+          for (const off of [-5, -2.5, 0, 2.5, 5]) { if (!off) centre.push({ j: samples.length, along: accNm + dst * k / n, p: c }); samples.push(off ? destPt(c, tc + 90, off) : c); owner.push(i); }
         }
+        accNm += dst;
       }
       const el = await elevations(samples);
+      profile = centre.map((c) => ({ along: c.along, p: c.p, ft: Math.round((el[c.j] || 0) * 3.281) }));
       safe = pts.slice(1).map(() => 0);
       el.forEach((m, j) => { if (m != null) safe[owner[j]] = Math.max(safe[owner[j]], m * 3.281); });
       safe = safe.map((maxFt) => ({ terrain: Math.round(maxFt), alt: Math.ceil((maxFt + 1000) / 100) * 100 }));
@@ -602,8 +658,99 @@
       f, userIds, ids, pts, detours: routed.detours, obstacles, legs, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
+      profile, wxRoute: await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message })),
+      vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
+  }
+
+  // ================================================================== météo le long de la route
+  // Prévision modèle (Open-Meteo) à l'heure de passage : plafond estimé (écart T/Td), nuages bas, visibilité, pluie, orages.
+  async function routeWeather(pts, legs, depT, cruiseFt) {
+    const horizon = (depT - Date.now()) / 864e5;
+    if (horizon < -1 || horizon > 15) return { err: 'prévisions disponibles à 16 jours' };
+    const samp = [];   // un point tous les ~12 NM avec son heure de passage
+    let t = depT.getTime(), acc = 0;
+    legs.forEach((lg, i) => {
+      const n = Math.max(1, Math.round(lg.dist / 12));
+      const dt = (lg.min * 6e4) / n;
+      for (let k = (i === 0 ? 0 : 1); k <= n; k++) samp.push({ p: destPt(lg.a, lg.tc, lg.dist * k / n), at: new Date(t + dt * k), along: acc + lg.dist * k / n, leg: i });
+      t += lg.min * 6e4; acc += lg.dist;
+    });
+    const days = [...new Set(samp.map((x) => x.at.toISOString().slice(0, 10)))].sort();
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${samp.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${samp.map((x) => x.p[1].toFixed(3)).join(',')}`
+      + '&hourly=temperature_2m,dew_point_2m,cloud_cover_low,cloud_cover_mid,visibility,precipitation,weather_code,wind_gusts_10m'
+      + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`;
+    const r = await fetch(url); if (!r.ok) throw new Error('open-meteo ' + r.status);
+    let d = await r.json(); if (!Array.isArray(d)) d = [d];
+    const pts2 = samp.map((x, i) => {
+      const h = d[i].hourly, idx = h.time.indexOf(x.at.toISOString().slice(0, 13) + ':00');
+      const g = (k) => (idx >= 0 ? h[k][idx] : null);
+      const T = g('temperature_2m'), Td = g('dew_point_2m'), low = g('cloud_cover_low'), vis = g('visibility'), rr = g('precipitation'), wc = g('weather_code'), gust = g('wind_gusts_10m');
+      const elevFt = Math.round((d[i].elevation || 0) * 3.281);
+      const baseAgl = T != null && Td != null ? Math.max(0, Math.round((T - Td) * 400 / 100) * 100) : null;
+      const baseAmsl = baseAgl != null ? Math.round((baseAgl + elevFt) / 100) * 100 : null;
+      let level = 0; const why = [];
+      if (vis != null && vis < 5000) { level = 2; why.push(`visi ${Math.round(vis / 100) / 10} km`); } else if (vis != null && vis < 8000) { level = Math.max(level, 1); why.push(`visi ${Math.round(vis / 100) / 10} km`); }
+      if (low != null && low >= 70 && baseAgl != null && baseAgl < 1000) { level = 2; why.push(`plafond ~${baseAgl} ft sol`); }
+      else if (low != null && low >= 50 && baseAgl != null && baseAgl < 2000) { level = Math.max(level, 1); why.push(`nuages bas ~${baseAgl} ft sol`); }
+      if (low != null && low >= 50 && baseAmsl != null && baseAmsl < cruiseFt + 500) { level = Math.max(level, 1); why.push(`base ~${baseAmsl} ft < croisière`); }
+      if (wc != null && wc >= 95) { level = 2; why.push('orages'); } else if (rr != null && rr >= 1) { level = Math.max(level, 1); why.push(`pluie ${rr} mm/h`); }
+      if (gust != null && gust >= 25) { level = Math.max(level, 1); why.push(`rafales ${Math.round(gust)} kt`); }
+      return { ...x, T, Td, low, vis, rr, wc, gust, elevFt, baseAgl, baseAmsl, level, why };
+    });
+    return { pts: pts2, worst: Math.max(0, ...pts2.map((x) => x.level)) };
+  }
+  const WXCOL = ['#2ecc40', '#ff9f0a', '#ff3b30'], WXTXT = ['VFR favorable', 'VFR marginal', 'VFR défavorable'];
+
+  // ================================================================== coupe verticale
+  function verticalProfile(profile, asp, zones, cruiseFt) {
+    if (!profile.length) return null;
+    const segs = [];
+    const add = (name, kind, lower, upper, color) => {
+      let cur = null;
+      profile.forEach((pp, i) => {
+        const inside = inPoly(pp.p, kind.poly);
+        if (inside && !cur) cur = { name, from: pp.along, to: pp.along, lower, upper, color, aglL: /ASFC|AGL/i.test(String(kind.lowerS)), aglU: /ASFC|AGL/i.test(String(kind.upperS)), ter: [] };
+        if (inside) { cur.to = pp.along; cur.ter.push(pp.ft); }
+        if ((!inside || i === profile.length - 1) && cur) { segs.push(cur); cur = null; }
+      });
+    };
+    for (const s of asp) {
+      if (s.kind === 'SIV') continue;
+      const lo = parseAlt(s.lower), up = parseAlt(s.upper);
+      if (lo === null || lo > 12000) continue;
+      if (polyRouteDist(s.poly, profile.map((x) => x.p)) > 0) continue;
+      add(`${s.name} (${s.cls})`, { poly: s.poly, lowerS: s.lower, upperS: s.upper }, lo, Math.min(up ?? 12000, 12000), s.kind === 'CTR' ? '#1e88e5' : '#64b5f6');
+    }
+    for (const x of zones) {
+      if (!x.crossed) continue;
+      const lo = parseAlt(x.z.lower), up = parseAlt(x.z.upper);
+      if (lo === null || lo > 12000) continue;
+      add(`${x.z.id} ${x.z.name}`, { poly: x.z.poly, lowerS: x.z.lower, upperS: x.z.upper }, lo, Math.min(up ?? 12000, 12000), x.z.rtba ? '#ff3b30' : x.z.type === 'P' ? '#d81b60' : x.z.type === 'D' ? '#fb8c00' : '#8e24aa');
+    }
+    const maxTer = Math.max(...profile.map((x) => x.ft));
+    const total = profile[profile.length - 1].along;
+    const conflicts = segs.filter((sg) => {
+      if (sg.to <= 8 || sg.from >= total - 8) return false;   // CTR / zones au départ ou à l'arrivée : attendues
+      const tmax = Math.max(0, ...sg.ter);
+      const lo = sg.lower + (sg.aglL ? tmax : 0), up = sg.upper + (sg.aglU ? tmax : 0);
+      return cruiseFt >= lo && cruiseFt <= up;
+    });
+    return { profile, segs, maxTer, total: profile[profile.length - 1].along, conflicts };
+  }
+  function profileSvg(v, b, w = 430, h = 170) {
+    if (!v) return '';
+    const top = Math.max(b.f.ft + 2000, v.maxTer + 1500, 3000), X = (nm) => 30 + nm / v.total * (w - 36), Y = (ft) => h - 18 - ft / top * (h - 26);
+    const ter = `M${X(0)},${Y(0)} ` + v.profile.map((p) => `L${X(p.along).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(' ') + ` L${X(v.total)},${Y(0)} Z`;
+    const rects = v.segs.filter((s) => s.lower < top).map((s) => ({ ...s, upper: Math.min(s.upper, top) })).map((s) => `<rect x="${X(s.from).toFixed(1)}" y="${Y(s.upper).toFixed(1)}" width="${Math.max(1, X(s.to) - X(s.from)).toFixed(1)}" height="${Math.max(1, Y(s.lower) - Y(s.upper)).toFixed(1)}" fill="${s.color}" fill-opacity=".18" stroke="${s.color}" stroke-width=".8"><title>${esc(s.name)} ${s.lower}-${s.upper} ft</title></rect>`).join('');
+    const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${h - 6}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((k) => `<text x="2" y="${(Y(top * k) + 3).toFixed(1)}" font-size="8" fill="#9bd">${Math.round(top * k / 100) * 100}</text>`).join('');
+    const marks = [];
+    let acc = 0; b.legs.forEach((lg, i) => { if (i) marks.push([acc, lg.from]); acc += lg.dist; });
+    const mk = marks.map(([a, n]) => `<line x1="${X(a)}" x2="${X(a)}" y1="8" y2="${h - 18}" stroke="#fff" stroke-opacity=".25"/><text x="${X(a) + 2}" y="16" font-size="8" fill="#fff">${esc(n)}</text>`).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="background:rgba(0,0,0,.25);border-radius:5px">${grid}${rects}<path d="${ter}" fill="#8d6e63" fill-opacity=".85"/><line x1="${X(0)}" x2="${X(v.total)}" y1="${Y(b.f.ft)}" y2="${Y(b.f.ft)}" stroke="#ff2bd6" stroke-width="2"/>${mk}${wx}
+      <text x="${X(0)}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[0])}</text><text x="${X(v.total) - 26}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[b.ids.length - 1])}</text></svg>`;
   }
 
   // ================================================================== carte + résumé
@@ -648,6 +795,9 @@
     b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
     b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
+    if (b.wxRoute && b.wxRoute.worst) al.push(`Météo en route : ${WXTXT[b.wxRoute.worst]} (${[...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 4).join(', ')}).`);
+    if (b.vprofile && b.vprofile.conflicts.length) al.push(`Coupe verticale : à ${b.f.ft} ft la route pénètre ${b.vprofile.conflicts.map((c) => c.name).slice(0, 4).join(', ')} — clairance ou changement d'altitude.`);
+    if (b.legs.some((l) => l.safe && l.safe.alt > b.f.ft)) al.push(`Altitude de croisière ${b.f.ft} ft inférieure à l'alti sécu de ${b.legs.filter((l) => l.safe && l.safe.alt > b.f.ft).map((l) => `${l.from}-${l.to} (${l.safe.alt} ft)`).join(', ')}.`);
     return al;
   }
 
@@ -663,6 +813,14 @@
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}.</p>
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
+      <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
+      ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
+        <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
+      <h4>Coupe verticale</h4>
+      ${profileSvg(b.vprofile, b)}
+      ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
+      <h4>Exporter la route</h4>
+      <div class="row"><button class="btn" id="pf-gpx">GPX (SkyDemon, Garmin, etc.)</button><button class="btn" id="pf-fpl">Garmin .fpl (ForeFlight, Garmin Pilot)</button></div>
       <h4>Fréquences en route</h4>
       ${b.legs.map((l) => `<p class="meta" style="margin:2px 0"><b>${l.from}→${l.to}</b> : ${l.airspaces.map((s) => `${esc(s.name)} ${esc(s.freq)}`).join(' · ') || 'classe G (A/A 123.500 / SIV)'}</p>`).join('')}`;
   }
@@ -804,6 +962,8 @@
     const elevOf = (id) => { const v = VAC && VAC.data && VAC.data[id]; const a = A.aptByIcao[id]; return v && v.alt != null ? v.alt : (a && a.elev ? +a.elev : null); };
     const nameOf = (id, i) => {
       if (id.startsWith('DT')) return `${id} ${coords[i][0].toFixed(2)}N ${Math.abs(coords[i][1]).toFixed(2)}${coords[i][1] < 0 ? 'W' : 'E'}`;
+      const r = resolvePt(id);
+      if (r && r.kind === 'vfr') return short(`${id.split('-')[1]} ${r.desc}`, 22);
       const a = A.aptByIcao[id]; return short((a ? a.name : id).toUpperCase(), 16);
     };
     const nUse = Math.min(legs.length, slots);
@@ -814,7 +974,8 @@
       // point de départ de la branche
       const id = pts[k];
       sh.set(`M${pr}`, id.startsWith('DT') ? null : elevOf(id));
-      sh.set(`N${pr}`, nameOf(id, k)); sh.set(`P${pr}`, id.startsWith('DT') ? 'contournement' : id);
+      const rv = resolvePt(id);
+      sh.set(`N${pr}`, nameOf(id, k)); sh.set(`P${pr}`, id.startsWith('DT') ? 'contournement' : (rv && rv.kind === 'vfr' ? rv.ad : id));
       if (k > 0) sh.formula(`Q${pr}`, '=' + M.legs.slice(0, k).map((r) => `P${r}`).join('+'));
       else sh.set(`Q${pr}`, utc(b.depT));
       // branche (si dernière branche disponible et route plus longue, on cumule la distance)
@@ -882,6 +1043,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
     a.download = `log_nav_${b.userIds.join('-')}_${reg}_${b.depT.toISOString().slice(0, 10)}.xlsx`;
+    if (window.AWW_saveBriefing) await window.AWW_saveBriefing(a.download, blob);
     document.body.appendChild(a); a.click(); a.remove();
     if (warn.length) $('#pf-out').insertAdjacentHTML('beforeend', `<div class="warn">${esc(warn.join(' '))}</div>`);
     return blob;
@@ -975,8 +1137,8 @@
     let fuelLeft = b.reqFuel;
     const body = [];
     const ptRow = (id, i) => {
-      const isDt = id.startsWith('DT'), a = A.aptByIcao[id];
-      const name = isDt ? `${id} (${b.pts[i][0].toFixed(3)} ${b.pts[i][1].toFixed(3)})` : `${id}${a ? ' ' + a.name : ''}`;
+      const isDt = id.startsWith('DT'), a = A.aptByIcao[id], vr = !a && !isDt ? resolvePt(id) : null;
+      const name = isDt ? `${id} (${b.pts[i][0].toFixed(3)} ${b.pts[i][1].toFixed(3)})` : vr ? `${id} - ${vr.desc}` : `${id}${a ? ' ' + a.name : ''}`;
       const req = `${Math.max(0, fuelLeft)} L`;
       const freqs = i === 0 ? depFreqs : i === b.pts.length - 1 ? arrFreqs : (isDt ? b.detours.find((d) => d.id === id).around ? `contournement ${b.detours.find((d) => d.id === id).around}` : '' : '');
       const hEst = i === 0 ? utc(b.depT) : utc(b.legs[i - 1].eto);
@@ -1088,10 +1250,16 @@
       if (kind === 'DÉPART') {
         rows.push(['Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
         const l0 = b.legs[0];
+        const vx = resolvePt(l0.to);
+        if (vx && vx.kind === 'vfr') rows.push(['Point de sortie', `${l0.to} : ${vx.desc} (Rm ${r3(l0.tm)}°, ${l0.dist.toFixed(1)} NM)`]);
+        const vp = vfrOf(t.id); if (vp.length) rows.push(['Points VFR publiés', vp.map((p) => `${p.id} : ${p.desc}`).join('\n')]);
         rows.push(['Sortie / 1re branche', `Rm ${r3(l0.tm)}° vers ${l0.to}, ${l0.dist.toFixed(0)} NM, montée vers ${b.f.ft} ft${b.f.T.speeds.Vy ? ` (Vy ${b.f.T.speeds.Vy} kt)` : ''}, alti sécu ${l0.safe ? l0.safe.alt + ' ft' : '?'}`]);
         rows.push(['Premiers contacts', l0.airspaces.slice(0, 4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
       } else {
         const lN = b.legs[b.legs.length - 1];
+        const ve = resolvePt(lN.from);
+        if (ve && ve.kind === 'vfr') rows.push(['Point d\'entrée', `${lN.from} : ${ve.desc} — puis Rm ${r3(lN.tm)}°, ${lN.dist.toFixed(1)} NM jusqu'au terrain`]);
+        const vp = vfrOf(t.id); if (vp.length) rows.push(['Points VFR publiés', vp.map((p) => `${p.id} : ${p.desc}`).join('\n')]);
         rows.push(['Arrivée par', `Rm ${r3(lN.tm)}° depuis ${lN.from} — descendre pour l'altitude du tour de piste (${(v.tdp || [])[0] || 'voir VAC'})`]);
         rows.push(['Derniers contacts', lN.airspaces.slice(-4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
         rows.push(['Carburant à l\'arrivée', `${b.loaded - b.totFuel} L estimés (réserve + dégagement requis : ${b.resFuel + (b.altLeg ? b.altLeg.fuel : 0)} L)`]);
@@ -1128,7 +1296,17 @@
       h2('Points de contournement');
       table(['Point', 'Position', 'Contourne'], b.detours.map((d) => [d.id, `${d.p[0].toFixed(4)} ${d.p[1].toFixed(4)}`, d.around]), { size: 8 });
     }
-    h2('Météo en route');
+    h2('Coupe verticale');
+    drawProfilePdf(doc, b, M, y + 1, W - 2 * M, 62); y += 72;
+    h2('Météo le long de la route (prévision modèle à l\'heure de passage)');
+    if (b.wxRoute && b.wxRoute.pts) {
+      table(['Heure', 'Pos.', 'Avis', 'Nuages bas', 'Base est.', 'Visi', 'Pluie', 'Rafales', 'Détail'], b.wxRoute.pts.map((p) => [utc(p.at), `${p.along.toFixed(0)} NM`,
+        { content: WXTXT[p.level], styles: { textColor: p.level === 2 ? [190, 20, 20] : p.level === 1 ? [200, 110, 0] : [20, 130, 40], fontStyle: 'bold' } },
+        p.low != null ? `${p.low} %` : '?', p.baseAgl != null ? `${p.baseAgl} ft sol / ${p.baseAmsl} ft` : '?', p.vis != null ? `${Math.round(p.vis / 1000)} km` : '?',
+        p.rr != null ? `${p.rr} mm` : '?', p.gust != null ? `${Math.round(p.gust)} kt` : '?', p.why.join(', ')]), { size: 7 });
+      para('Base estimée par l\'écart température / point de rosée (x 400 ft) - indicatif, ne remplace pas les TEMSI.', { size: 7, color: [90, 90, 90] });
+    } else para('Prévision en route indisponible.', { size: 8 });
+    h2('Vent et stations le long de la route');
     if (b.winds) para(`Vent prévu ${b.winds[0].lv} hPa (Open-Meteo) : ${b.legs.map((l) => `${l.from}-${l.to} ${r3(l.wind.dir)}°/${Math.round(l.wind.spd)} kt ${Math.round(l.wind.t)}°C`).join(' · ')}. Isotherme 0° ~${Math.round((b.winds[0].iso || 0) * 3.281 / 100) * 100} ft.`, { size: 8 });
     else para(b.windErr || '', { size: 8 });
     b.wxNear.forEach((x) => para(`${x.m.rawOb}  [${x.m.fltCat || '?'}] (${x.r.d.toFixed(0)} NM)`, { mono: true, size: 7.3, gap: .4 }));
@@ -1179,10 +1357,70 @@
     }
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const name = `briefing_${b.userIds.join('-')}_${b.f.ac.reg}_${b.depT.toISOString().slice(0, 10)}.pdf`;
+    if (window.AWW_saveBriefing) await window.AWW_saveBriefing(name, blob);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => window.open(url, '_blank'), 300);
     if (failed.length) $('#pf-out').insertAdjacentHTML('beforeend', `<div class="warn">VAC ${failed.join(', ')} non jointes ${A.IS_EXT ? '' : '(le SIA bloque le téléchargement depuis une page web : l\'extension Chrome les joint automatiquement)'} — liens dans le PDF.</div>`);
+  }
+
+  // Coupe verticale dans le PDF
+  function drawProfilePdf(doc, b, x0, y0, w, h) {
+    const v = b.vprofile; if (!v) return;
+    const top = Math.max(b.f.ft + 2000, v.maxTer + 1500, 3000);
+    const X = (nm) => x0 + 12 + nm / v.total * (w - 14), Y = (ft) => y0 + h - 8 - ft / top * (h - 12);
+    doc.setFillColor(235, 243, 250); doc.rect(x0, y0, w, h, 'F');
+    doc.saveGraphicsState(); doc.rect(x0, y0, w, h, null); doc.clip(); doc.discardPath();
+    v.segs.filter((sg) => sg.lower < top).map((sg) => ({ ...sg, upper: Math.min(sg.upper, top) })).forEach((sg) => {
+      const c = sg.color.match(/\w\w/g).map((x) => parseInt(x, 16));
+      doc.setDrawColor(...c); doc.setFillColor(Math.round(255 - (255 - c[0]) * .25), Math.round(255 - (255 - c[1]) * .25), Math.round(255 - (255 - c[2]) * .25));
+      doc.setLineWidth(.2); doc.rect(X(sg.from), Y(sg.upper), Math.max(.5, X(sg.to) - X(sg.from)), Math.max(.5, Y(sg.lower) - Y(sg.upper)), 'FD');
+      doc.setFontSize(5.2); doc.setTextColor(...c.map((q) => Math.round(q * .6)));
+      if (X(sg.to) - X(sg.from) > 14) doc.text(sg.name.slice(0, 28), X(sg.from) + 1, Y(sg.upper) + 2.5);
+    });
+    doc.setFillColor(141, 110, 99); doc.setDrawColor(110, 80, 70);
+    const segsT = []; let prev = [X(0), Y(0)];
+    const ptsT = [[X(0), Y(0)], ...v.profile.map((p) => [X(p.along), Y(p.ft)]), [X(v.total), Y(0)]];
+    for (let i = 1; i < ptsT.length; i++) { segsT.push([ptsT[i][0] - prev[0], ptsT[i][1] - prev[1]]); prev = ptsT[i]; }
+    doc.lines(segsT, ptsT[0][0], ptsT[0][1], [1, 1], 'F', true);
+    doc.setDrawColor(255, 0, 180); doc.setLineWidth(.7); doc.line(X(0), Y(b.f.ft), X(v.total), Y(b.f.ft));
+    doc.setFontSize(6); doc.setTextColor(60);
+    [0, .25, .5, .75, 1].forEach((k) => doc.text(String(Math.round(top * k / 100) * 100), x0 + 1, Y(top * k) + 1));
+    let acc = 0;
+    b.legs.forEach((lg, i) => { doc.setDrawColor(150); doc.setLineWidth(.15); doc.line(X(acc), y0 + 2, X(acc), Y(0)); doc.text(String(lg.from), X(acc) + .8, y0 + 4); acc += lg.dist; });
+    doc.text(String(b.ids[b.ids.length - 1]), X(v.total) - 8, y0 + 4);
+    if (b.wxRoute && b.wxRoute.pts) b.wxRoute.pts.forEach((p) => { const c = [[46, 204, 64], [255, 159, 10], [255, 59, 48]][p.level]; doc.setFillColor(...c); doc.circle(X(p.along), y0 + h - 3.5, 1.1, 'F'); });
+    doc.restoreGraphicsState();
+    doc.setDrawColor(0, 102, 153); doc.setLineWidth(.3); doc.rect(x0, y0, w, h, 'S');
+    doc.setTextColor(90); doc.setFontSize(6);
+    doc.text(latin(`Relief (marron), croisière ${b.f.ft} ft (rose), espaces et zones traversés, pastilles = météo prévue (vert / orange / rouge). Altitudes en ft.`), x0 + 12, y0 + h + 3);
+    doc.setTextColor(0);
+  }
+
+  // ================================================================== export de la route
+  function routePoints(b) {
+    return b.ids.map((id, i) => {
+      const r = resolvePt(id);
+      return { id: id.replace(/[^A-Z0-9-]/g, ''), name: r ? (r.kind === 'ad' ? r.name : (r.desc || id)) : id, la: b.pts[i][0], lo: b.pts[i][1], type: r && r.kind === 'ad' ? 'AIRPORT' : 'USER WAYPOINT', alt: r && r.kind === 'ad' ? (r.ad && VAC.data[r.ad] && VAC.data[r.ad].alt) || 0 : b.f.ft };
+    });
+  }
+  const xmlEsc = (t) => String(t).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+  function download(name, text, type) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function exportGpx(b) {
+    const P = routePoints(b), nm = `${b.userIds[0]}-${b.userIds[b.userIds.length - 1]}`;
+    const wpt = P.map((p) => `  <wpt lat="${p.la.toFixed(6)}" lon="${p.lo.toFixed(6)}"><name>${xmlEsc(p.id)}</name><desc>${xmlEsc(p.name)}</desc></wpt>`).join('\n');
+    const rte = P.map((p) => `    <rtept lat="${p.la.toFixed(6)}" lon="${p.lo.toFixed(6)}"><name>${xmlEsc(p.id)}</name><desc>${xmlEsc(p.name)}</desc></rtept>`).join('\n');
+    download(`route_${nm}.gpx`, `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Aero Meteo Webcams Ouest" xmlns="http://www.topografix.com/GPX/1/1">\n${wpt}\n  <rte><name>${xmlEsc(nm)}</name>\n${rte}\n  </rte>\n</gpx>\n`, 'application/gpx+xml');
+  }
+  function exportFpl(b) {
+    const P = routePoints(b), nm = `${b.userIds[0]}-${b.userIds[b.userIds.length - 1]}`;
+    const ident = (p, i) => (p.type === 'AIRPORT' ? p.id : (p.id.replace(/-/g, '') || `WP${i}`)).slice(0, 12);
+    const wps = P.map((p, i) => `    <waypoint>\n      <identifier>${xmlEsc(ident(p, i))}</identifier>\n      <type>${p.type}</type>\n      <country-code>${p.type === 'AIRPORT' ? 'LF' : ''}</country-code>\n      <lat>${p.la.toFixed(6)}</lat>\n      <lon>${p.lo.toFixed(6)}</lon>\n      <comment>${xmlEsc(p.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9 /]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 25))}</comment>\n      <elevation>${p.alt}</elevation>\n    </waypoint>`).join('\n');
+    const rp = P.map((p, i) => `    <route-point>\n      <waypoint-identifier>${xmlEsc(ident(p, i))}</waypoint-identifier>\n      <waypoint-type>${p.type}</waypoint-type>\n      <waypoint-country-code>${p.type === 'AIRPORT' ? 'LF' : ''}</waypoint-country-code>\n    </route-point>`).join('\n');
+    download(`route_${nm}.fpl`, `<?xml version="1.0" encoding="utf-8"?>\n<flight-plan xmlns="http://www8.garmin.com/xmlschemas/FlightPlan/v1">\n  <created>${new Date().toISOString().slice(0, 19)}Z</created>\n  <waypoint-table>\n${wps}\n  </waypoint-table>\n  <route>\n    <route-name>${xmlEsc(nm)}</route-name>\n    <flight-plan-index>1</flight-plan-index>\n${rp}\n  </route>\n</flight-plan>\n`, 'application/xml');
   }
 
   // Croquis vectoriel

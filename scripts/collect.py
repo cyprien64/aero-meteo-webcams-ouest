@@ -43,13 +43,18 @@ def get(url, data=None, timeout=90, headers=None):
         return r.read().decode('utf-8', errors='replace')
 
 
-def save(name, obj):
+STATUS = {}   # état de chaque fichier pour la surveillance (status.json)
+
+
+def save(name, obj, reused=False):
+    STATUS[name] = 'repris (inchangé)' if reused else 'ok'
     with open(os.path.join(OUT, name), 'w', encoding='utf-8') as f:
         json.dump(obj, f, ensure_ascii=False, separators=(',', ':'))
     print(f'  -> {name} ({os.path.getsize(os.path.join(OUT, name)) // 1024} ko)')
 
 
 def fallback(name):
+    STATUS[name] = 'échec'
     if not FALLBACK_URL:
         return False
     try:
@@ -58,6 +63,7 @@ def fallback(name):
         with open(os.path.join(OUT, name), 'w', encoding='utf-8') as f:
             f.write(txt)
         print(f'  -> {name} repris de la version publiée')
+        STATUS[name] = 'échec (version précédente conservée)'
         return True
     except Exception as e:  # noqa: BLE001
         print('  fallback impossible :', e)
@@ -690,7 +696,7 @@ def collect_aip():
             prevz = json.loads(get(f'{FALLBACK_URL}/data/live/zones.json', timeout=30))
             preva = json.loads(get(f'{FALLBACK_URL}/data/live/airspaces.json', timeout=30))
             if prev.get('cycle') == cycle and prev.get('v') == VAC_PARSER and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
-                save('vac.json', prev); save('zones.json', prevz); save('airspaces.json', preva)
+                save('vac.json', prev, True); save('zones.json', prevz, True); save('airspaces.json', preva, True)
                 print('  inchangé (même cycle)')
                 return
         except Exception:  # noqa: BLE001
@@ -729,8 +735,65 @@ def collect_aip():
         fallback('vac.json')
 
 
+# ---------------------------------------------------------------- webcams : contrôle hebdomadaire
+def collect_cams():
+    print('Webcams (contrôle hebdomadaire)')
+    prev = None
+    if FALLBACK_URL:
+        try:
+            prev = json.loads(get(f'{FALLBACK_URL}/data/live/cams_status.json', timeout=30))
+        except Exception:  # noqa: BLE001
+            prev = None
+    if prev and os.environ.get('FORCE_CAMS') != '1':
+        try:
+            age = (NOW - datetime.fromisoformat(prev['checked'])).days
+        except Exception:  # noqa: BLE001
+            age = 99
+        if age < 7:
+            save('cams_status.json', prev, True)
+            print(f'  dernier contrôle il y a {age} j : inchangé')
+            return
+    src = open(os.path.join(ROOT, 'data', 'sources.js'), encoding='utf-8').read()
+    items = json.loads(re.search(r'window\.SOURCES = (\[.*?\]);', src, re.S).group(1))
+    urls = sorted({x['u'] for x in items if x.get('t') == 'cam'})
+    from concurrent.futures import ThreadPoolExecutor
+
+    def check(u):
+        try:
+            req = urllib.request.Request(u, headers={'User-Agent': UA, 'Range': 'bytes=0-2048'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                r.read(512)
+                return u, None
+        except urllib.error.HTTPError as e:
+            return u, (f'HTTP {e.code}' if e.code in (404, 410, 500, 502, 503) else None)   # 401/403/429 : blocage anti-robot, pas une panne
+        except Exception as e:  # noqa: BLE001
+            return u, type(e).__name__ + ': ' + str(e)[:60]
+    with ThreadPoolExecutor(16) as ex:
+        res = list(ex.map(check, urls))
+    dead = {u: why for u, why in res if why}
+    print(f'  {len(urls)} webcams contrôlées, {len(dead)} hors service')
+    save('cams_status.json', {'checked': NOW.isoformat(), 'total': len(urls), 'dead': dead})
+
+
+def write_status():
+    prev = {}
+    if FALLBACK_URL:
+        try:
+            prev = json.loads(get(f'{FALLBACK_URL}/data/live/status.json', timeout=30)).get('files', {})
+        except Exception:  # noqa: BLE001
+            prev = {}
+    files = {}
+    for name in set(prev) | set(STATUS):
+        st = STATUS.get(name, 'non exécuté')
+        last_ok = NOW.isoformat() if st.startswith('ok') or st.startswith('repris') else (prev.get(name) or {}).get('last_ok')
+        files[name] = {'state': st, 'last_ok': last_ok}
+    with open(os.path.join(OUT, 'status.json'), 'w', encoding='utf-8') as f:
+        json.dump({'run': NOW.isoformat(), 'files': files}, f, ensure_ascii=False, indent=1)
+    print('État :', {k: v['state'] for k, v in files.items()})
+
+
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -739,3 +802,6 @@ if __name__ == '__main__':
         collect_supaip()
     if 'aip' in what:
         collect_aip()
+    if 'cams' in what:
+        collect_cams()
+    write_status()

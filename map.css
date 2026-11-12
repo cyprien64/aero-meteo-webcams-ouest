@@ -138,3 +138,12 @@ table.legs th:first-child, table.legs td:first-child { text-align: left; }
   #detail { top: auto; bottom: 8px; max-height: 55%; }
 }
 .fuel { display: inline-block; padding: 0 6px; border-radius: 3px; background: #ffd34d; color: #002a40; font-weight: 700; font-size: 11px; }
+.wxbar { display: flex; gap: 2px; margin: 4px 0; }
+.wxbar span { flex: 1; height: 12px; border-radius: 2px; cursor: help; }
+.sw-asp { background: transparent; border: 2px dashed #64b5f6; border-radius: 2px; }
+.sw-siv { background: transparent; border: 2px dotted #81c784; border-radius: 2px; }
+.sw-zones { background: rgba(142,36,170,.4); border: 2px solid #ba68c8; border-radius: 2px; }
+.sw-rtba { background: rgba(255,59,48,.4); border: 2px solid #ff3b30; border-radius: 2px; }
+.sw-vfr { background: #fff; border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.vfr-label { color: #fff; font: 700 10px system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
+.z-lo .vfr-label { display: none; }

@@ -4,7 +4,7 @@ Carte de préparation des vols inspirée de http://international.aero.free.fr/we
 Pyrénées, Pays basque, Landes, Gironde, Charentes, Vendée, Pays de la Loire, Bretagne.
 
 Utilisable de deux façons :
-- **Site web** (GitHub Pages) : `https://<utilisateur>.github.io/<dépôt>/`
+- **Site web** (GitHub Pages) : https://cyprien64.github.io/aero-meteo-webcams-ouest/
 - **Extension Chrome / Edge / Brave** : ce même dossier.
 
 ## Contenu
@@ -32,7 +32,7 @@ La GitHub Action `.github/workflows/pages.yml` lance `scripts/collect.py` toutes
 ## Installer l'extension
 1. `chrome://extensions` → activer le **Mode développeur**
 2. **Charger l'extension non empaquetée** → choisir ce dossier
-3. Dans `config.js`, renseigner `liveUrl` avec l'adresse du site GitHub Pages pour avoir les NOTAM / SUP AIP à jour.
+3. Les NOTAM / SUP AIP à jour sont lus depuis le site GitHub Pages (adresse dans `config.js`).
 
 ## Avertissement
 Outil d'aide uniquement. Les NOTAM et SUP AIP sont recopiés automatiquement et la localisation des SUP AIP est déduite de leur titre :

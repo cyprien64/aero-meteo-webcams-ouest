@@ -124,7 +124,7 @@ window.AIRCRAFT = [
   { reg: 'F-GKQR', type: 'DR400-ROTAX', empty: 552, arm: 0.408 },
   { reg: 'F-HCOY', type: 'DR401-CDI', empty: 701, arm: 0.338 },
   { reg: 'F-HNDI', type: 'DR401-CDI', empty: 684, arm: 0.291 },
-  { reg: 'F-XXXX', type: 'DR400-120', empty: 582, arm: 0.358, note: 'DR400/120 2+2 — saisir l\'immatriculation' },
+  { reg: 'F-GSUR', type: 'DR400-120', empty: 582, arm: 0.358 },
   { reg: 'F-PKFC', type: 'JODEL-D112', empty: 300, arm: null, note: 'masse à vide à vérifier (pesée)' },
   { reg: 'D-EPDH', type: 'GROB-G120A', empty: 1050, arm: null, note: 'masse à vide à vérifier (pesée)' },
   { reg: 'F-HMRA', type: 'R3000-180', empty: 650, arm: null, note: 'masse à vide à vérifier (pesée)' },

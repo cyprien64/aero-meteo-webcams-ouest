@@ -1,0 +1,4 @@
+{
+  "_lisezmoi": "Taxes d'atterrissage connues (avion léger < 1,2 t, vol privé). Il n'existe pas de base officielle : complétez avec les tarifs publiés par chaque aérodrome. Format : \"LFxx\": { \"tarif\": \"10 € TTC\", \"note\": \"gratuit pour les membres FFA\", \"maj\": \"2026-11\", \"source\": \"site de l'aérodrome\" }",
+  "aerodromes": {}
+}

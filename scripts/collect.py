@@ -501,10 +501,41 @@ def parse_vac(icao, data):
     fuel = re.search(r'(Carburants?[^\n]*\n?[^\n]*)', txt)
     if fuel:
         info['carburant'] = re.sub(r'\s+', ' ', fuel.group(1))[:300]
+    # --- Escale : carburants disponibles, moyens de paiement, exploitant (rubriques 10 et 4 de la VAC)
+    alltxt = '\n'.join(pages)
+    fb = re.search(r':\s*9\s*-(.*?)AVT\s*:\s*10', alltxt, re.S)
+    ftxt = re.sub(r'\s+', ' ', fb.group(1)).strip() if fb else (info.get('carburant') or '')
+    if ftxt:
+        types = []
+        for pat, lab in ((r'100 ?LL|AVGAS', '100LL'), (r'UL ?91', 'UL91'), (r'SP ?98', 'SP98'), (r'MOGAS', 'MOGAS'), (r'AERO ?SUPER', 'UL Aéro Super+'), (r'JET ?A-?1|Jet ?A-?1', 'Jet A1')):
+            if re.search(pat, ftxt, re.I):
+                types.append(lab)
+        pay = []
+        for pat, lab in ((r'carte TOTAL|TOTAL card|TOTAL', 'carte Total'), (r'SHELL', 'carte Shell'), (r'AIR ?BP', 'carte Air BP'),
+                         (r'carte (?:bancaire|de crédit|bleue)|credit card|\bCB\b|VISA|MASTERCARD', 'carte bancaire'),
+                         (r'espèces|cash', 'espèces'), (r'chèque|cheque', 'chèque'),
+                         (r'automate|automatique|automatic|libre[- ]service|self', 'automate (libre-service)'),
+                         (r'heures d.ouverture|HOR\b|SKED|\bHJ\b|horaires', 'aux horaires d\'ouverture'),
+                         (r'\bPPR\b', 'sur PPR'), (r'sur demande|on request', 'sur demande')):
+            if re.search(pat, ftxt, re.I):
+                pay.append(lab)
+        none = bool(re.match(r'^(NIL|Néant)\b', ftxt)) and not types
+        fr = ' '.join(s for s in re.split(r'(?<=[.])\s+', ftxt) if not re.search(r'\b(Payment|automatic dispenser|by credit|Lubricants?|Outside|on-call|cards)\b', s))
+        info['escale'] = {'fuel': types, 'pay': pay, 'none': none, 'texte': (fr or ftxt)[:420],
+                          'tel': list(dict.fromkeys(re.findall(r'(?:\+33 ?|0)\d(?:[ .]?\d{2}){4}', ftxt)))[:3]}
+    ob = re.search(r':\s*3\s*-(.*?)Exploitant d.a[ée]rodrome', alltxt, re.S)
+    if ob:
+        o = re.sub(r'\s+', ' ', ob.group(1)).strip()
+        info.setdefault('escale', {})['exploitant'] = o[:220]
+        info['escale']['tel_ad'] = list(dict.fromkeys(re.findall(r'(?:\+33 ?|0)\d(?:[ .]?\d{2}){4}', o)))[:3]
+        site = re.search(r'(?:www\.|https?://)[^\s,;]+', o)
+        if site:
+            info['escale']['site'] = site.group(0).rstrip('.')
     return info
 
 
 OPENAIR_URL = 'https://planeur-net.github.io/airspace/france.txt'
+VAC_PARSER = 3   # à incrémenter quand l'analyse des VAC change (force une nouvelle analyse)
 
 
 def _oa_coord(s):
@@ -658,7 +689,7 @@ def collect_aip():
             prev = json.loads(get(f'{FALLBACK_URL}/data/live/vac.json', timeout=30))
             prevz = json.loads(get(f'{FALLBACK_URL}/data/live/zones.json', timeout=30))
             preva = json.loads(get(f'{FALLBACK_URL}/data/live/airspaces.json', timeout=30))
-            if prev.get('cycle') == cycle and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
+            if prev.get('cycle') == cycle and prev.get('v') == VAC_PARSER and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
                 save('vac.json', prev); save('zones.json', prevz); save('airspaces.json', preva)
                 print('  inchangé (même cycle)')
                 return
@@ -693,7 +724,7 @@ def collect_aip():
         time.sleep(0.2)
     print(f'  {len(vac)} cartes VAC analysées')
     if vac:
-        save('vac.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP — Atlas VAC', 'data': vac})
+        save('vac.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'v': VAC_PARSER, 'source': 'SIA eAIP — Atlas VAC', 'data': vac})
     else:
         fallback('vac.json')
 

@@ -54,6 +54,17 @@ Le PDF contient :
 - fiche par terrain extraite de la VAC (altitude, pistes, tour de piste, fréquences, espaces, obstacles, carburant, consignes) ;
 - les cartes VAC officielles jointes à la fin (extension Chrome ; sur le site web, liens vers les VAC car le SIA bloque le téléchargement direct).
 
+## Escale : carburant, paiement, taxe d'atterrissage
+Dans la fiche de chaque aérodrome (et dans les briefings départ / arrivée du PDF) :
+- **carburants disponibles et moyens de paiement**, extraits automatiquement de la VAC officielle (rubrique AVT), avec l'exploitant et son téléphone ;
+- **taxe d'atterrissage** : il n'existe pas de base officielle. Elle vient du fichier `data/fees.json` (tableau du club, à compléter)
+  ou d'une saisie personnelle dans la fiche (mémorisée dans le navigateur), avec des liens vers airfield.directory, aeroPS et le site de l'aérodrome.
+
+Exemple pour `data/fees.json` :
+```json
+{ "aerodromes": { "LFBP": { "tarif": "15 € TTC", "note": "< 1,5 t", "maj": "2026-11", "source": "brochure tarifaire Pau" } } }
+```
+
 ## Fonctionnement de la mise à jour
 La GitHub Action `.github/workflows/pages.yml` lance `scripts/collect.py` toutes les 30 min, qui écrit
 `data/live/{metar,taf,notam,supaip}.json` (et, une fois par cycle AIRAC, `zones.json` et `vac.json`), puis publie le site sur GitHub Pages.

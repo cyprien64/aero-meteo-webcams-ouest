@@ -154,7 +154,9 @@
   }
   function aptTip(a) {
     const m = metars[a.icao];
-    return `<b>${a.icao}</b> ${esc(a.name)}${m ? `<br><span class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span> <code style="font-size:11px">${esc(m.rawOb)}</code>` : ''}`;
+    const e = escaleOf(a.icao), fee = feeFor(a.icao);
+    const esc2 = e ? `<br>⛽ ${e.none ? 'pas de carburant' : (e.fuel && e.fuel.length ? e.fuel.join(' · ') : '?')}${fee ? ` · taxe ${esc(fee.tarif)}` : ''}` : (fee ? `<br>Taxe ${esc(fee.tarif)}` : '');
+    return `<b>${a.icao}</b> ${esc(a.name)}${m ? `<br><span class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span> <code style="font-size:11px">${esc(m.rawOb)}</code>` : ''}${esc2}`;
   }
   function drawAerodromes() {
     layers.metar.clearLayers(); layers.apt.clearLayers();
@@ -354,6 +356,7 @@
       ${m ? `<h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
       ${t ? `<h4>TAF</h4><pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre>` : ''}
       ${!m ? nearestMetarHtml(a) : ''}
+      ${escaleHtml(icao)}
       ${notamAdHtml(icao)}
       ${supNearHtml(a)}
       <h4>Liens météo</h4>
@@ -372,6 +375,7 @@
     detailBody.querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => { const s = cams[+b.dataset.cam].s; openWin(s.u, s.w, s.h); }));
     detailBody.querySelectorAll('[data-other]').forEach((b) => b.addEventListener('click', () => { const s = others[+b.dataset.other].s; openWin(s.u, s.w, s.h); }));
     detailBody.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showAerodrome(b.dataset.goto)));
+    bindEscale(detailBody, icao);
     bindDocLinks(detailBody);
     detail.hidden = false;
     if (fly) map.flyTo([a.la, a.lo], Math.max(map.getZoom(), 9), { duration: .6 });
@@ -471,6 +475,57 @@
       <div class="nv">${fmtT(n.from)} → ${fmtT(n.to)} · ${fl(n.lower)} – ${fl(n.upper)}${n.d ? ` · ${esc(n.d)}` : ''}</div>
       <pre>${esc(txt)}</pre></div>`;
   }
+  // ---------- Escale : carburant, paiement, taxe d'atterrissage ----------
+  let VACD = {}, FEES = {};
+  const escaleOf = (icao) => (VACD[icao] && VACD[icao].escale) || null;
+  function feeFor(icao) {
+    try { const loc = JSON.parse(localStorage.getItem('aww.fee.' + icao) || 'null'); if (loc && loc.tarif) return { ...loc, source: 'saisie personnelle' }; } catch { /* ignore */ }
+    return FEES[icao] && FEES[icao].tarif ? FEES[icao] : null;
+  }
+  async function loadEscale() {
+    try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); }
+    try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
+    drawAerodromes();
+  }
+  function escaleHtml(icao) {
+    const e = escaleOf(icao), fee = feeFor(icao);
+    const fuel = !e ? '<span class="meta">non renseigné (pas de VAC)</span>'
+      : e.none ? '<b>Pas de carburant</b>'
+        : (e.fuel && e.fuel.length ? e.fuel.map((f) => `<span class="fuel">${esc(f)}</span>`).join(' ') : '<span class="meta">voir VAC</span>');
+    const pay = e && e.pay && e.pay.length ? e.pay.map(esc).join(' · ') : '<span class="meta">non précisé</span>';
+    const tels = [...((e && e.tel) || []), ...((e && e.tel_ad) || [])];
+    return `<h4>Escale</h4>
+      <dl class="decoded">
+        <dt>Carburant</dt><dd>${fuel}</dd>
+        <dt>Paiement</dt><dd>${pay}</dd>
+        ${e && e.texte ? `<dt>Détail (VAC)</dt><dd style="font-size:11px">${esc(e.texte)}</dd>` : ''}
+        ${e && e.exploitant ? `<dt>Exploitant</dt><dd style="font-size:11px">${esc(e.exploitant)}</dd>` : ''}
+        ${tels.length ? `<dt>Téléphone</dt><dd>${[...new Set(tels)].map((t) => `<a href="tel:${esc(t.replace(/\s/g, ''))}" style="color:#fff">${esc(t)}</a>`).join(' · ')}</dd>` : ''}
+        <dt>Taxe d'atterrissage</dt><dd>${fee ? `<b>${esc(fee.tarif)}</b>${fee.note ? ' — ' + esc(fee.note) : ''} <span class="meta">(${esc(fee.source || 'tableau du club')}${fee.maj ? ', ' + esc(fee.maj) : ''})</span>` : '<span class="meta">non renseignée</span>'}</dd>
+      </dl>
+      <div class="row" style="margin-top:4px">
+        <input id="fee-in" placeholder="ex. 10 € TTC, gratuit…" value="${fee && fee.source === 'saisie personnelle' ? esc(fee.tarif) : ''}" style="flex:1;min-width:140px;margin:0">
+        <button class="btn" id="fee-save">Enregistrer la taxe</button>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button class="btn" data-ext="https://airfield.directory/airfield/${icao}">Tarifs (airfield.directory)</button>
+        <button class="btn" data-ext="https://www.aerops.com/fr/airports-1/fee-info/${icao}/">Tarifs (aeroPS)</button>
+        ${e && e.site ? `<button class="btn" data-ext="${esc(/^https?:/.test(e.site) ? e.site : 'https://' + e.site)}">Site de l'aérodrome</button>` : ''}
+      </div>`;
+  }
+  function bindEscale(el, icao) {
+    el.querySelectorAll('[data-ext]').forEach((b) => b.addEventListener('click', () => openWin(b.dataset.ext, 1200, 0)));
+    const save = el.querySelector('#fee-save');
+    if (save) save.addEventListener('click', () => {
+      const v = el.querySelector('#fee-in').value.trim();
+      try {
+        if (v) localStorage.setItem('aww.fee.' + icao, JSON.stringify({ tarif: v, maj: new Date().toISOString().slice(0, 7) }));
+        else localStorage.removeItem('aww.fee.' + icao);
+      } catch { /* ignore */ }
+      showAerodrome(icao, false); drawAerodromes();
+    });
+  }
+
   function notamAdHtml(icao) {
     const list = NOTAM.ad[icao] || [];
     if (!list.length) return NOTAM.generated ? '<h4>NOTAM aérodrome</h4><p class="meta">Aucun NOTAM pour les prochaines 24 h.</p>' : '';
@@ -581,7 +636,7 @@
   window.AWW = {
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
     metars, tafs, aptByIcao, APTS, SOURCES,
-    get NOTAM() { return NOTAM; }, get SUP() { return SUP; },
+    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor,
     showPanel(title, html) { showList(title, html); },
     detailBody, detail,
   };
@@ -591,5 +646,6 @@
   loadMetarTaf();
   loadPiouPiou();
   loadNotamSup();
+  loadEscale();
   setInterval(() => { loadMetarTaf(); loadPiouPiou(); loadNotamSup(); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
 })();

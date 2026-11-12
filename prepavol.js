@@ -954,6 +954,8 @@
         ['RWY', t.rw ? `QFU ${t.rw.best.qfu}°${t.len ? ` · ${t.len} m${t.grass ? ' herbe' : ''}` : ''}` : ''],
         ['VW', mm.vw], ['VISI', mm.visi], ['Nuages', mm.clouds], ['TT/TD', mm.tt], ['QNH', String(mm.qnh)],
         ['Alt. AD', v.alt != null ? `${v.alt} ft` : ''], ['TDP', (v.tdp || [])[0] || ''],
+        ['Carbu', v.escale ? (v.escale.none ? 'aucun' : (v.escale.fuel || []).join(' ')) : ''],
+        ['Taxe', (A.feeFor && A.feeFor(t.id) || {}).tarif || ''],
       ];
     };
     const leftW = 62;
@@ -1078,6 +1080,11 @@
       rows.push(['Moyens radio', (v.nav || []).join(', ') || '-']);
       rows.push(['Espaces autour (VAC)', (v.espaces || []).join('\n') || '-']);
       rows.push(['Obstacles (VAC)', (v.obst || []).join('\n') || '-']);
+      const es = v.escale || {}, fee = A.feeFor ? A.feeFor(t.id) : null;
+      rows.push(['Carburant', es.none ? 'Pas de carburant' : ((es.fuel || []).join(' · ') || 'voir VAC') + (es.texte ? `\n${es.texte}` : '')]);
+      rows.push(['Paiement', (es.pay || []).join(' · ') || 'non précisé']);
+      rows.push(['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' - ' + fee.note : ''} (${fee.source || 'tableau du club'}${fee.maj ? ', ' + fee.maj : ''})` : 'non renseignée - voir airfield.directory / aeroPS / exploitant']);
+      if (es.exploitant || (es.tel_ad || []).length) rows.push(['Exploitant', [es.exploitant, ...(es.tel || [])].filter(Boolean).join(' · ')]);
       if (kind === 'DÉPART') {
         rows.push(['Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
         const l0 = b.legs[0];

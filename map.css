@@ -137,3 +137,4 @@ table.legs th:first-child, table.legs td:first-child { text-align: left; }
   #panel { width: calc(100% - 16px); max-height: 45%; }
   #detail { top: auto; bottom: 8px; max-height: 55%; }
 }
+.fuel { display: inline-block; padding: 0 6px; border-radius: 3px; background: #ffd34d; color: #002a40; font-weight: 700; font-size: 11px; }

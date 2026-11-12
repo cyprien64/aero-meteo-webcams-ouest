@@ -25,10 +25,21 @@ Clic sur un point → la webcam/la station s'ouvre dans une fenêtre dédiée.
 Clic sur un aérodrome → METAR/TAF décodés, NOTAM, SUP AIP proches, webcams à moins de 25 km, liens meteoblue, Windy, carte OACI, SafeSky…
 
 ## Préparation de vol (briefing PDF)
-Bouton **✈️ Préparer un vol** : départ, arrivée, points tournants, dégagement, heure, vitesse, altitude, consommation.
-Le briefing PDF contient :
-- navigation : Rv, Rm, vent prévu au niveau de croisière (Open-Meteo), dérive, Cm, Vs, temps, HEA, carburant, lever/coucher du soleil ;
-- croquis de route avec zones P/R/D et RTBA ;
+Bouton **✈️ Préparer un vol** : départ, arrivée, points tournants, dégagement, heure, avion du club, régime, altitude, masses, carburant.
+
+Avions (repris du log de nav ACB) : DR400 Rotax 912iS (F-HAFF, F-HPYR, F-GLDS, F-GKQR) et DR401 / DR400-140B CDI 155 (F-HCOY, F-HNDI)
+— performances, consommations, enveloppes de centrage et vitesses dans `data/aircraft.js`.
+
+La route contourne automatiquement les zones interdites (P) et, au choix, les zones RTBA actives pendant le vol (points DT1, DT2…).
+
+Le PDF contient :
+- **log de navigation** au format du log ACB : cases départ/arrivée (ATIS, piste, vent, visi, nuages, TT/TD, QNH pré-remplis depuis le METAR),
+  alti sécu par branche (relief ±5 NM + 1000 ft), Rm/Cm, distance, temps, heure estimée, carburant requis, et pour chaque branche
+  les espaces aériens traversés avec leur indicatif et leur fréquence (CTR/TMA/CTA : OpenAir FFVP ; SIV : eAIP ENR 2.2), déroutement ;
+- masse et centrage (graphique d'enveloppe), carburant requis / autonomie, vitesses, distances de décollage estimées ;
+- **briefing départ et briefing arrivée** d'après la VAC : piste probable selon le vent, composantes de vent, distances, fréquences,
+  tour de piste, espaces autour, consignes de la VAC triées (départ / arrivée / générales), infos pratiques, NOTAM du terrain ;
+- croquis de route avec zones P/R/D, RTBA et CTR/TMA traversées ;
 - METAR/TAF des terrains et des stations le long de la route ;
 - NOTAM terrains, NOTAM en route (couloir), obstacles, NOTAM de portée FIR ;
 - SUP AIP près de la route ;

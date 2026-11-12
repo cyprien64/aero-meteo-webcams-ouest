@@ -423,7 +423,8 @@ def parse_vac(icao, data):
     import pypdf
     r = pypdf.PdfReader(io.BytesIO(data))
     pages = [decode_mt(p.extract_text() or '') for p in r.pages]
-    chart = pages[0] if pages else ''
+    charts = [p for p in pages if 'ALT AD' in p or 'TODA' in p or 'ATTERRISSAGE A VUE' in p] or pages[:1]
+    chart = '\n'.join(charts)
     lines = [l.strip() for l in chart.splitlines() if l.strip()]
     info = {'icao': icao, 'pages': len(pages)}
     m = re.search(r'ALT AD\s*:\s*(\d+)\s*\((\d+) ?hPa\)', chart)
@@ -443,14 +444,39 @@ def parse_vac(icao, data):
         if m and re.search(r'\d{3}\.\d{2,3}', m.group(2)):
             freqs.append(f'{m.group(1)} : {m.group(2)}')
     info['freqs'] = list(dict.fromkeys(freqs))
-    rwy = re.search(r'RWY QFU.*?\n(.*?)(?:Aides lumineuses|Lighting|$)', chart, re.S)
-    if rwy:
-        blob = rwy.group(1)
-        info['qfu'] = sorted(set(re.findall(r'\b([0-3]\d0|[0-3]\d[1-9])\b(?! ?x)', blob.split('x')[0])))[:6]
-        info['rwy'] = list(dict.fromkeys(re.findall(r'(\d{3,4} ?x ?\d{2,3})', blob)))[:4]
-        surf = re.findall(r'(Revêtue|Non revêtue|Herbe|Grass|Paved|Unpaved)', blob)
-        if surf:
-            info['surface'] = list(dict.fromkeys(surf))[:2]
+    # Lignes du tableau des pistes : "QFU1 QFU2 LONGUEUR x LARGEUR Nature", parfois éclatées sur plusieurs lignes
+    qfus, dims, surf = [], [], []
+    for m in re.finditer(r'((?:\b[0-3]\d{2}\b[\s\n]*){1,2})(\d{3,4}) ?x ?(\d{2,3})\s*(Non revêtue|Revêtue|Herbe)?', chart):
+        q = [x for x in re.findall(r'[0-3]\d{2}', m.group(1)) if 0 < int(x) <= 360]
+        if not q:
+            continue
+        qfus += q
+        dims.append(f'{m.group(2)} x {m.group(3)}')
+        if m.group(4):
+            surf.append(m.group(4))
+    # Format « Distances déclarées » (grands terrains) : "Revêtue\nPaved2102 x 45\n101\n281"
+    for m in re.finditer(r'(Non revêtue|Revêtue)\s*\n?(?:Unpaved|Paved)?\s*(\d{3,4}) ?x ?(\d{2,3})\s*\n(\d{3})\s*\n(\d{3})', '\n'.join(pages)):
+        q = [x for x in (m.group(4), m.group(5)) if 0 < int(x) <= 360]
+        if q and abs(int(q[0]) - int(q[-1])) in (180,) or len(q) == 1:
+            qfus += q
+            dims.append(f'{m.group(2)} x {m.group(3)}')
+            surf.append(m.group(1))
+    # Format courant : "11\n29\n112\n292" (désignations puis QFU) dans le tableau des pistes
+    for m in re.finditer(r'\b(\d{2})[LRC]?\s*\n\s*(\d{2})[LRC]?\s*\n\s*(\d{3})\s*\n\s*(\d{3})', chart):
+        r1, r2, q1, q2 = (int(x) for x in m.groups())
+        if abs(abs(q1 - q2) - 180) <= 2 and abs(q1 - r1 * 10) <= 15 and abs(q2 - r2 * 10) <= 15:
+            qfus += [m.group(3), m.group(4)]
+    qfus = list(dict.fromkeys(qfus))
+    if not qfus:   # désignation de piste à 2 chiffres (ex. "07 / 25") -> QFU approché
+        m = re.search(r'TODA\s*ASDA\s*LDA\s*\n(\d{2})\s*\n(\d{2})\b', chart)
+        if m:
+            qfus = [f'{int(m.group(1)) * 10:03d}', f'{int(m.group(2)) * 10:03d}']
+    dims = list(dict.fromkeys(dims + [f'{a} x {b}' for a, b in re.findall(r'(\d{3,4}) ?x ?(\d{2,3})\b', chart) if 200 <= int(a) <= 4000]))
+    surf = list(dict.fromkeys(surf + re.findall(r'(Non revêtue|Revêtue|Herbe)', chart)))
+    info['qfu'] = list(dict.fromkeys(qfus))[:6]
+    info['rwy'] = list(dict.fromkeys(dims))[:4]
+    if surf:
+        info['surface'] = list(dict.fromkeys(surf))[:2]
     tdp = re.findall(r'\b(\d{3,4})\((\d{3,4})\)', chart)
     if tdp:
         info['tdp'] = [f'{a} ft ({b} ft AAL)' for a, b in dict.fromkeys(tdp)][:3]
@@ -478,6 +504,145 @@ def parse_vac(icao, data):
     return info
 
 
+OPENAIR_URL = 'https://planeur-net.github.io/airspace/france.txt'
+
+
+def _oa_coord(s):
+    m = re.match(r'\s*(\d+):(\d+):(\d+(?:\.\d+)?)\s*([NS])\s+(\d+):(\d+):(\d+(?:\.\d+)?)\s*([EW])', s)
+    if not m:
+        return None
+    la = int(m.group(1)) + int(m.group(2)) / 60 + float(m.group(3)) / 3600
+    lo = int(m.group(5)) + int(m.group(6)) / 60 + float(m.group(7)) / 3600
+    return [round(-la if m.group(4) == 'S' else la, 5), round(-lo if m.group(8) == 'W' else lo, 5)]
+
+
+def parse_openair(txt):
+    """Espaces CTR / TMA / CTA / RMZ / TMZ avec fréquence (AF) et indicatif (AG)."""
+    out, cur, center, cw = [], None, None, True
+
+    def close():
+        if cur and len(cur['poly']) >= 3:
+            out.append(cur)
+    for raw in txt.splitlines():
+        line = raw.split('*')[0].rstrip()
+        if not line:
+            continue
+        key, _, val = line.partition(' ')
+        val = val.strip()
+        if key == 'AC':
+            close()
+            cur = {'cls': val, 'name': '', 'type': '', 'upper': '', 'lower': '', 'freq': '', 'call': '', 'poly': []}
+            center, cw = None, True
+        elif cur is None:
+            continue
+        elif key == 'AN':
+            cur['name'] = val
+        elif key == 'AY':
+            cur['type'] = val
+        elif key == 'AH':
+            cur['upper'] = val
+        elif key == 'AL':
+            cur['lower'] = val
+        elif key == 'AF':
+            cur['freq'] = val
+        elif key == 'AG':
+            cur['call'] = val
+        elif key == 'DP':
+            p = _oa_coord(val)
+            if p:
+                cur['poly'].append(p)
+        elif key == 'V':
+            if val.startswith('X='):
+                center = _oa_coord(val[2:])
+            elif val.startswith('D='):
+                cw = val[2:].strip() != '-'
+        elif key == 'DB' and center:
+            a, _, b = val.partition(',')
+            p1, p2 = _oa_coord(a), _oa_coord(b)
+            if p1 and p2:
+                import math
+                dx = (p1[1] - center[1]) * 60 * math.cos(math.radians(center[0]))
+                dy = (p1[0] - center[0]) * 60
+                r = math.hypot(dx, dy)
+                a1 = _brg(center[0], center[1], p1[0], p1[1])
+                a2 = _brg(center[0], center[1], p2[0], p2[1])
+                span = (a2 - a1) % 360 if cw else -((a1 - a2) % 360)
+                n = max(2, int(abs(span) / 10))
+                for i in range(0, n + 1):
+                    cur['poly'].append(_dest(center[0], center[1], a1 + span * i / n, r))
+        elif key == 'DC' and center:
+            r = float(val.split()[0])
+            cur['poly'] = [_dest(center[0], center[1], a, r) for a in range(0, 360, 15)]
+    close()
+    keep = []
+    for a in out:
+        kind = (a['type'] or a['name'].split(' ')[0]).upper()
+        if kind not in ('CTR', 'TMA', 'CTA', 'RMZ', 'TMZ', 'SIV', 'FIS'):
+            continue
+        la = sum(p[0] for p in a['poly']) / len(a['poly'])
+        lo = sum(p[1] for p in a['poly']) / len(a['poly'])
+        if not (41.8 < la < 49.6 and -6.5 < lo < 3.6):
+            continue
+        a['kind'] = kind
+        a['poly'] = [[round(p[0], 4), round(p[1], 4)] for p in a['poly']]
+        keep.append(a)
+    return keep
+
+
+def collect_siv(folder, cycle):
+    """SIV (secteurs d'information de vol) de l'ENR 2.2 : géométrie, limites, indicatif, fréquences."""
+    page = get(f'{SIA_DVD}/{folder}/FRANCE/AIRAC-{cycle}/html/eAIP/FR-ENR-2.2-fr-FR.html', timeout=180)
+    text = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', page))).replace('’', "'")
+    out = []
+    for m in re.finditer(r"SIV ([A-ZÀ-Ü' -]+?(?: partie [A-Z0-9.]+(?: partie [A-Z0-9.]+)?)?) (?=\d{2}°\d{2}')", text):
+        name = 'SIV ' + m.group(1).strip()
+        seg = text[m.end():m.end() + 6000]
+        poly, end = parse_geometry(seg)
+        if len(poly) < 3:
+            continue
+        tail = seg[end:end + 400]
+        LIM = r'(FL ?\d{2,3}|\d{3,5} ?ft (?:ASFC|AMSL|AGL)|SFC|GND|UNL)'
+        up = re.search(LIM, tail)
+        dash = tail.find('----')
+        lo = re.search(LIM, tail[dash:]) if dash >= 0 else None
+        upper = up.group(1) if up else '?'
+        lower = lo.group(1) if lo else '?'
+        after = tail[dash + lo.end():] if lo else tail
+        freqs = re.findall(r'\d{3}\.\d{2,3}', after[:160])
+        call = re.search(r'([A-ZÀ-Ü][A-ZÀ-Ü\' -]+ INFO)', after[:120])
+        la = sum(p[0] for p in poly) / len(poly)
+        lo = sum(p[1] for p in poly) / len(poly)
+        if not (41.8 < la < 49.6 and -6.5 < lo < 3.6) or not freqs:
+            continue
+        out.append({'kind': 'SIV', 'cls': 'G/E', 'name': name, 'upper': upper[:30], 'lower': lower[:30],
+                    'freq': ' / '.join(dict.fromkeys(freqs[:3])), 'call': call.group(1).strip() if call else name.replace('SIV', '').split(' partie')[0].strip() + ' INFO',
+                    'poly': [[round(p[0], 4), round(p[1], 4)] for p in poly]})
+    # dédoublonnage par nom
+    uniq = {}
+    for s in out:
+        uniq.setdefault(s['name'], s)
+    print(f'  {len(uniq)} SIV (ENR 2.2)')
+    return list(uniq.values())
+
+
+def collect_airspaces(cycle, folder=None):
+    try:
+        txt = get(OPENAIR_URL, timeout=120)
+        ver = re.search(r'\*version=\s*(.+)', txt)
+        data = parse_openair(txt)
+        print(f'  {len(data)} espaces CTR/TMA/CTA/RMZ/TMZ avec fréquences (OpenAir FFVP)')
+        if folder:
+            try:
+                data += collect_siv(folder, cycle)
+            except Exception as e:  # noqa: BLE001
+                print('  SIV : échec', e)
+        save('airspaces.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'version': ver.group(1).strip() if ver else '',
+                                'source': 'Fichier OpenAir FFVP / planeur-net (non officiel)', 'data': data})
+    except Exception as e:  # noqa: BLE001
+        print('  espaces : échec', e)
+        fallback('airspaces.json')
+
+
 def collect_aip():
     print('AIP (cycle AIRAC, zones, VAC)')
     try:
@@ -492,12 +657,14 @@ def collect_aip():
         try:
             prev = json.loads(get(f'{FALLBACK_URL}/data/live/vac.json', timeout=30))
             prevz = json.loads(get(f'{FALLBACK_URL}/data/live/zones.json', timeout=30))
-            if prev.get('cycle') == cycle and prevz.get('cycle') == cycle:
-                save('vac.json', prev); save('zones.json', prevz)
+            preva = json.loads(get(f'{FALLBACK_URL}/data/live/airspaces.json', timeout=30))
+            if prev.get('cycle') == cycle and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
+                save('vac.json', prev); save('zones.json', prevz); save('airspaces.json', preva)
                 print('  inchangé (même cycle)')
                 return
         except Exception:  # noqa: BLE001
             pass
+    collect_airspaces(cycle, folder)
     try:
         save('zones.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP ENR 5.1',
                             'data': collect_zones(folder, cycle)})

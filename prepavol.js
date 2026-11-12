@@ -1,0 +1,989 @@
+/* Préparation de vol — Aéro Météo Webcams Ouest
+ *  - avions du club (DR400 Rotax 912iS, DR401 CDI 155) : performances, masse et centrage
+ *  - route directe entre les terrains, avec contournement automatique des zones interdites (P)
+ *    et des zones RTBA actives pendant le vol
+ *  - espaces aériens traversés et fréquences (CTR/TMA/CTA/SIV), altitude de sécurité (relief)
+ *  - briefing départ / arrivée établi d'après la carte VAC (piste probable, vent, distances, consignes)
+ *  - log de navigation au format du log ACB + briefing PDF (météo, NOTAM, SUP AIP, AZBA, VAC)
+ * Outil d'aide : ne remplace pas la préparation réglementaire (SOFIA, SIA, aviation.meteo.fr).
+ */
+(() => {
+  'use strict';
+  const A = window.AWW;
+  if (!A) return;
+  const { map, L, esc } = A;
+  const $ = (s, el = document) => el.querySelector(s);
+  const rad = (d) => d * Math.PI / 180, deg = (r) => r * 180 / Math.PI;
+  const TYPES = window.AIRCRAFT_TYPES || {}, FLEET = window.AIRCRAFT || [];
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('aww.prep2.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('aww.prep2.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  };
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = (min) => `${Math.floor(min / 60)}h${pad(Math.round(min % 60))}`;
+  const utc = (d) => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}Z`;
+  const r3 = (x) => String(Math.round(x) % 360 || 360).padStart(3, '0');
+
+  // ================================================================== géométrie
+  function distNm(a, b) {
+    const dLa = rad(b[0] - a[0]), dLo = rad(b[1] - a[1]);
+    const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLo / 2) ** 2;
+    return 2 * 3440.065 * Math.asin(Math.sqrt(h));
+  }
+  function bearing(a, b) {
+    const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
+    const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
+    return (deg(Math.atan2(y, x)) + 360) % 360;
+  }
+  function destPt(p, brg, nm) {
+    const d = nm / 3440.065, la1 = rad(p[0]), lo1 = rad(p[1]), b = rad(brg);
+    const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(b));
+    const lo2 = lo1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2));
+    return [deg(la2), deg(lo2)];
+  }
+  let PROJ_LAT = 46;
+  const P = (p) => [p[1] * 60 * Math.cos(rad(PROJ_LAT)), p[0] * 60];
+  const UNP = (q) => [q[1] / 60, q[0] / (60 * Math.cos(rad(PROJ_LAT)))];
+  function segDistXY(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return { d: Math.hypot(px - ax - t * dx, py - ay - t * dy), t };
+  }
+  function segDist(p, a, b) { const [px, py] = P(p), [ax, ay] = P(a), [bx, by] = P(b); return segDistXY(px, py, ax, ay, bx, by); }
+  function routeDist(p, pts) {
+    let best = { d: Infinity, along: 0 }, acc = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const len = distNm(pts[i], pts[i + 1]); const r = segDist(p, pts[i], pts[i + 1]);
+      if (r.d < best.d) best = { d: r.d, along: acc + r.t * len, leg: i };
+      acc += len;
+    }
+    return best;
+  }
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  function properX(a, b, c, d) {   // intersection stricte de [ab] et [cd] (plan projeté)
+    const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d);
+    return ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9));
+  }
+  function inPolyXY(x, y, q) {
+    let ins = false;
+    for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+      if ((q[i][1] > y) !== (q[j][1] > y) && x < (q[j][0] - q[i][0]) * (y - q[i][1]) / (q[j][1] - q[i][1]) + q[i][0]) ins = !ins;
+    }
+    return ins;
+  }
+  const inPoly = (p, poly) => { const [x, y] = P(p); return inPolyXY(x, y, poly.map(P)); };
+  function polyRouteDist(poly, pts) {
+    const q = poly.map(P);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = P(pts[i]), b = P(pts[i + 1]);
+      if (inPolyXY(a[0], a[1], q)) return 0;
+      for (let k = 0; k < q.length - 1; k++) if (properX(a, b, q[k], q[k + 1])) return 0;
+    }
+    const e = P(pts[pts.length - 1]); if (inPolyXY(e[0], e[1], q)) return 0;
+    let m = Infinity;
+    for (const v of poly) m = Math.min(m, routeDist(v, pts).d);
+    for (const p of pts) { const [x, y] = P(p); for (let k = 0; k < q.length - 1; k++) m = Math.min(m, segDistXY(x, y, q[k][0], q[k][1], q[k + 1][0], q[k + 1][1]).d); }
+    return m;
+  }
+  function hull(points) {   // enveloppe convexe (monotone chain) en coordonnées projetées
+    const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (p.length < 3) return p;
+    const lo = [], up = [];
+    for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+    up.pop(); lo.pop(); return lo.concat(up);
+  }
+
+  // ================================================================== soleil
+  function sunTimes(date, la, lo) {
+    const d0 = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    const n = Math.floor((d0 - Date.UTC(2000, 0, 1, 12)) / 864e5) + 1;
+    const Js = n - lo / 360, M = (357.5291 + 0.98560028 * Js) % 360;
+    const C = 1.9148 * Math.sin(rad(M)) + 0.02 * Math.sin(rad(2 * M)) + 0.0003 * Math.sin(rad(3 * M));
+    const lam = (M + C + 180 + 102.9372) % 360;
+    const Jt = 2451545 + Js + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2 * lam));
+    const dec = Math.asin(Math.sin(rad(lam)) * Math.sin(rad(23.44)));
+    const cosw = (Math.sin(rad(-0.833)) - Math.sin(rad(la)) * Math.sin(dec)) / (Math.cos(rad(la)) * Math.cos(dec));
+    if (Math.abs(cosw) > 1) return null;
+    const w = deg(Math.acos(cosw)), toD = (j) => new Date((j - 2440587.5) * 864e5);
+    return { rise: toD(Jt - w / 360), set: toD(Jt + w / 360) };
+  }
+
+  // ================================================================== données
+  let ZONES = null, VAC = null, ASP = null;
+  async function loadAip() {
+    if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
+    if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
+    if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
+  }
+  const hpaFor = (ft) => [[1000, 975], [1800, 950], [2600, 925], [3300, 900], [5000, 850], [6500, 800], [99999, 700]].find(([f]) => ft <= f)[1];
+  async function windsAloft(points, ft, when) {
+    const lv = hpaFor(ft), day = when.toISOString().slice(0, 10);
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${points.map((p) => p[0].toFixed(3)).join(',')}`
+      + `&longitude=${points.map((p) => p[1].toFixed(3)).join(',')}`
+      + `&hourly=wind_speed_${lv}hPa,wind_direction_${lv}hPa,temperature_${lv}hPa,freezing_level_height`
+      + `&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${day}`;
+    const r = await fetch(url); if (!r.ok) throw new Error('open-meteo ' + r.status);
+    let d = await r.json(); if (!Array.isArray(d)) d = [d];
+    const h = when.getUTCHours();
+    return d.map((x) => ({ dir: x.hourly[`wind_direction_${lv}hPa`][h], spd: x.hourly[`wind_speed_${lv}hPa`][h], t: x.hourly[`temperature_${lv}hPa`][h], iso: x.hourly.freezing_level_height[h], lv }));
+  }
+  async function elevations(points) { // m, par paquets de 100
+    const out = [];
+    for (let i = 0; i < points.length; i += 100) {
+      const ch = points.slice(i, i + 100);
+      const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map((p) => p[0].toFixed(4)).join(',')}&longitude=${ch.map((p) => p[1].toFixed(4)).join(',')}`);
+      if (!r.ok) throw new Error('élévation ' + r.status);
+      out.push(...(await r.json()).elevation);
+    }
+    return out;
+  }
+  function parseAlt(s) { // -> ft (ASFC/AGL ramené au sol = valeur brute)
+    if (!s) return null;
+    if (/SFC|GND/i.test(s)) return 0;
+    if (/UNL/i.test(s)) return 99999;
+    let m = s.match(/FL ?(\d{2,3})/i); if (m) return +m[1] * 100;
+    m = s.match(/(\d{3,5}) ?FT/i); if (m) return +m[1];
+    return null;
+  }
+  const isAgl = (s) => /ASFC|AGL|SFC\b(?! *-)/i.test(s || '') && !/^SFC$|^GND$/i.test((s || '').trim());
+
+  // RTBA : NOTAM "ZONES AIRFORCE RTBA ACT ZONE R57 BRETAGNE 0900-1100:ACTIVE ..."
+  function rtbaActivations(notams) {
+    const out = [];
+    for (const n of notams) {
+      const t = (n.e || '') + ' ' + (n.efr || '');
+      if (!/RTBA/.test(t)) continue;
+      const re = /ZONE\s+(R\s?\d+\s?[A-Z]?\d?)\s+([A-Z' .-]+?)\s+((?:\d{4}-\d{4}:ACTIVE\s*)+)/g;
+      let m;
+      while ((m = re.exec(t))) out.push({ zone: m[1].replace(/\s/g, ''), name: m[2].trim(), slots: m[3].match(/\d{4}-\d{4}/g), from: n.from, to: n.to });
+    }
+    return out;
+  }
+  function slotOverlap(slot, dayStartMs, t0, t1) {
+    const s = +slot.slice(0, 2) * 60 + +slot.slice(2, 4), e = +slot.slice(5, 7) * 60 + +slot.slice(7, 9);
+    const a = dayStartMs + s * 6e4, b = dayStartMs + (e <= s ? e + 1440 : e) * 6e4;
+    return a < t1 && b > t0;
+  }
+
+  // ================================================================== évitement des zones interdites
+  // Graphe de visibilité autour des enveloppes convexes (marge 2 NM) des zones à éviter, puis plus court chemin.
+  function avoidRoute(userPts, userIds, obstacles, margin = 2) {
+    const polys = obstacles.map((o) => {
+      const pts = [];
+      for (const v of o.z.poly) { const [x, y] = P(v); for (let a = 0; a < 360; a += 45) pts.push([x + margin * Math.cos(rad(a)), y + margin * Math.sin(rad(a))]); }
+      return { o, h: hull(pts) };
+    });
+    const outPts = [userPts[0]], outIds = [userIds[0]], detours = [];
+    let dt = 0;
+    for (let i = 0; i < userPts.length - 1; i++) {
+      const s = P(userPts[i]), e = P(userPts[i + 1]);
+      const rel = polys.filter((p) => !inPolyXY(s[0], s[1], p.h) && !inPolyXY(e[0], e[1], p.h));
+      const blocked = (a, b, skip) => rel.some((p, pi) => {
+        if (pi === skip.poly) { // même enveloppe : seuls les côtés adjacents sont autorisés
+          const n = p.h.length, ia = skip.ia, ib = skip.ib;
+          if (ia >= 0 && ib >= 0) return !(Math.abs(ia - ib) === 1 || Math.abs(ia - ib) === n - 1);
+        }
+        const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        if (inPolyXY(m[0], m[1], p.h)) return true;
+        for (let k = 0; k < p.h.length; k++) if (properX(a, b, p.h[k], p.h[(k + 1) % p.h.length])) return true;
+        return false;
+      });
+      const direct = !rel.some((p) => {
+        const m = [(s[0] + e[0]) / 2, (s[1] + e[1]) / 2];
+        if (inPolyXY(m[0], m[1], p.h)) return true;
+        for (let k = 0; k < p.h.length; k++) if (properX(s, e, p.h[k], p.h[(k + 1) % p.h.length])) return true;
+        return false;
+      });
+      if (direct) { outPts.push(userPts[i + 1]); outIds.push(userIds[i + 1]); continue; }
+      // nœuds : départ, arrivée, sommets des enveloppes proches
+      const nodes = [{ xy: s }, { xy: e }];
+      rel.forEach((p, pi) => p.h.forEach((xy, k) => nodes.push({ xy, poly: pi, k })));
+      const n = nodes.length, dist = Array(n).fill(Infinity), prev = Array(n).fill(-1), done = Array(n).fill(false);
+      dist[0] = 0;
+      for (let it = 0; it < n; it++) {
+        let u = -1; for (let j = 0; j < n; j++) if (!done[j] && (u < 0 || dist[j] < dist[u])) u = j;
+        if (u < 0 || dist[u] === Infinity) break;
+        done[u] = true; if (u === 1) break;
+        for (let v = 0; v < n; v++) {
+          if (done[v] || v === u) continue;
+          const nu = nodes[u], nv = nodes[v];
+          const same = nu.poly !== undefined && nu.poly === nv.poly ? { poly: nu.poly, ia: nu.k, ib: nv.k } : { poly: -1 };
+          const dd = Math.hypot(nu.xy[0] - nv.xy[0], nu.xy[1] - nv.xy[1]);
+          if (dist[u] + dd >= dist[v]) continue;
+          if (blocked(nu.xy, nv.xy, same)) continue;
+          dist[v] = dist[u] + dd; prev[v] = u;
+        }
+      }
+      if (dist[1] === Infinity) { outPts.push(userPts[i + 1]); outIds.push(userIds[i + 1]); continue; }
+      const path = []; for (let v = prev[1]; v > 0; v = prev[v]) path.unshift(v);
+      for (const v of path) {
+        dt += 1; const p = UNP(nodes[v].xy);
+        outPts.push(p); outIds.push(`DT${dt}`);
+        detours.push({ id: `DT${dt}`, p, around: rel[nodes[v].poly].o.z.id + ' ' + rel[nodes[v].poly].o.z.name });
+      }
+      outPts.push(userPts[i + 1]); outIds.push(userIds[i + 1]);
+    }
+    return { pts: outPts, ids: outIds, detours };
+  }
+
+  // ================================================================== VAC : consignes triées
+  const EN_WORDS = /\b(the|is|are|with|for|of|to|must|shall|prohibited|runway|aircraft|only|when|be|by|on|at|and|outside|within|except|advised|recommended|airfield|pilots?|should|landing|take-?off|traffic pattern|hours?)\b/gi;
+  const FR_WORDS = /\b(le|la|les|des|du|de|est|sont|pour|avec|au|aux|en|à|interdit|interdite|obligatoire|piste|pilotes?|uniquement|sauf|hors|tour|vent|arrière|survol|terrain|activité|aérodrome|réservé|attention)\b/gi;
+  function frenchSentences(txt) {
+    if (!txt) return [];
+    const flat = txt.replace(/\r/g, '').replace(/←/g, '').replace(/([a-z])-\n([a-z])/g, '$1$2').replace(/\n(?=[a-zà-ÿ(])/g, ' ');
+    const parts = flat.split(/\n|(?<=[.:;])(?=[A-ZÉÈÀ])|(?<=[a-z])(?=[A-ZÉ][a-zé])/).map((s) => s.trim()).filter((s) => s.length > 3);
+    const out = [];
+    for (const s of parts) {
+      const fr = (s.match(FR_WORDS) || []).length, en = (s.match(EN_WORDS) || []).length;
+      if (fr > en || (fr === en && /[éèàùâêîôûç]/i.test(s))) out.push(s.replace(/\s+/g, ' '));
+    }
+    return [...new Set(out)];
+  }
+  function classifyConsignes(v) {
+    const S = frenchSentences(v && v.consignes);
+    const dep = [], arr = [], gen = [];
+    for (const s of S) {
+      if (/^(Conditions d|Dangers à la|Procédures et consignes|Activités diverses|Consignes particulières)/i.test(s)) continue;
+      if (/\bDEP\b|départ|décoll|sortie|montée initiale|après le décollage/i.test(s)) dep.push(s);
+      else if (/\bARR\b|arrivée|intégration|vent arrière|atterriss|tour de piste|tours de piste|circuit|finale|entrée|approche|verticale/i.test(s)) arr.push(s);
+      else gen.push(s);
+    }
+    return { dep, arr, gen };
+  }
+  function infosVac(v) {
+    const S = frenchSentences(v && v.infos);
+    return S.filter((s) => /Situation|Exploitant|ATS|Carbur|AVT|Douane|Hangar|Péril|SSLIA|RFFS|Restaurant|Transport|TEL|PPR|ACB|horaire/i.test(s)).slice(0, 14);
+  }
+
+  // Piste probable et composantes de vent
+  function runwayFor(v, wdir, wspd) {
+    const q = ((v && v.qfu) || []).map(Number).filter((x) => x > 0 && x <= 360);
+    if (!q.length) return null;
+    const opts = q.map((qfu) => {
+      const a = rad((wdir ?? qfu) - qfu);
+      return { qfu, head: wspd != null ? wspd * Math.cos(a) : null, cross: wspd != null ? Math.abs(wspd * Math.sin(a)) : null };
+    });
+    opts.sort((a, b) => (b.head ?? 0) - (a.head ?? 0));
+    return { best: opts[0], all: opts };
+  }
+  function rwyLength(v) {
+    const m = ((v && v.rwy) || []).map((s) => +String(s).split(/\s*x\s*/)[0]).filter(Boolean);
+    return m.length ? Math.max(...m) : null;
+  }
+  const isGrass = (v) => { const s = (v && v.surface) || []; return s.length > 0 && !s.some((x) => /^(Revêtue|Paved)$/i.test(x)); };
+
+  // ================================================================== formulaire
+  const aptOptions = () => A.APTS.map((a) => `<option value="${a.icao}">${esc(a.name)}</option>`).join('');
+  const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  function regimeOptions(reg, sel) {
+    const ac = FLEET.find((x) => x.reg === reg) || FLEET[0]; const T = TYPES[ac.type];
+    return T.regimes.map((r, i) => `<option value="${i}" ${i === (sel ?? T.defaultRegime) ? 'selected' : ''}>${esc(r.name)} — ${r.tas} kt, ${r.ff} L/h</option>`).join('');
+  }
+  function openForm() {
+    const f = store.get('form', {});
+    const next = new Date(Date.now() + 3600e3); next.setMinutes(0, 0, 0);
+    const reg = f.reg && FLEET.some((x) => x.reg === f.reg) ? f.reg : FLEET[0].reg;
+    A.showPanel('Préparation de vol', `
+      <p class="meta">Route directe entre les terrains (codes OACI), contournement automatique des zones interdites et des RTBA actives.</p>
+      <datalist id="apt-list">${aptOptions()}</datalist>
+      <div class="prep-form">
+        <label>Départ<input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
+        <label>Arrivée<input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
+        <label class="full">Points tournants (codes OACI, optionnel)<input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX LFBI"></label>
+        <label>Dégagement<input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
+        <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
+        <label>Avion<select id="pf-reg">${FLEET.map((a) => `<option value="${a.reg}" ${a.reg === reg ? 'selected' : ''}>${a.reg} — ${esc(TYPES[a.type].label)}</option>`).join('')}</select></label>
+        <label>Régime<select id="pf-regime">${regimeOptions(reg, f.regime)}</select></label>
+        <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${f.ft || 2500}"></label>
+        <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${f.res ?? 30}"></label>
+        <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${f.m1 ?? 80}"></label>
+        <label>Copilote / passager avant (kg)<input id="pf-m2" type="number" min="0" max="150" value="${f.m2 ?? 0}"></label>
+        <label>Passagers arrière (kg)<input id="pf-m3" type="number" min="0" max="250" value="${f.m3 ?? 0}"></label>
+        <label>Bagages (kg)<input id="pf-m4" type="number" min="0" max="60" value="${f.m4 ?? 10}"></label>
+        <label>Carburant au départ (L)<input id="pf-fuel" type="number" min="0" max="200" value="${f.fuel ?? 100}"></label>
+        <label id="pf-aux-l">Réservoir supp. (L)<input id="pf-aux" type="number" min="0" max="50" value="${f.aux ?? 0}"></label>
+        <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${f.cor || 10}"></label>
+        <label>Éviter<select id="pf-avoid">
+          <option value="p+rtba" ${f.avoid !== 'p' && f.avoid !== 'none' ? 'selected' : ''}>Zones P + RTBA actives</option>
+          <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
+          <option value="none" ${f.avoid === 'none' ? 'selected' : ''}>Ne rien contourner</option></select></label>
+        <label class="full">Pilote (nom)<input id="pf-pil" value="${esc(f.pil || '')}"></label>
+      </div>
+      <div class="prep-actions">
+        <button class="btn primary" id="pf-calc">Calculer la route</button>
+        <button class="btn" id="pf-pdf">📄 Briefing + log de nav (PDF)</button>
+      </div>
+      <div class="prep-progress" id="pf-prog"></div>
+      <div id="pf-out"></div>`);
+    const syncAux = () => { const ac = FLEET.find((x) => x.reg === $('#pf-reg').value); $('#pf-aux-l').style.display = TYPES[ac.type].fuel.tanks.length > 1 ? '' : 'none'; };
+    $('#pf-reg').addEventListener('change', (e) => { $('#pf-regime').innerHTML = regimeOptions(e.target.value); syncAux(); });
+    syncAux();
+    $('#pf-calc').addEventListener('click', () => run(false));
+    $('#pf-pdf').addEventListener('click', () => run(true));
+    ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-wps'].forEach((s) => $(s).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
+  }
+  $('#btn-prep').addEventListener('click', openForm);
+
+  function readForm() {
+    const v = (s) => ($(s).value || '').trim();
+    const f = {
+      dep: v('#pf-dep').toUpperCase(), arr: v('#pf-arr').toUpperCase(), alt: v('#pf-alt').toUpperCase(), wps: v('#pf-wps').toUpperCase(),
+      time: v('#pf-time'), reg: v('#pf-reg'), regime: +v('#pf-regime'), ft: +v('#pf-ft'), res: +v('#pf-res'),
+      m1: +v('#pf-m1'), m2: +v('#pf-m2'), m3: +v('#pf-m3'), m4: +v('#pf-m4'), fuel: +v('#pf-fuel'), aux: +v('#pf-aux') || 0,
+      cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'),
+    };
+    store.set('form', { ...f, time: undefined });
+    const ac = FLEET.find((x) => x.reg === f.reg) || FLEET[0];
+    const T = TYPES[ac.type];
+    const rg = T.regimes[f.regime] || T.regimes[T.defaultRegime];
+    if (T.fuel.tanks.length < 2) f.aux = 0;
+    return { ...f, ac, T, rg, tas: rg.tas, ff: rg.ff };
+  }
+
+  let routeLayer = null;
+  async function run(makePdf) {
+    const prog = $('#pf-prog'), out = $('#pf-out');
+    try {
+      const f = readForm();
+      if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
+      const userIds = [f.dep, ...f.wps.split(/[\s,;]+/).filter(Boolean), f.arr];
+      const bad = userIds.filter((id) => !A.aptByIcao[id]);
+      if (bad.length) throw new Error(`Terrain inconnu : ${bad.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
+      if (f.alt && !A.aptByIcao[f.alt]) throw new Error(`Dégagement inconnu : ${f.alt}`);
+      prog.textContent = 'Chargement des données AIP, espaces aériens…';
+      await loadAip();
+      prog.textContent = 'Calcul de la route, du vent et du relief…';
+      const b = await compute(f, userIds);
+      drawRoute(b);
+      out.innerHTML = summaryHtml(b);
+      prog.textContent = '';
+      if (makePdf) {
+        prog.textContent = 'Génération du PDF…';
+        await buildPdf(b, (t) => { prog.textContent = t; });
+        prog.textContent = 'PDF généré ✔';
+      }
+    } catch (e) {
+      console.error(e); prog.textContent = '';
+      out.innerHTML = `<div class="warn">${esc(e.message || e)}</div>`;
+    }
+  }
+
+  // ================================================================== calculs
+  function massBalance(f) {
+    const T = f.T, ac = f.ac, d = T.fuel.density;
+    const rows = [
+      ['Avion vide', ac.empty, ac.arm],
+      ['Pilote', f.m1, T.arms.pilot],
+      ['Copilote / pax avant', f.m2, T.arms.copilot],
+      ['Passagers arrière', f.m3, T.arms.pax],
+      ['Bagages', f.m4, ac.bagArm || T.arms.bag],
+      [`Carburant ${T.fuel.tanks[0].name} (${f.fuel} L)`, f.fuel * d, T.fuel.tanks[0].arm],
+    ];
+    if (T.fuel.tanks[1] && f.aux) rows.push([`Carburant ${T.fuel.tanks[1].name} (${f.aux} L)`, f.aux * d, T.fuel.tanks[1].arm]);
+    const mass = rows.reduce((s, r) => s + r[1], 0), mom = rows.reduce((s, r) => s + r[1] * r[2], 0);
+    const env = T.envelope.map(([arm, m]) => [arm, m]);
+    const inEnv = (cg, m) => inPolyXY(cg, m, env);
+    return { rows, mass, cg: mom / mass, mom, inEnv, env };
+  }
+
+  async function compute(f, userIds) {
+    const userPts = userIds.map((id) => [A.aptByIcao[id].la, A.aptByIcao[id].lo]);
+    PROJ_LAT = userPts.reduce((s, p) => s + p[0], 0) / userPts.length;
+    const depT = new Date(f.time);
+    if (isNaN(depT)) throw new Error('Heure de départ invalide.');
+    const vacOf = (id) => (VAC && VAC.data && VAC.data[id]) || null;
+    const N = A.NOTAM || { fir: [], ad: {} };
+    const horizon = (depT - Date.now()) / 864e5;
+
+    // --- Zones à éviter (verticalement concernées)
+    const acts = rtbaActivations(N.fir || []);
+    const dayStart = Date.UTC(depT.getUTCFullYear(), depT.getUTCMonth(), depT.getUTCDate());
+    const roughDur = userPts.slice(1).reduce((s, p, i) => s + distNm(userPts[i], p), 0) / f.tas * 3600e3;
+    const t0 = depT.getTime() - 1800e3, t1 = depT.getTime() + roughDur * 1.3 + 1800e3;
+    const vOverlap = (z) => {
+      const lo = parseAlt(z.lower), up = parseAlt(z.upper);
+      const upFt = up === null ? 99999 : up + (/ASFC|AGL/i.test(z.upper) ? 1500 : 0);
+      return (lo === null || lo <= f.ft + 500) && upFt >= f.ft - 500;
+    };
+    const rtbaSlots = (z) => {
+      const key = z.id.replace(/\s/g, '');
+      return [...new Set(acts.filter((a) => a.zone === key && (!a.from || Date.parse(a.from) <= dayStart + 864e5) && (isNaN(Date.parse(a.to)) || Date.parse(a.to) >= dayStart)).flatMap((a) => a.slots))];
+    };
+    const obstacles = [];
+    if (f.avoid !== 'none') {
+      for (const z of (ZONES && ZONES.data) || []) {
+        if (!vOverlap(z)) continue;
+        if (polyRouteDist(z.poly, userPts) > 40) continue;
+        if (z.type === 'P') obstacles.push({ z, why: 'zone interdite' });
+        else if (f.avoid === 'p+rtba' && z.rtba && rtbaSlots(z).some((s) => slotOverlap(s, dayStart, t0, t1))) obstacles.push({ z, why: 'RTBA active' });
+      }
+    }
+    const routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
+    const pts = routed.pts, ids = routed.ids;
+    const adIds = [...new Set([...userIds, f.alt].filter(Boolean))];
+    const varDeg = (() => {
+      const v = [vacOf(f.dep), vacOf(f.arr)].map((x) => x && x.var).filter((x) => typeof x === 'number');
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    })();
+
+    // --- Vent en altitude
+    const mids = []; for (let i = 0; i < pts.length - 1; i++) mids.push([(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2]);
+    let winds = null, windErr = null;
+    if (horizon < -1 || horizon > 15) windErr = 'Vent non disponible pour cette date (prévisions à 16 jours).';
+    else { try { winds = await windsAloft(mids, f.ft, depT); } catch (e) { windErr = 'Vent en altitude indisponible (' + e.message + ').'; } }
+
+    // --- Relief : altitude de sécurité par branche (relief max ±5 NM + 1000 ft)
+    let safe = null, elevErr = null;
+    try {
+      const samples = [], owner = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const dst = distNm(pts[i], pts[i + 1]), tc = bearing(pts[i], pts[i + 1]);
+        const n = Math.max(2, Math.ceil(dst / 3));
+        for (let k = 0; k <= n; k++) {
+          const c = destPt(pts[i], tc, dst * k / n);
+          for (const off of [-5, -2.5, 0, 2.5, 5]) { samples.push(off ? destPt(c, tc + 90, off) : c); owner.push(i); }
+        }
+      }
+      const el = await elevations(samples);
+      safe = pts.slice(1).map(() => 0);
+      el.forEach((m, j) => { if (m != null) safe[owner[j]] = Math.max(safe[owner[j]], m * 3.281); });
+      safe = safe.map((maxFt) => ({ terrain: Math.round(maxFt), alt: Math.ceil((maxFt + 1000) / 100) * 100 }));
+    } catch (e) { elevErr = 'Relief indisponible (' + e.message + ').'; }
+
+    // --- Branches (règles du log ACB : +2 min et +4 L sur la 1re branche)
+    const legs = [];
+    let t = depT.getTime(), totDist = 0, totMin = 0, totFuel = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const dist = distNm(pts[i], pts[i + 1]), tc = bearing(pts[i], pts[i + 1]);
+      const w = winds && winds[i] && winds[i].spd != null ? winds[i] : { dir: 0, spd: 0 };
+      const wa = rad(w.dir - tc);
+      const wca = deg(Math.asin(Math.max(-1, Math.min(1, (w.spd / f.tas) * Math.sin(wa)))));
+      const gs = Math.max(20, f.tas * Math.cos(rad(wca)) - w.spd * Math.cos(wa));
+      const th = (tc + wca + 360) % 360;
+      let min = Math.round(dist / gs * 60);
+      let fuel = Math.round(min * f.ff / 60);
+      if (i === 0) { min += f.T.climb.extraMin; fuel += f.T.climb.extraFuel; }
+      legs.push({ from: ids[i], to: ids[i + 1], a: pts[i], b: pts[i + 1], dist, tc, tm: (tc - varDeg + 360) % 360, th, hm: (th - varDeg + 360) % 360, wca, gs, min, fuel, wind: winds ? w : null, eto: new Date(t + min * 6e4), safe: safe && safe[i] });
+      t += min * 6e4; totDist += dist; totMin += min; totFuel += fuel;
+    }
+    const eta = new Date(t);
+    let altLeg = null;
+    if (f.alt) {
+      const a = A.aptByIcao[f.alt], bpt = pts[pts.length - 1], d = distNm(bpt, [a.la, a.lo]);
+      const tc = bearing(bpt, [a.la, a.lo]);
+      const min = Math.round(d / f.tas * 60) + 2;
+      altLeg = { to: f.alt, dist: d, tc, tm: (tc - varDeg + 360) % 360, min, fuel: Math.round(min * f.ff / 60) + 2 };
+    }
+    const resFuel = Math.round(f.res / 60 * f.ff);
+    const reqFuel = totFuel + (altLeg ? altLeg.fuel : 0) + resFuel;
+    const loaded = f.fuel + f.aux;
+
+    // --- Espaces aériens traversés + fréquences par branche
+    const aspAll = (ASP && ASP.data) || [];
+    for (const lg of legs) {
+      const n = Math.max(2, Math.ceil(lg.dist / 1.5)), seen = new Map();
+      for (let k = 0; k <= n; k++) {
+        const p = destPt(lg.a, lg.tc, lg.dist * k / n);
+        for (const s of aspAll) {
+          if (seen.has(s)) continue;
+          const lo = parseAlt(s.lower), up = parseAlt(s.upper);
+          const isFirst = lg === legs[0] && k <= 1, isLast = lg === legs[legs.length - 1] && k >= n - 1;
+          const vert = (lo === null || lo <= f.ft + 300 || ((isFirst || isLast) && s.kind === 'CTR')) && (up === null || up + (/AGL|ASFC/i.test(s.upper) ? 1500 : 0) >= f.ft - 300 || ((isFirst || isLast) && s.kind === 'CTR'));
+          if (!vert) continue;
+          if (inPoly(p, s.poly)) seen.set(s, k / n);
+        }
+      }
+      lg.airspaces = [...seen.entries()].sort((x, y) => x[1] - y[1]).map(([s]) => s);
+      // espaces dont le plancher est juste au-dessus (risque d'y pénétrer en montée)
+      lg.ceilings = aspAll.filter((s) => !seen.has(s) && s.kind !== 'SIV' && polyRouteDist(s.poly, [lg.a, lg.b]) === 0)
+        .map((s) => ({ s, lo: parseAlt(s.lower) })).filter((x) => x.lo !== null && x.lo > f.ft && x.lo - f.ft <= 1500)
+        .sort((x, y) => x.lo - y.lo).slice(0, 3).map((x) => x.s);
+    }
+
+    // --- Météo
+    const wxNear = Object.values(A.metars).map((m) => ({ m, r: routeDist([m.lat, m.lon], pts) }))
+      .filter((x) => x.r.d <= f.cor + 15 && !adIds.includes(x.m.icaoId)).sort((a, b) => a.r.along - b.r.along);
+    const nearestMetar = (id) => {
+      const a = A.aptByIcao[id];
+      return Object.values(A.metars).map((m) => ({ m, d: distNm([a.la, a.lo], [m.lat, m.lon]) })).sort((x, y) => x.d - y.d)[0];
+    };
+    const wx = adIds.map((id) => ({ id, metar: A.metars[id], taf: A.tafs[id], near: A.metars[id] ? null : nearestMetar(id) }));
+
+    // --- NOTAM
+    const T1 = eta.getTime() + 3600e3 + (altLeg ? altLeg.min * 6e4 : 0), T0 = depT.getTime() - 3600e3;
+    const overlaps = (n) => (!n.from || Date.parse(n.from) <= T1) && (isNaN(Date.parse(n.to)) || Date.parse(n.to) >= T0);
+    const adNotams = adIds.map((id) => ({ id, list: (N.ad[id] || []).filter(overlaps) }));
+    const ceil = f.ft / 100 + 15, enroute = [], general = [], obst = [];
+    for (const n of N.fir || []) {
+      if (n.la == null || !overlaps(n) || /RTBA/.test(n.e || '')) continue;
+      if (n.lower != null && n.lower > ceil) continue;
+      const r = routeDist([n.la, n.lo], pts);
+      if (r.d - (n.r || 0) > f.cor) continue;
+      if ((n.r || 0) >= 100) general.push(n);
+      else if ((n.q || '')[0] === 'O') obst.push({ n, along: r.along, d: r.d });
+      else enroute.push({ n, along: r.along, d: r.d });
+    }
+    enroute.sort((a, b) => a.along - b.along); obst.sort((a, b) => a.along - b.along);
+
+    // --- SUP AIP
+    const flightDay = depT.toISOString().slice(0, 10);
+    const sups = (A.SUP || []).filter((s) => (!s.from || s.from <= flightDay) && (!s.to || s.to >= flightDay))
+      .map((s) => ({ s, d: Math.min(...s.places.map((p) => routeDist([p.la, p.lo], pts).d), Infinity) }))
+      .filter((x) => x.d <= f.cor + 10).sort((a, b) => a.d - b.d);
+
+    // --- Zones P/R/D + AZBA sur la route finale
+    const zones = [];
+    for (const z of (ZONES && ZONES.data) || []) {
+      const d = polyRouteDist(z.poly, pts);
+      if (d > f.cor) continue;
+      zones.push({ z, d, crossed: d === 0, below: vOverlap(z) });
+    }
+    zones.sort((a, b) => (a.z.type + a.z.id).localeCompare(b.z.type + b.z.id));
+    const rtba = zones.filter((x) => x.z.rtba).map((x) => {
+      const slots = rtbaSlots(x.z);
+      return { ...x, slots, conflict: slots.some((s) => slotOverlap(s, dayStart, T0, T1)) };
+    });
+    const azbaKnown = acts.length > 0 && Math.abs(horizon) < 1.5;
+
+    // --- Terrains : briefing départ / arrivée
+    const sun = sunTimes(eta, pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    const sunDep = sunTimes(depT, pts[0][0], pts[0][1]);
+    const mb = massBalance(f);
+    const landMass = mb.mass - totFuel * f.T.fuel.density;
+    const terrain = (id, role) => {
+      const v = vacOf(id), a = A.aptByIcao[id];
+      const w = wx.find((x) => x.id === id);
+      const m = (w && w.metar) || (w && w.near && w.near.m) || null;
+      const rw = runwayFor(v, m && m.wdir !== 'VRB' ? +m.wdir : null, m ? m.wspd : null);
+      const len = rwyLength(v), grass = isGrass(v);
+      const elev = v && v.alt != null ? v.alt : (a && +a.elev) || 0;
+      const tIsa = 15 - 2 * elev / 1000, temp = m && m.temp != null ? m.temp : tIsa;
+      const factor = (1 + 0.10 * elev / 1000) * (1 + 0.10 * Math.max(0, temp - tIsa) / 10);
+      const base = grass ? f.T.takeoff.grass : f.T.takeoff.hard;
+      const tod = Math.round(base * factor / 10) * 10;
+      const cons = classifyConsignes(v);
+      return { id, role, a, v, m, rw, len, grass, elev, temp, tod, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
+    };
+    const depInfo = terrain(f.dep, 'DÉPART'), arrInfo = terrain(f.arr, 'ARRIVÉE'), altInfo = f.alt ? terrain(f.alt, 'DÉGAGEMENT') : null;
+
+    const cams = (id) => {
+      const a = A.aptByIcao[id];
+      return A.SOURCES.filter((s) => s.t === 'cam').map((s) => ({ s, d: distNm([a.la, a.lo], [s.la, s.lo]) * 1.852 })).filter((x) => x.d <= 15).sort((x, y) => x.d - y.d).slice(0, 5);
+    };
+
+    return {
+      f, userIds, ids, pts, detours: routed.detours, obstacles, legs, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
+      sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
+      mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
+      generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
+    };
+  }
+
+  // ================================================================== carte + résumé
+  function drawRoute(b) {
+    if (routeLayer) map.removeLayer(routeLayer);
+    routeLayer = L.layerGroup().addTo(map);
+    const shown = new Set();
+    b.legs.forEach((lg) => lg.airspaces.forEach((s) => {
+      if (shown.has(s) || s.kind === 'SIV') return; shown.add(s);
+      L.polygon(s.poly, { color: '#64d2ff', weight: 1, fillOpacity: .05, dashArray: '4 4' })
+        .bindTooltip(`<b>${esc(s.name)}</b> (${esc(s.cls)})<br>${esc(s.lower)} – ${esc(s.upper)}<br>${esc(s.call)} ${esc(s.freq)}`, { className: 'tip', sticky: true }).addTo(routeLayer);
+    }));
+    b.zones.filter((x) => x.crossed || x.z.rtba || x.z.type === 'P').forEach((x) => {
+      L.polygon(x.z.poly, { color: x.z.rtba ? '#ff3b30' : x.z.type === 'P' ? '#ff2d55' : x.z.type === 'D' ? '#ff9f0a' : '#bf5af2', weight: 1.5, fillOpacity: .14 })
+        .bindTooltip(`<b>${esc(x.z.id)} ${esc(x.z.name)}</b><br>${esc(x.z.lower)} – ${esc(x.z.upper)}`, { className: 'tip', sticky: true }).addTo(routeLayer);
+    });
+    L.polyline(b.pts, { color: '#ff2bd6', weight: 4, opacity: .95 }).addTo(routeLayer);
+    if (b.altLeg) { const a = A.aptByIcao[b.altLeg.to]; L.polyline([b.pts[b.pts.length - 1], [a.la, a.lo]], { color: '#ff2bd6', weight: 2, dashArray: '6 6' }).addTo(routeLayer); }
+    b.pts.forEach((p, i) => L.circleMarker(p, { radius: b.ids[i].startsWith('DT') ? 4 : 6, color: '#fff', weight: 2, fillColor: b.ids[i].startsWith('DT') ? '#ffd34d' : '#ff2bd6', fillOpacity: 1 })
+      .bindTooltip(b.ids[i], { permanent: true, direction: 'right', className: 'tip' }).addTo(routeLayer));
+    map.fitBounds(L.latLngBounds(b.pts).pad(0.25), { paddingTopLeft: [320, 20], paddingBottomRight: [480, 20] });
+  }
+
+  function alertsOf(b) {
+    const al = [];
+    if (b.windErr) al.push(b.windErr + ' Temps calculés sans vent.');
+    if (b.elevErr) al.push(b.elevErr);
+    if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => d.id).join(', ')}).`);
+    if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
+    if (b.sunDep && b.depT < new Date(b.sunDep.rise.getTime() - 30 * 6e4)) al.push('Départ avant le jour aéronautique.');
+    if (b.loaded < b.reqFuel) al.push(`Carburant insuffisant : ${b.loaded} L à bord pour ${b.reqFuel} L requis (étape + dégagement + réserve).`);
+    if (b.mb.mass > b.f.T.mtow) al.push(`Masse au décollage ${Math.round(b.mb.mass)} kg > MTOW ${b.f.T.mtow} kg.`);
+    if (!b.mb.inEnv(b.mb.cg, b.mb.mass)) al.push(`Centrage hors limites au décollage (${b.mb.cg.toFixed(3)} m).`);
+    const tanks = b.f.T.fuel.tanks;
+    if (b.f.fuel > tanks[0].cap || (tanks[1] && b.f.aux > tanks[1].cap)) al.push('Quantité de carburant supérieure à la capacité des réservoirs.');
+    for (const t of [b.depInfo, b.arrInfo]) {
+      if (t.rw && t.rw.best.cross != null && t.rw.best.cross > b.f.T.speeds['Vw 90° max']) al.push(`${t.id} : vent traversier ${Math.round(t.rw.best.cross)} kt > ${b.f.T.speeds['Vw 90° max']} kt démontré.`);
+      if (t.len && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
+    }
+    b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
+    if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
+    b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
+    return al;
+  }
+
+  function summaryHtml(b) {
+    const al = alertsOf(b);
+    return `
+      <h4>Route ${b.ids.join(' → ')}</h4>
+      <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
+      <table class="legs"><tr><th>Branche</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
+      ${b.legs.map((l) => `<tr><td>${l.from}→${l.to}</td><td>${l.safe ? l.safe.alt : '–'}</td><td>${r3(l.tm)}°</td><td>${l.dist.toFixed(0)}</td>
+        <td>${l.wind ? `${r3(l.wind.dir)}/${Math.round(l.wind.spd)}` : '–'}</td><td>${r3(l.hm)}°</td><td>${l.min}'</td><td>${l.fuel} L</td></tr>`).join('')}
+      <tr><th>Total</th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
+      <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
+        Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg.toFixed(3)} m.</p>
+      ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
+      <h4>Fréquences en route</h4>
+      ${b.legs.map((l) => `<p class="meta" style="margin:2px 0"><b>${l.from}→${l.to}</b> : ${l.airspaces.map((s) => `${esc(s.name)} ${esc(s.freq)}`).join(' · ') || 'classe G (A/A 123.500 / SIV)'}</p>`).join('')}`;
+  }
+
+  // ================================================================== PDF
+  const latin = (s) => String(s ?? '').replace(/→/g, '->').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-')
+    .replace(/…/g, '...').replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/•/g, '-').replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/ /g, ' ')
+    .replace(/←/g, '').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF€]/g, '');
+
+  async function buildPdf(b, progress) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    let W = 297, H = 210, y = 0;
+    const M = 10;
+    const title = latin(`${b.ids.filter((x) => !x.startsWith('DT')).join(' -> ')}${b.f.alt ? ` (dégt ${b.f.alt})` : ''} · ${b.f.ac.reg} ${b.f.T.label}`);
+    const bar = (sub) => {
+      doc.setFillColor(0, 102, 153); doc.rect(0, 0, W, 14, 'F'); doc.setTextColor(255);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.text(doc.splitTextToSize(latin(sub + ' - ' + title), W - 2 * M - 60)[0], M, 6.5);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+      doc.text(latin(`Vol du ${b.depT.toLocaleDateString('fr-FR', { timeZone: 'UTC' })} · départ ${utc(b.depT)}${b.f.pil ? ' · pilote ' + b.f.pil : ''}`), M, 11.5);
+      doc.text(latin(`Généré le ${b.generated.toISOString().slice(0, 16).replace('T', ' ')}Z`), W - M, 11.5, { align: 'right' });
+      doc.setTextColor(0); doc.setFont('helvetica', 'normal');
+    };
+    let curSub = 'LOG DE NAVIGATION';
+    const newPage = (orient, sub) => {
+      doc.addPage('a4', orient); W = orient === 'landscape' ? 297 : 210; H = orient === 'landscape' ? 210 : 297;
+      curSub = sub; bar(sub); y = 19;
+    };
+    const ensure = (h) => { if (y + h > H - 12) newPage(W > H ? 'landscape' : 'portrait', curSub); };
+    const h2 = (t) => {
+      ensure(12); doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(0, 80, 130);
+      doc.text(latin(t), M, y); y += 1.3; doc.setDrawColor(0, 102, 153); doc.setLineWidth(.35); doc.line(M, y, W - M, y);
+      y += 4.5; doc.setTextColor(0); doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    };
+    const para = (t, o = {}) => {
+      doc.setFont(o.mono ? 'courier' : 'helvetica', o.bold ? 'bold' : 'normal'); const fs = o.size || (o.mono ? 8 : 9); doc.setFontSize(fs);
+      if (o.color) doc.setTextColor(...o.color);
+      const lines = doc.splitTextToSize(latin(t), (o.w || (W - 2 * M)) - (o.indent || 0)), lh = fs * 0.42;
+      for (const l of lines) { ensure(lh + 1); doc.text(l, (o.x || M) + (o.indent || 0), y); y += lh; }
+      y += o.gap ?? 1.4; doc.setTextColor(0);
+    };
+    const table = (head, body, o = {}) => {
+      doc.autoTable({
+        startY: o.y || y, head: head ? [head.map(latin)] : undefined, body: body.map((r) => r.map((c) => (c && typeof c === 'object' && !Array.isArray(c)) ? { ...c, content: latin(c.content) } : latin(c))),
+        margin: { left: o.x || M, right: o.right ?? M, top: 18 }, tableWidth: o.width || 'auto',
+        styles: { fontSize: o.size || 8, cellPadding: o.pad ?? 1.1, overflow: 'linebreak', lineColor: [150, 170, 185], lineWidth: .15 },
+        headStyles: { fillColor: [0, 102, 153], fontSize: (o.size || 8) }, theme: 'grid',
+        didDrawPage: () => bar(curSub), ...(o.at || {}),
+      });
+      if (!o.keepY) y = doc.lastAutoTable.finalY + 3.5;
+      return doc.lastAutoTable.finalY;
+    };
+
+    // ---------------------------------------------------------------- 1. LOG DE NAVIGATION (paysage, inspiré du log ACB)
+    progress('PDF : log de navigation…');
+    bar('LOG DE NAVIGATION'); y = 18;
+    const fmtMetar = (m) => m ? {
+      vw: m.wdir != null ? `${m.wdir === 'VRB' ? 'VRB' : r3(m.wdir)}/${m.wspd ?? 0}${m.wgst ? 'G' + m.wgst : ''} kt` : '',
+      visi: m.visib != null ? (String(m.visib).includes('+') ? '9999' : `${Math.round(parseFloat(m.visib) * 1609)} m`) : '',
+      clouds: (m.clouds || []).map((c) => c.cover + (c.base != null ? String(Math.round(c.base / 100)).padStart(3, '0') : '')).join(' ') || (m.rawOb.includes('CAVOK') ? 'CAVOK' : ''),
+      tt: m.temp != null ? `${m.temp}/${m.dewp ?? '?'}` : '', qnh: m.altim != null ? Math.round(m.altim) : '',
+    } : { vw: '', visi: '', clouds: '', tt: '', qnh: '' };
+    const infoBox = (t, label) => {
+      const mm = fmtMetar(t.m), v = t.v || {};
+      const atis = (v.freqs || []).find((x) => /^ATIS/.test(x));
+      return [
+        [{ content: `${label} ${t.id}`, colSpan: 2, styles: { fillColor: [220, 236, 246], fontStyle: 'bold' } }],
+        ['INFO', atis ? atis.replace(/^ATIS : /, 'ATIS ') : (t.m && t.m.icaoId !== t.id ? `METAR ${t.m.icaoId}` : '')],
+        ['RWY', t.rw ? `QFU ${t.rw.best.qfu}°${t.len ? ` · ${t.len} m${t.grass ? ' herbe' : ''}` : ''}` : ''],
+        ['VW', mm.vw], ['VISI', mm.visi], ['Nuages', mm.clouds], ['TT/TD', mm.tt], ['QNH', String(mm.qnh)],
+        ['Alt. AD', v.alt != null ? `${v.alt} ft` : ''], ['TDP', (v.tdp || [])[0] || ''],
+      ];
+    };
+    const leftW = 62;
+    table(null, infoBox(b.depInfo, 'DÉPART'), { x: M, width: leftW, size: 7.5, keepY: true, at: { columnStyles: { 0: { cellWidth: 14, fontStyle: 'bold' } } } });
+    const yInfo2 = doc.lastAutoTable.finalY + 3;
+    table(null, infoBox(b.arrInfo, 'ARRIVÉE'), { x: M, y: yInfo2, width: leftW, size: 7.5, keepY: true, at: { columnStyles: { 0: { cellWidth: 14, fontStyle: 'bold' } } } });
+    const yLeftEnd = doc.lastAutoTable.finalY;
+
+    // tableau principal : points / branches
+    const depFreqs = ((b.depInfo.v && b.depInfo.v.freqs) || []).join('\n');
+    const arrFreqs = ((b.arrInfo.v && b.arrInfo.v.freqs) || []).join('\n');
+    const freqTxt = (lg) => {
+      const lines = lg.airspaces.map((s) => `${s.name} (${s.cls}) ${s.lower}-${s.upper} : ${s.call} ${s.freq}`);
+      lg.ceilings.forEach((s) => lines.push(`plancher ${s.name} ${s.lower} (${s.call} ${s.freq})`));
+      return lines.join('\n') || 'Classe G - A/A 123.500 / SIV';
+    };
+    let fuelLeft = b.reqFuel;
+    const body = [];
+    const ptRow = (id, i) => {
+      const isDt = id.startsWith('DT'), a = A.aptByIcao[id];
+      const name = isDt ? `${id} (${b.pts[i][0].toFixed(3)} ${b.pts[i][1].toFixed(3)})` : `${id}${a ? ' ' + a.name : ''}`;
+      const req = `${Math.max(0, fuelLeft)} L`;
+      const freqs = i === 0 ? depFreqs : i === b.pts.length - 1 ? arrFreqs : (isDt ? b.detours.find((d) => d.id === id).around ? `contournement ${b.detours.find((d) => d.id === id).around}` : '' : '');
+      const hEst = i === 0 ? utc(b.depT) : utc(b.legs[i - 1].eto);
+      return ['', { content: name, styles: { fontStyle: 'bold', fillColor: [235, 244, 250] } }, '', '', { content: hEst, styles: { fontStyle: 'bold' } }, '', req, '', freqs];
+    };
+    b.ids.forEach((id, i) => {
+      body.push(ptRow(id, i));
+      const lg = b.legs[i];
+      if (lg) {
+        fuelLeft -= lg.fuel;
+        body.push([lg.safe ? String(lg.safe.alt) : '', `Rm ${r3(lg.tm)}°  Cm ${r3(lg.hm)}°  (vent ${lg.wind ? r3(lg.wind.dir) + '/' + Math.round(lg.wind.spd) : '-'}, Vs ${Math.round(lg.gs)})`,
+          lg.dist.toFixed(0), `${lg.min}'`, '', '', `${lg.fuel} L`, '', freqTxt(lg)]);
+      }
+    });
+    body.push([{ content: 'Totaux', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } }, b.totDist.toFixed(0), `${b.totMin}'`, utc(b.eta), '', `${b.totFuel} L`, '', `Étape ${b.totFuel} L + dégt ${b.altLeg ? b.altLeg.fuel : 0} L + RF ${b.resFuel} L = ${b.reqFuel} L requis · à bord ${b.loaded} L`]);
+    if (b.altLeg) {
+      const av = b.altInfo && b.altInfo.v;
+      body.push([{ content: 'DÉROUTEMENT', colSpan: 9, styles: { fillColor: [255, 236, 210], fontStyle: 'bold' } }]);
+      body.push(['', `${b.f.arr} -> ${b.altLeg.to} : Rm ${r3(b.altLeg.tm)}°`, b.altLeg.dist.toFixed(0), `${b.altLeg.min}'`, '', '', `${b.altLeg.fuel} L`, '', ((av && av.freqs) || []).join('\n')]);
+    }
+    table(['Alti sécu', 'WPT / route', 'Dist NM', 'Tps vol', 'H est.', 'H réelle', 'Carbu requis', 'Réel', 'Fréquences / espaces traversés'],
+      body, {
+        x: M + leftW + 3, y: 18, size: 7, pad: .9, at: {
+          columnStyles: { 0: { cellWidth: 12, halign: 'center' }, 1: { cellWidth: 52 }, 2: { cellWidth: 10, halign: 'center' }, 3: { cellWidth: 11, halign: 'center' }, 4: { cellWidth: 12, halign: 'center' }, 5: { cellWidth: 12 }, 6: { cellWidth: 14, halign: 'center' }, 7: { cellWidth: 10 } },
+        },
+      });
+    y = Math.max(y, yLeftEnd + 4);
+    para(`Croisière ${b.f.ft} ft · ${b.f.rg.name} : Vp ${b.f.tas} kt, ${b.f.ff} L/h · Rm/Cm magnétiques (déclinaison ${b.varDeg.toFixed(1)}°). Alti sécu = relief max ±5 NM + 1000 ft (hors obstacles : voir carte). Temps et carburant arrondis comme le log ACB (+${b.f.T.climb.extraMin} min / +${b.f.T.climb.extraFuel} L en 1re branche).`, { size: 7, color: [90, 90, 90] });
+    para(`Espaces/fréquences : ${b.aspSource || 'OpenAir FFVP'} + SIV eAIP ENR 2.2 - données non officielles, vérifier sur la carte OACI et les VAC.`, { size: 7, color: [90, 90, 90] });
+
+    // page 2 du log : masse & centrage, performances, carburant
+    newPage('landscape', 'LOG DE NAVIGATION - MASSE, CENTRAGE ET PERFORMANCES');
+    const mb = b.mb;
+    table(['Élément', 'Masse (kg)', 'Bras (m)', 'Moment'], mb.rows.map((r) => [r[0], r[1].toFixed(0), r[2].toFixed(3), (r[1] * r[2]).toFixed(1)]).concat([
+      [{ content: 'Total décollage', styles: { fontStyle: 'bold' } }, { content: mb.mass.toFixed(0), styles: { fontStyle: 'bold' } }, { content: mb.cg.toFixed(3), styles: { fontStyle: 'bold' } }, mb.mom.toFixed(1)],
+      ['MTOW / marge', `${b.f.T.mtow} / ${Math.round(b.f.T.mtow - mb.mass)}`, mb.inEnv(mb.cg, mb.mass) ? 'Centrage OK' : 'HORS LIMITES', ''],
+      ['Masse à l\'atterrissage (est.)', b.landMass.toFixed(0), '', ''],
+    ]), { x: M, width: 125, size: 8, keepY: true });
+    const yMb = doc.lastAutoTable.finalY;
+    // enveloppe de centrage
+    const gx = M + 132, gy = 22, gw = 70, gh = 55;
+    const env = b.f.T.envelope, arms = env.map((p) => p[0]), masses = env.map((p) => p[1]).filter((m) => m > 0);
+    const aMin = Math.min(...arms) - 0.03, aMax = Math.max(...arms) + 0.03, mMin = Math.min(...masses) - 150, mMax = b.f.T.mtow + 30;
+    const X = (a) => gx + (a - aMin) / (aMax - aMin) * gw, Y = (m) => gy + gh - (Math.max(mMin, m) - mMin) / (mMax - mMin) * gh;
+    doc.setDrawColor(150); doc.setLineWidth(.2); doc.rect(gx, gy, gw, gh);
+    doc.setDrawColor(0, 102, 153); doc.setLineWidth(.6);
+    const envPts = env.map((p) => [X(p[0]), Y(p[1])]);
+    for (let i = 0; i < envPts.length - 1; i++) doc.line(envPts[i][0], envPts[i][1], envPts[i + 1][0], envPts[i + 1][1]);
+    const ptsMb = [[mb.cg, mb.mass, 'TO'], [(mb.mom - b.totFuel * b.f.T.fuel.density * b.f.T.fuel.tanks[0].arm) / b.landMass, b.landMass, 'LDG']];
+    ptsMb.forEach(([a, m, l]) => { doc.setFillColor(l === 'TO' ? 220 : 30, l === 'TO' ? 30 : 140, 30); doc.circle(X(a), Y(m), 1.1, 'F'); doc.setFontSize(6.5); doc.text(l, X(a) + 1.5, Y(m) - 1); });
+    doc.line(X(ptsMb[0][0]), Y(ptsMb[0][1]), X(ptsMb[1][0]), Y(ptsMb[1][1]));
+    doc.setFontSize(6.5); doc.setTextColor(90);
+    doc.text(latin(`Enveloppe de centrage ${b.f.T.label} (bras m / masse kg)`), gx, gy - 1.5);
+    doc.text(aMin.toFixed(2), gx, gy + gh + 3); doc.text(aMax.toFixed(2), gx + gw, gy + gh + 3, { align: 'right' });
+    doc.text(String(Math.round(mMax)), gx - 1, gy + 2, { align: 'right' }); doc.text(String(Math.round(mMin)), gx - 1, gy + gh, { align: 'right' });
+    doc.setTextColor(0);
+    // vitesses
+    const sp = b.f.T.speeds;
+    table(['Vitesses', 'kt'], Object.entries(sp).map(([k, v]) => [k, String(v)]), { x: M + 210, y: 18, width: 67, size: 7.5, keepY: true });
+    y = Math.max(yMb, gy + gh + 6, doc.lastAutoTable.finalY) + 4;
+    // carburant / autonomie
+    const tanks = b.f.T.fuel.tanks;
+    const yFuelStart = y;
+    table(['Carburant', 'Valeur'], [
+      ['Type', b.f.T.fuel.name], ['Capacité', tanks.map((t) => `${t.name} ${t.cap} L`).join(' + ')],
+      ['À bord au départ', `${b.loaded} L (${(b.loaded * b.f.T.fuel.density).toFixed(0)} kg)`],
+      ['Étape', `${b.totFuel} L`], ['Dégagement', b.altLeg ? `${b.altLeg.fuel} L (${b.altLeg.to})` : '-'], ['Réserve finale', `${b.resFuel} L (${b.f.res} min)`],
+      [{ content: 'Requis', styles: { fontStyle: 'bold' } }, { content: `${b.reqFuel} L`, styles: { fontStyle: 'bold' } }],
+      ['Marge', `${b.loaded - b.reqFuel} L, soit ${Math.round((b.loaded - b.reqFuel) / b.f.ff * 60)} min`],
+      ['Autonomie totale', hhmm(b.loaded / b.f.ff * 60)], ['Repère', `1 L = ${b.f.T.minPerLitre} min`],
+    ], { x: M, width: 110, size: 8, keepY: true });
+    const yFuel = doc.lastAutoTable.finalY;
+    // performances décollage
+    const perfRow = (t) => t ? [t.id, `${t.elev} ft`, `${Math.round(t.temp)}°C`, t.grass ? 'herbe' : 'dur', t.len ? `${t.len} m` : '?', `${t.tod} m`,
+      t.rw ? `QFU ${t.rw.best.qfu}° : ${t.rw.best.head != null ? `${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, travers ${Math.round(t.rw.best.cross)} kt` : 'vent ?'}` : '-'] : null;
+    table(['Terrain', 'Alt.', 'Temp.', 'Piste', 'Longueur', 'Décollage 15 m (est.)', 'Piste probable / vent'],
+      [perfRow(b.depInfo), perfRow(b.arrInfo), perfRow(b.altInfo)].filter(Boolean), { x: M + 115, y: yFuelStart, size: 7.5, keepY: true });
+    y = Math.max(yFuel, doc.lastAutoTable.finalY) + 3;
+    para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur) / ${b.f.T.takeoff.grass} m (herbe), majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
+
+    // ---------------------------------------------------------------- 2. BRIEFINGS DÉPART / ARRIVÉE (portrait)
+    const briefTerrain = (t, kind) => {
+      newPage('portrait', `BRIEFING ${kind}`);
+      const v = t.v || {};
+      h2(`${kind} : ${t.id} ${t.a ? t.a.name : ''}`);
+      if (!t.v) para('Carte VAC non disponible (terrain privé, ULM ou hors AIP) : se renseigner auprès de l\'exploitant.', { color: [170, 40, 0] });
+      const m = t.m;
+      const when = kind === 'DÉPART' ? `Départ prévu ${utc(b.depT)}${b.sunDep ? ` (lever du soleil ${utc(b.sunDep.rise)})` : ''}` : `Arrivée estimée ${utc(b.eta)}${b.sun ? ` (coucher du soleil ${utc(b.sun.set)}, nuit aéro ${utc(new Date(b.sun.set.getTime() + 30 * 6e4))})` : ''}`;
+      para(when, { bold: true });
+      if (m) para(`${m.icaoId !== t.id ? `METAR le plus proche (${m.icaoId}) : ` : ''}${m.rawOb}`, { mono: true });
+      const taf = A.tafs[t.id] || (m && A.tafs[m.icaoId]);
+      if (taf) para(taf.rawTAF, { mono: true, size: 7.5 });
+      const rows = [];
+      rows.push(['Statut', [v.cap ? 'Ouvert à la CAP' : null, v.restreint ? 'Usage restreint' : null, v.prive ? 'Usage privé' : null, v.vfr ? 'Atterrissage à vue' : null].filter(Boolean).join(' · ') || '-']);
+      rows.push(['Altitude terrain', v.alt != null ? `${v.alt} ft (QNH-QFE ≈ ${v.hpa} hPa)` : '-']);
+      rows.push(['Pistes', [(v.qfu || []).map((q) => q + '°').join(' / '), (v.rwy || []).join(', '), (v.surface || []).join(' / ')].filter(Boolean).join(' · ') || '-']);
+      if (t.rw) rows.push(['Piste probable', `QFU ${t.rw.best.qfu}° — ${t.rw.best.head != null ? `vent de ${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, traversier ${Math.round(t.rw.best.cross)} kt (max démontré ${b.f.T.speeds['Vw 90° max']} kt)` : 'vent inconnu'}`]);
+      rows.push(['Fréquences', (v.freqs || []).join('\n') || 'A/A 123.500 si non publiée']);
+      rows.push(['Tour de piste', (v.tdp || []).join(' ; ') || 'voir VAC']);
+      rows.push(['Moyens radio', (v.nav || []).join(', ') || '-']);
+      rows.push(['Espaces autour (VAC)', (v.espaces || []).join('\n') || '-']);
+      rows.push(['Obstacles (VAC)', (v.obst || []).join('\n') || '-']);
+      if (kind === 'DÉPART') {
+        rows.push(['Décollage (estimé)', `${t.tod} m (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
+        const l0 = b.legs[0];
+        rows.push(['Sortie / 1re branche', `Rm ${r3(l0.tm)}° vers ${l0.to}, ${l0.dist.toFixed(0)} NM, montée vers ${b.f.ft} ft (Vy ${b.f.T.speeds.Vy} kt), alti sécu ${l0.safe ? l0.safe.alt + ' ft' : '?'}`]);
+        rows.push(['Premiers contacts', l0.airspaces.slice(0, 4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
+      } else {
+        const lN = b.legs[b.legs.length - 1];
+        rows.push(['Arrivée par', `Rm ${r3(lN.tm)}° depuis ${lN.from} — descendre pour l'altitude du tour de piste (${(v.tdp || [])[0] || 'voir VAC'})`]);
+        rows.push(['Derniers contacts', lN.airspaces.slice(-4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
+        rows.push(['Carburant à l\'arrivée', `${b.loaded - b.totFuel} L estimés (réserve + dégagement requis : ${b.resFuel + (b.altLeg ? b.altLeg.fuel : 0)} L)`]);
+        rows.push(['Vitesses d\'approche', Object.entries(b.f.T.speeds).filter(([k]) => /Vapp|Vatt/.test(k)).map(([k, s]) => `${k} : ${s} kt`).join(' · ')]);
+        if (b.altLeg) rows.push(['Dégagement', `${b.altLeg.to} : Rm ${r3(b.altLeg.tm)}°, ${b.altLeg.dist.toFixed(0)} NM, ${b.altLeg.min} min, ${b.altLeg.fuel} L`]);
+      }
+      table(['Élément', 'Information'], rows, { size: 8, at: { columnStyles: { 0: { cellWidth: 38, fontStyle: 'bold' } } } });
+      const own = kind === 'DÉPART' ? t.cons.dep : t.cons.arr;
+      h2(`Consignes de la VAC pour le ${kind.toLowerCase()}`);
+      if (own.length) own.forEach((s) => para('- ' + s, { size: 8.5, gap: .6 })); else para('Pas de consigne spécifique extraite : lire la VAC.', { size: 8.5 });
+      if (t.cons.gen.length) { h2('Consignes générales et dangers (VAC)'); t.cons.gen.forEach((s) => para('- ' + s, { size: 8.2, gap: .5 })); }
+      if (t.infos.length) { h2('Informations pratiques (VAC)'); t.infos.forEach((s) => para('- ' + s, { size: 7.8, gap: .4 })); }
+      if (t.notams.length) {
+        h2(`NOTAM ${t.id} (${t.notams.length})`);
+        table(['Réf.', 'Validité', 'Texte'], t.notams.map((n) => [n.ref, `${A.fmtT(n.from)}\n${A.fmtT(n.to)}`, n.efr || n.e || '']), { size: 7, at: { columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 24 } } } });
+      } else para(`Aucun NOTAM ${t.id} sur la période du vol.`, { size: 8 });
+      const cams = kind === 'DÉPART' ? b.cams.dep : b.cams.arr;
+      if (cams.length) { h2('Webcams à proximité'); cams.forEach((c) => para(`- ${c.s.n} (${c.d.toFixed(0)} km) : ${c.s.u}`, { size: 7.5, gap: .3 })); }
+      if (t.v) para(`VAC officielle (cycle ${b.vacCycle || '?'}) : ${t.v.url}`, { size: 7.5, color: [0, 80, 160] });
+    };
+    progress('PDF : briefings départ / arrivée…');
+    briefTerrain(b.depInfo, 'DÉPART');
+    briefTerrain(b.arrInfo, 'ARRIVÉE');
+    if (b.altInfo) briefTerrain(b.altInfo, 'DÉGAGEMENT');
+
+    // ---------------------------------------------------------------- 3. ROUTE, MÉTÉO, NOTAM, SUP AIP, AZBA
+    newPage('portrait', 'BRIEFING ROUTE');
+    const al = alertsOf(b);
+    h2('Points d\'attention');
+    if (al.length) al.forEach((a) => para('- ' + a, { color: [170, 40, 0] })); else para('Aucune alerte majeure détectée automatiquement.');
+    progress('PDF : croquis…');
+    drawSketch(doc, b, M, y + 1, W - 2 * M, 110, latin); y += 115;
+    if (b.detours.length) {
+      h2('Points de contournement');
+      table(['Point', 'Position', 'Contourne'], b.detours.map((d) => [d.id, `${d.p[0].toFixed(4)} ${d.p[1].toFixed(4)}`, d.around]), { size: 8 });
+    }
+    h2('Météo en route');
+    if (b.winds) para(`Vent prévu ${b.winds[0].lv} hPa (Open-Meteo) : ${b.legs.map((l) => `${l.from}-${l.to} ${r3(l.wind.dir)}°/${Math.round(l.wind.spd)} kt ${Math.round(l.wind.t)}°C`).join(' · ')}. Isotherme 0° ~${Math.round((b.winds[0].iso || 0) * 3.281 / 100) * 100} ft.`, { size: 8 });
+    else para(b.windErr || '', { size: 8 });
+    b.wxNear.forEach((x) => para(`${x.m.rawOb}  [${x.m.fltCat || '?'}] (${x.r.d.toFixed(0)} NM)`, { mono: true, size: 7.3, gap: .4 }));
+    para('Compléter avec TEMSI / WINTEM / prévisions officielles sur aviation.meteo.fr.', { size: 7.5, color: [90, 90, 90] });
+    progress('PDF : NOTAM…');
+    h2(`NOTAM en route (couloir ±${b.f.cor} NM, collecte ${b.notamGenerated ? b.notamGenerated.slice(0, 16).replace('T', ' ') + 'Z' : '?'})`);
+    const nRow = (n, extra = '') => [n.ref, `${A.fmtT(n.from)}\n${A.fmtT(n.to)}`, `${A.fl(n.lower)}-${A.fl(n.upper)}${extra}`, n.efr || n.e || ''];
+    const nCols = { columnStyles: { 0: { cellWidth: 17 }, 1: { cellWidth: 23 }, 2: { cellWidth: 21 } } };
+    if (b.enroute.length) table(['Réf.', 'Validité', 'Niveaux', 'Texte'], b.enroute.map((x) => nRow(x.n, `\nà ${x.along.toFixed(0)} NM`)), { size: 7, at: nCols }); else para('Aucun.', { size: 8 });
+    if (b.obst.length) { para(`Obstacles (${b.obst.length})`, { bold: true }); table(['Réf.', 'Validité', 'Niveaux', 'Texte'], b.obst.map((x) => nRow(x.n, `\nà ${x.along.toFixed(0)} NM`)), { size: 6.5, at: nCols }); }
+    if (b.general.length) { para(`NOTAM de portée FIR (${b.general.length})`, { bold: true }); table(['Réf.', 'Validité', 'Niveaux', 'Texte'], b.general.map((n) => nRow(n)), { size: 6.5, at: nCols }); }
+    h2('SUP AIP');
+    if (b.sups.length) table(['SUP', 'Titre', 'Validité', 'Dist.'], b.sups.map((x) => [x.s.num, x.s.title, `${x.s.from || '?'} -> ${x.s.to || '?'}`, `${x.d.toFixed(0)} NM`]), { size: 7.5, at: { columnStyles: { 0: { cellWidth: 17 }, 2: { cellWidth: 32 }, 3: { cellWidth: 14 } } } });
+    else para('Aucun SUP AIP localisé près de la route (localisation d\'après les titres : voir la liste du SIA).', { size: 8 });
+    h2('AZBA (RTBA) et zones P / R / D');
+    if (b.rtba.length) table(['Zone RTBA', 'Limites', 'Position', 'Créneaux du jour (UTC)', 'Conflit'], b.rtba.map((r) => [`${r.z.id} ${r.z.name}`, `${r.z.lower} - ${r.z.upper}`, r.crossed ? 'traversée' : `à ${r.d.toFixed(0)} NM`, r.slots.join(', ') || (b.azbaKnown ? 'non active' : 'inconnu'), r.conflict && r.crossed ? 'OUI' : '-']), { size: 7.5 });
+    else para('Aucune zone RTBA dans le couloir.', { size: 8 });
+    const others = b.zones.filter((x) => !x.z.rtba);
+    if (others.length) table(['Zone', 'Limites', 'Position', 'Remarques'], others.map((x) => [`${x.z.id} ${x.z.name}`, `${x.z.lower} - ${x.z.upper}`, (x.crossed ? 'TRAVERSÉE' : `à ${x.d.toFixed(0)} NM`) + (x.below ? '' : '\nhors altitude'), (x.z.rmk || '').slice(0, 240)]), { size: 6.8, at: { columnStyles: { 0: { cellWidth: 36 }, 1: { cellWidth: 30 }, 2: { cellWidth: 20 } } } });
+
+    // pied de page
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+      doc.setFontSize(6.5); doc.setTextColor(110);
+      doc.text(latin('Outil d\'aide - ne remplace pas la préparation réglementaire (SOFIA, SIA, aviation.meteo.fr, VAC officielles, manuel de vol).'), M, ph - 5);
+      doc.text(`${i}/${n}`, pw - M, ph - 5, { align: 'right' });
+    }
+    // première page vide créée par jsPDF ? (non : la 1re page est le log)
+
+    // ---------------------------------------------------------------- 4. VAC jointes (pdf-lib)
+    let bytes = doc.output('arraybuffer');
+    const vacIds = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && VAC.data[v]);
+    const failed = [];
+    if (window.PDFLib && vacIds.length) {
+      try {
+        const out = await PDFLib.PDFDocument.load(bytes);
+        for (const id of vacIds) {
+          progress(`PDF : ajout de la VAC ${id}…`);
+          try {
+            const r = await fetch(VAC.data[id].url); if (!r.ok) throw new Error(r.status);
+            const src = await PDFLib.PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true });
+            (await out.copyPages(src, src.getPageIndices())).forEach((p) => out.addPage(p));
+          } catch (e) { failed.push(id); }
+        }
+        bytes = await out.save();
+      } catch (e) { console.warn('pdf-lib', e); }
+    }
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const name = `briefing_${b.userIds.join('-')}_${b.f.ac.reg}_${b.depT.toISOString().slice(0, 10)}.pdf`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => window.open(url, '_blank'), 300);
+    if (failed.length) $('#pf-out').insertAdjacentHTML('beforeend', `<div class="warn">VAC ${failed.join(', ')} non jointes ${A.IS_EXT ? '' : '(le SIA bloque le téléchargement depuis une page web : l\'extension Chrome les joint automatiquement)'} — liens dans le PDF.</div>`);
+  }
+
+  // Croquis vectoriel
+  function drawSketch(doc, b, x0, y0, w, h, latin) {
+    const pts = b.pts.concat(b.altLeg ? [[A.aptByIcao[b.altLeg.to].la, A.aptByIcao[b.altLeg.to].lo]] : []);
+    let s = Math.min(...pts.map((p) => p[0])), n = Math.max(...pts.map((p) => p[0])), wl = Math.min(...pts.map((p) => p[1])), e = Math.max(...pts.map((p) => p[1]));
+    const k = Math.cos(rad((s + n) / 2)), padLa = Math.max(0.25, (n - s) * 0.12), padLo = Math.max(0.35, (e - wl) * 0.12);
+    s -= padLa; n += padLa; wl -= padLo; e += padLo;
+    const sc = Math.min(w / ((e - wl) * k), h / (n - s));
+    const cx = x0 + (w - (e - wl) * k * sc) / 2, cy = y0 + (h - (n - s) * sc) / 2;
+    const pr = (p) => [cx + (p[1] - wl) * k * sc, cy + (n - p[0]) * sc];
+    const path = (ring, style) => { const q = ring.map(pr); const sg = []; for (let i = 1; i < q.length; i++) sg.push([q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]]); if (sg.length) doc.lines(sg, q[0][0], q[0][1], [1, 1], style, true); };
+    doc.setFillColor(214, 234, 248); doc.rect(x0, y0, w, h, 'F');
+    doc.saveGraphicsState(); doc.rect(x0, y0, w, h, null); doc.clip(); doc.discardPath();
+    doc.setLineWidth(0.2); doc.setDrawColor(120, 150, 170); doc.setFillColor(245, 245, 240);
+    for (const f of (window.BASEMAP && window.BASEMAP.features) || []) {
+      if (f.properties.k === 'reg') continue;
+      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+      for (const pl of polys) path(pl[0].map((c) => [c[1], c[0]]), 'FD');
+    }
+    const drawn = new Set();
+    b.legs.forEach((lg) => lg.airspaces.forEach((sp) => {
+      if (drawn.has(sp) || sp.kind === 'SIV') return; drawn.add(sp);
+      doc.setDrawColor(0, 120, 200); doc.setLineWidth(0.25); doc.setLineDashPattern([1, 1], 0); path(sp.poly, 'S'); doc.setLineDashPattern([], 0);
+    }));
+    for (const x of b.zones) {
+      if (x.z.rtba) { doc.setDrawColor(220, 30, 30); doc.setFillColor(255, 220, 220); }
+      else if (x.z.type === 'P') { doc.setDrawColor(200, 0, 60); doc.setFillColor(255, 200, 220); }
+      else if (x.z.type === 'D') { doc.setDrawColor(230, 130, 0); doc.setFillColor(255, 236, 205); }
+      else { doc.setDrawColor(140, 60, 200); doc.setFillColor(240, 225, 255); }
+      doc.setLineWidth(0.3); path(x.z.poly, 'FD');
+      const c = pr([x.z.poly.reduce((a, p) => a + p[0], 0) / x.z.poly.length, x.z.poly.reduce((a, p) => a + p[1], 0) / x.z.poly.length]);
+      doc.setFontSize(5.5); doc.setTextColor(120, 0, 0); doc.text(latin(x.z.id), c[0], c[1], { align: 'center' });
+    }
+    doc.setDrawColor(255, 0, 180); doc.setLineWidth(0.9);
+    for (let i = 0; i < b.pts.length - 1; i++) { const a = pr(b.pts[i]), c = pr(b.pts[i + 1]); doc.line(a[0], a[1], c[0], c[1]); }
+    if (b.altLeg) { const a = pr(b.pts[b.pts.length - 1]), c = pr(pts[pts.length - 1]); doc.setLineWidth(0.4); doc.setLineDashPattern([1.5, 1.2], 0); doc.line(a[0], a[1], c[0], c[1]); doc.setLineDashPattern([], 0); }
+    doc.setFontSize(7.5); doc.setTextColor(0);
+    pts.forEach((p, i) => {
+      const q = pr(p), id = i < b.ids.length ? b.ids[i] : b.altLeg.to;
+      doc.setFillColor(id.startsWith('DT') ? 230 : 255, id.startsWith('DT') ? 170 : 0, id.startsWith('DT') ? 0 : 180); doc.circle(q[0], q[1], 1.2, 'F');
+      doc.setFont('helvetica', 'bold'); doc.text(id, q[0] + 2, q[1] - 1.5);
+    });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(30, 110, 30);
+    for (const a of A.APTS) {
+      if (b.ids.includes(a.icao)) continue;
+      const q = pr([a.la, a.lo]);
+      if (q[0] < x0 || q[0] > x0 + w || q[1] < y0 || q[1] > y0 + h || routeDist([a.la, a.lo], b.pts).d > b.f.cor * 1.5) continue;
+      doc.setDrawColor(30, 110, 30); doc.setLineWidth(0.3); doc.circle(q[0], q[1], 0.7, 'S'); doc.text(a.icao, q[0] + 1.2, q[1] + 0.6);
+    }
+    doc.restoreGraphicsState();
+    doc.setTextColor(0); doc.setDrawColor(0, 102, 153); doc.setLineWidth(0.3); doc.rect(x0, y0, w, h, 'S');
+    doc.setFontSize(6.3); doc.setTextColor(90);
+    doc.text(latin('Croquis indicatif - rose : route (jaune : contournement) · rouge : RTBA · framboise : P · orange : D · violet : R · pointillés bleus : CTR/TMA traversées'), x0 + 1.5, y0 + h - 1.5);
+    doc.setTextColor(0);
+  }
+})();

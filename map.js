@@ -577,6 +577,15 @@
   $('#btn-notam-list').addEventListener('click', showNotamList);
   $('#btn-sup-list').addEventListener('click', showSupList);
 
+  // ---------- API interne pour le module de préparation de vol (flightprep.js) ----------
+  window.AWW = {
+    map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
+    metars, tafs, aptByIcao, APTS, SOURCES,
+    get NOTAM() { return NOTAM; }, get SUP() { return SUP; },
+    showPanel(title, html) { showList(title, html); },
+    detailBody, detail,
+  };
+
   // ---------- Démarrage ----------
   drawAerodromes();
   loadMetarTaf();

@@ -283,11 +283,261 @@ def collect_supaip():
         fallback('supaip.json')
 
 
+# ---------------------------------------------------------------- AIP : cycle AIRAC, zones P/R/D, VAC
+SIA_DVD = 'https://www.sia.aviation-civile.gouv.fr/media/dvd'
+MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+
+def current_cycle():
+    """Renvoie (dossier eAIP, date AIRAC ISO) du cycle publié en vigueur."""
+    from datetime import date, timedelta
+    ref = date(2024, 1, 25)
+    n = (NOW.date() - ref).days // 28
+    for k in (n, n - 1):
+        d = ref + timedelta(days=28 * k)
+        folder = f'eAIP_{d.day:02d}_{MONTHS[d.month - 1]}_{d.year}'
+        try:
+            req = urllib.request.Request(f'{SIA_DVD}/{folder}/FRANCE/AIRAC-{d.isoformat()}/html/eAIP/FR-ENR-5.1-fr-FR.html',
+                                         method='HEAD', headers={'User-Agent': UA})
+            with opener.open(req, timeout=30) as r:
+                if r.status == 200:
+                    return folder, d.isoformat()
+        except Exception:  # noqa: BLE001
+            continue
+    raise RuntimeError('cycle AIRAC introuvable')
+
+
+def dms(s):
+    m = re.match(r"(\d{2,3})°(\d{2})'(\d{2}(?:\.\d+)?)\"([NSEW])", s.strip())
+    if not m:
+        return None
+    v = int(m.group(1)) + int(m.group(2)) / 60 + float(m.group(3)) / 3600
+    return round(-v if m.group(4) in 'SW' else v, 5)
+
+
+COORD = r"(\d{2}°\d{2}'\d{2}(?:\.\d+)?\"[NS])\s*,\s*(\d{3}°\d{2}'\d{2}(?:\.\d+)?\"[EW])"
+
+
+def _dest(la, lo, brg, dist_nm):
+    import math
+    R = 3440.065
+    d = dist_nm / R
+    la1, lo1, b = map(math.radians, (la, lo, brg))
+    la2 = math.asin(math.sin(la1) * math.cos(d) + math.cos(la1) * math.sin(d) * math.cos(b))
+    lo2 = lo1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(la1), math.cos(d) - math.sin(la1) * math.sin(la2))
+    return [round(math.degrees(la2), 5), round(math.degrees(lo2), 5)]
+
+
+def _brg(la1, lo1, la2, lo2):
+    import math
+    y = math.sin(math.radians(lo2 - lo1)) * math.cos(math.radians(la2))
+    x = (math.cos(math.radians(la1)) * math.sin(math.radians(la2)) -
+         math.sin(math.radians(la1)) * math.cos(math.radians(la2)) * math.cos(math.radians(lo2 - lo1)))
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def _to_nm(v, u):
+    v = float(v.replace(',', '.'))
+    return v if u == 'NM' else v / 1.852 if u == 'km' else v / 1852
+
+
+def parse_geometry(text):
+    """Polygone (sommets + arcs + cercles) décrit en texte eAIP. Renvoie (points, fin du texte géométrique)."""
+    pts, pos, pending_arc = [], 0, None
+    tok = re.compile(r'(?P<c>' + COORD + r')|(?P<arc>arc (?P<dir>horaire|anti-horaire) de (?P<r>[\d.,]+) ?(?P<u>NM|km|m) de rayon centré sur )'
+                     r'|(?P<circ>[Cc]ercle de (?P<cr>[\d.,]+) ?(?P<cu>NM|km|m) de rayon centré sur )')
+    end = 0
+    for m in tok.finditer(text):
+        if m.start() - end > 80 and pts:
+            break
+        end = m.end()
+        if m.group('circ'):
+            c = re.match(r'\s*' + COORD, text[m.end():])
+            if c:
+                la, lo = dms(c.group(1)), dms(c.group(2))
+                r = _to_nm(m.group('cr'), m.group('cu'))
+                pts = [_dest(la, lo, a, r) for a in range(0, 360, 15)]
+                end = m.end() + c.end()
+            break
+        if m.group('arc'):
+            pending_arc = (m.group('dir'), _to_nm(m.group('r'), m.group('u')))
+            continue
+        p = [dms(m.group(2)), dms(m.group(3))]
+        if pending_arc and pending_arc[0] != 'C':
+            pending_arc = ('C', pending_arc, p)   # cette coordonnée est le centre de l'arc
+            continue
+        if pending_arc and pts:
+            _, (dirn, r), c = pending_arc
+            a1 = _brg(c[0], c[1], pts[-1][0], pts[-1][1])
+            a2 = _brg(c[0], c[1], p[0], p[1])
+            span = (a2 - a1) % 360 if dirn == 'horaire' else -((a1 - a2) % 360)
+            n = max(2, int(abs(span) / 10))
+            for i in range(1, n):
+                pts.append(_dest(c[0], c[1], a1 + span * i / n, r))
+            pending_arc = None
+        pts.append(p)
+    return pts, end
+
+
+def collect_zones(folder, cycle):
+    """Zones P, R, D de l'ENR 5.1 (géométrie simplifiée aux sommets) dans la zone élargie."""
+    page = get(f'{SIA_DVD}/{folder}/FRANCE/AIRAC-{cycle}/html/eAIP/FR-ENR-5.1-fr-FR.html', timeout=180)
+    rows = re.split(r'(?=<tr[^>]*id="mid--[^"]*TXT_NAME-NOM_USUEL")', page)
+    out = []
+    for blk in rows[1:]:
+        head, _, rest = blk.partition('</tr>')
+        spans = [html.unescape(re.sub(r'<[^>]+>', '', x)).strip() for x in re.findall(r'<span[^>]*>([^<]*)</span>', head)]
+        spans = [s for s in spans if s]
+        if len(spans) < 3 or spans[1] not in ('P', 'R', 'D'):
+            continue
+        typ, num = spans[1], spans[2]
+        name = ' '.join(spans[3:])
+        body = rest.split('TXT_NAME-NOM_USUEL')[0]
+        text = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', body))).replace('’', "'")
+        poly, end = parse_geometry(text)
+        if len(poly) < 3:
+            continue
+        la = sum(p[0] for p in poly) / len(poly)
+        lo = sum(p[1] for p in poly) / len(poly)
+        if not (41.5 < la < 49.5 and -6.5 < lo < 3.5):
+            continue
+        tail = text[end:]
+        m = re.match(r'\s*(.+?)\s*-{4,}\s*(.+?(?:ASFC|AMSL|AGL|SFC|UNL|FL ?\d{2,3}))', tail)
+        upper, lower = (m.group(1).strip(), m.group(2).strip()) if m else ('?', '?')
+        rmk = tail[m.end():] if m else tail
+        rmk = re.split(r'Gestionnaire|Administrator', rmk)[0]
+        rtba = 'très basse altitude' in text or 'RTBA' in text or 'Low flying high speed' in text
+        out.append({'id': f'{typ} {num}', 'type': typ, 'name': name, 'upper': upper[:40], 'lower': lower[:40],
+                    'poly': poly, 'rtba': rtba, 'rmk': rmk.strip()[:500]})
+    print(f'  {len(out)} zones P/R/D dans la zone ({sum(1 for z in out if z["rtba"])} RTBA)')
+    return out
+
+
+def decode_mt(s):
+    return re.sub(r'/MT(\d+)', lambda m: bytes([int(m.group(1))]).decode('cp1252', errors='replace')
+                  if int(m.group(1)) < 256 else '', s)
+
+
+def parse_vac(icao, data):
+    import io
+    import pypdf
+    r = pypdf.PdfReader(io.BytesIO(data))
+    pages = [decode_mt(p.extract_text() or '') for p in r.pages]
+    chart = pages[0] if pages else ''
+    lines = [l.strip() for l in chart.splitlines() if l.strip()]
+    info = {'icao': icao, 'pages': len(pages)}
+    m = re.search(r'ALT AD\s*:\s*(\d+)\s*\((\d+) ?hPa\)', chart)
+    if m:
+        info['alt'], info['hpa'] = int(m.group(1)), int(m.group(2))
+    m = re.search(r'VAR\s*:\s*(-?\d+(?:[.,]\d)?)°\s*([EW])?', chart)
+    if m:
+        v = float(m.group(1).replace(',', '.'))
+        info['var'] = -v if m.group(2) == 'W' else v
+    for k, pat in (('vfr', r'ATTERRISSAGE A VUE'), ('cap', r'Ouvert à la CAP'), ('restreint', r'Usage restreint|Restricted use'),
+                   ('prive', r'Usage privé|Private use')):
+        if re.search(pat, '\n'.join(pages)):
+            info[k] = True
+    freqs = []
+    for l in lines:
+        m = re.match(r'^(APP|TWR|AFIS|A/A|ATIS|INFO|SOL|GND|VDF|CTL|PRE|DEL|SIV)\s*:\s*(.+)$', l)
+        if m and re.search(r'\d{3}\.\d{2,3}', m.group(2)):
+            freqs.append(f'{m.group(1)} : {m.group(2)}')
+    info['freqs'] = list(dict.fromkeys(freqs))
+    rwy = re.search(r'RWY QFU.*?\n(.*?)(?:Aides lumineuses|Lighting|$)', chart, re.S)
+    if rwy:
+        blob = rwy.group(1)
+        info['qfu'] = sorted(set(re.findall(r'\b([0-3]\d0|[0-3]\d[1-9])\b(?! ?x)', blob.split('x')[0])))[:6]
+        info['rwy'] = list(dict.fromkeys(re.findall(r'(\d{3,4} ?x ?\d{2,3})', blob)))[:4]
+        surf = re.findall(r'(Revêtue|Non revêtue|Herbe|Grass|Paved|Unpaved)', blob)
+        if surf:
+            info['surface'] = list(dict.fromkeys(surf))[:2]
+    tdp = re.findall(r'\b(\d{3,4})\((\d{3,4})\)', chart)
+    if tdp:
+        info['tdp'] = [f'{a} ft ({b} ft AAL)' for a, b in dict.fromkeys(tdp)][:3]
+    spaces = []
+    for i, l in enumerate(lines):
+        if re.match(r'^(CTR|TMA|CTA|SIV|RMZ|TMZ|LF-?[RDP] ?\d|[RDP] ?\d{1,3}[A-Z]?\b|ZRT|ZIT)', l) and len(l) < 60:
+            nxt = lines[i + 1] if i + 1 < len(lines) else ''
+            lim = nxt if re.search(r'\d|SFC|FL', nxt) and len(nxt) < 30 else ''
+            spaces.append((l + (' : ' + lim if lim else '')).replace('  ', ' '))
+    info['espaces'] = list(dict.fromkeys(s.rstrip('D').strip() for s in spaces))[:10]
+    nav = re.findall(r'\((?:D|T)\) ?([A-Z]{2,3}) (\d{3}\.\d{1,3})', chart)
+    info['nav'] = [f'{a} {b}' for a, b in dict.fromkeys(nav)][:4]
+    obst = re.findall(r'Obstacles? ?\n?(\d{3,4})\s*\n?(\d{3})° ?(\d+(?:\.\d)?) ?NM', chart)
+    info['obst'] = [f'{a} ft au {b}° {c} NM' for a, b, c in dict.fromkeys(obst)][:5]
+    txt = '\n'.join(pages[1:])
+    cons = re.search(r'Consignes particulières.*?\n(.*?)(?:©|Informations diverses|$)', txt, re.S)
+    if cons:
+        info['consignes'] = re.sub(r'[ \t]+', ' ', cons.group(1)).strip()[:3500]
+    misc = re.search(r'Informations diverses.*?\n(.*?)(?:AMDT|$)', txt, re.S)
+    if misc:
+        info['infos'] = re.sub(r'[ \t]+', ' ', misc.group(1)).strip()[:2500]
+    fuel = re.search(r'(Carburants?[^\n]*\n?[^\n]*)', txt)
+    if fuel:
+        info['carburant'] = re.sub(r'\s+', ' ', fuel.group(1))[:300]
+    return info
+
+
+def collect_aip():
+    print('AIP (cycle AIRAC, zones, VAC)')
+    try:
+        folder, cycle = current_cycle()
+        print('  cycle', cycle, folder)
+    except Exception as e:  # noqa: BLE001
+        print('  cycle : échec', e)
+        fallback('zones.json'); fallback('vac.json')
+        return
+    # Réutilise la version publiée si elle est du même cycle (évite de retélécharger les VAC)
+    if FALLBACK_URL and os.environ.get('FORCE_AIP') != '1':
+        try:
+            prev = json.loads(get(f'{FALLBACK_URL}/data/live/vac.json', timeout=30))
+            prevz = json.loads(get(f'{FALLBACK_URL}/data/live/zones.json', timeout=30))
+            if prev.get('cycle') == cycle and prevz.get('cycle') == cycle:
+                save('vac.json', prev); save('zones.json', prevz)
+                print('  inchangé (même cycle)')
+                return
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        save('zones.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP ENR 5.1',
+                            'data': collect_zones(folder, cycle)})
+    except Exception as e:  # noqa: BLE001
+        print('  zones : échec', e)
+        fallback('zones.json')
+    vac = {}
+    base = f'{SIA_DVD}/{folder}/Atlas-VAC/PDF_AIPparSSection/VAC/AD/AD-2.'
+    for a in aerodromes():
+        icao = a[0]
+        if not icao.startswith('LF'):
+            continue
+        try:
+            req = urllib.request.Request(base + icao + '.pdf', headers={'User-Agent': UA})
+            with opener.open(req, timeout=60) as r:
+                if 'pdf' not in (r.headers.get('Content-Type') or ''):
+                    continue
+                data = r.read()
+            info = parse_vac(icao, data)
+            info['url'] = base + icao + '.pdf'
+            vac[icao] = info
+        except urllib.error.HTTPError:
+            continue
+        except Exception as e:  # noqa: BLE001
+            print('  VAC', icao, 'erreur', e)
+        time.sleep(0.2)
+    print(f'  {len(vac)} cartes VAC analysées')
+    if vac:
+        save('vac.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP — Atlas VAC', 'data': vac})
+    else:
+        fallback('vac.json')
+
+
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
         collect_notam()
     if 'supaip' in what:
         collect_supaip()
+    if 'aip' in what:
+        collect_aip()

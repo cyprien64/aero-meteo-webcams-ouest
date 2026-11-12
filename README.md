@@ -24,9 +24,21 @@ Utilisable de deux façons :
 Clic sur un point → la webcam/la station s'ouvre dans une fenêtre dédiée.
 Clic sur un aérodrome → METAR/TAF décodés, NOTAM, SUP AIP proches, webcams à moins de 25 km, liens meteoblue, Windy, carte OACI, SafeSky…
 
+## Préparation de vol (briefing PDF)
+Bouton **✈️ Préparer un vol** : départ, arrivée, points tournants, dégagement, heure, vitesse, altitude, consommation.
+Le briefing PDF contient :
+- navigation : Rv, Rm, vent prévu au niveau de croisière (Open-Meteo), dérive, Cm, Vs, temps, HEA, carburant, lever/coucher du soleil ;
+- croquis de route avec zones P/R/D et RTBA ;
+- METAR/TAF des terrains et des stations le long de la route ;
+- NOTAM terrains, NOTAM en route (couloir), obstacles, NOTAM de portée FIR ;
+- SUP AIP près de la route ;
+- AZBA : zones RTBA traversées et créneaux d'activation (NOTAM « RTBA ACT ») + zones P/R/D (eAIP ENR 5.1) ;
+- fiche par terrain extraite de la VAC (altitude, pistes, tour de piste, fréquences, espaces, obstacles, carburant, consignes) ;
+- les cartes VAC officielles jointes à la fin (extension Chrome ; sur le site web, liens vers les VAC car le SIA bloque le téléchargement direct).
+
 ## Fonctionnement de la mise à jour
 La GitHub Action `.github/workflows/pages.yml` lance `scripts/collect.py` toutes les 30 min, qui écrit
-`data/live/{metar,taf,notam,supaip}.json`, puis publie le site sur GitHub Pages.
+`data/live/{metar,taf,notam,supaip}.json` (et, une fois par cycle AIRAC, `zones.json` et `vac.json`), puis publie le site sur GitHub Pages.
 (GitHub suspend les tâches planifiées d'un dépôt sans activité depuis 60 jours : il suffit alors de la relancer depuis l'onglet *Actions*.)
 
 ## Installer l'extension

@@ -24,6 +24,7 @@
     </header>
 
     <div id="panel-body">
+      <button id="btn-prep" class="prep-btn">✈️ Préparer un vol (briefing PDF)</button>
       <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
       <ul id="results"></ul>
 
@@ -85,5 +86,9 @@
   <script src="data/basemap.js"></script>
   <script src="data/sources.js"></script>
   <script src="map.js"></script>
+  <script src="lib/pdf/jspdf.umd.min.js"></script>
+  <script src="lib/pdf/jspdf.plugin.autotable.min.js"></script>
+  <script src="lib/pdf/pdf-lib.min.js"></script>
+  <script src="flightprep.js"></script>
 </body>
 </html>

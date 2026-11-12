@@ -298,6 +298,9 @@
         <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
         <label>Avion<select id="pf-reg">${FLEET.map((a) => `<option value="${a.reg}" ${a.reg === reg ? 'selected' : ''}>${a.reg} — ${esc(TYPES[a.type].label)}</option>`).join('')}</select></label>
         <label>Régime<select id="pf-regime">${regimeOptions(reg, f.regime)}</select></label>
+        <label>Immatriculation (si différente)<input id="pf-immat" value="${esc(f.immat || '')}" placeholder="${esc(reg)}"></label>
+        <label>Masse à vide (kg)<input id="pf-empty" type="number" min="100" max="2000" value="${(FLEET.find((x) => x.reg === reg) || {}).empty || ''}"></label>
+        <p class="meta full" id="pf-acnote" style="grid-column:1/-1;margin:0"></p>
         <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${f.ft || 2500}"></label>
         <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${f.res ?? 30}"></label>
         <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${f.m1 ?? 80}"></label>
@@ -315,15 +318,26 @@
       </div>
       <div class="prep-actions">
         <button class="btn primary" id="pf-calc">Calculer la route</button>
-        <button class="btn" id="pf-pdf">📄 Briefing + log de nav (PDF)</button>
+        <button class="btn" id="pf-pdf">📄 Briefing PDF + log Excel</button>
+        <button class="btn" id="pf-xlsx">📊 Log Excel seul</button>
       </div>
       <div class="prep-progress" id="pf-prog"></div>
       <div id="pf-out"></div>`);
-    const syncAux = () => { const ac = FLEET.find((x) => x.reg === $('#pf-reg').value); $('#pf-aux-l').style.display = TYPES[ac.type].fuel.tanks.length > 1 ? '' : 'none'; };
-    $('#pf-reg').addEventListener('change', (e) => { $('#pf-regime').innerHTML = regimeOptions(e.target.value); syncAux(); });
+    const syncAux = () => {
+      const ac = FLEET.find((x) => x.reg === $('#pf-reg').value), T = TYPES[ac.type];
+      $('#pf-aux-l').style.display = T.fuel.tanks.length > 1 ? '' : 'none';
+      $('#pf-immat').placeholder = ac.reg;
+      $('#pf-acnote').textContent = ac.note || T.source ? `ℹ️ ${[ac.note, T.source && 'Données : ' + T.source].filter(Boolean).join(' — ')}` : '';
+    };
+    $('#pf-reg').addEventListener('change', (e) => {
+      $('#pf-regime').innerHTML = regimeOptions(e.target.value);
+      $('#pf-empty').value = (FLEET.find((x) => x.reg === e.target.value) || {}).empty || '';
+      syncAux();
+    });
     syncAux();
     $('#pf-calc').addEventListener('click', () => run(false));
-    $('#pf-pdf').addEventListener('click', () => run(true));
+    $('#pf-pdf').addEventListener('click', () => run('pdf'));
+    $('#pf-xlsx').addEventListener('click', () => run('xlsx'));
     ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-wps'].forEach((s) => $(s).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
   }
   $('#btn-prep').addEventListener('click', openForm);
@@ -334,10 +348,11 @@
       dep: v('#pf-dep').toUpperCase(), arr: v('#pf-arr').toUpperCase(), alt: v('#pf-alt').toUpperCase(), wps: v('#pf-wps').toUpperCase(),
       time: v('#pf-time'), reg: v('#pf-reg'), regime: +v('#pf-regime'), ft: +v('#pf-ft'), res: +v('#pf-res'),
       m1: +v('#pf-m1'), m2: +v('#pf-m2'), m3: +v('#pf-m3'), m4: +v('#pf-m4'), fuel: +v('#pf-fuel'), aux: +v('#pf-aux') || 0,
-      cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'),
+      cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
     };
     store.set('form', { ...f, time: undefined });
-    const ac = FLEET.find((x) => x.reg === f.reg) || FLEET[0];
+    const base = FLEET.find((x) => x.reg === f.reg) || FLEET[0];
+    const ac = { ...base, baseReg: base.reg, reg: f.immat || base.reg, empty: f.empty || base.empty };
     const T = TYPES[ac.type];
     const rg = T.regimes[f.regime] || T.regimes[T.defaultRegime];
     if (T.fuel.tanks.length < 2) f.aux = 0;
@@ -361,10 +376,15 @@
       drawRoute(b);
       out.innerHTML = summaryHtml(b);
       prog.textContent = '';
-      if (makePdf) {
+      if (makePdf === 'pdf' || makePdf === true) {
         prog.textContent = 'Génération du PDF…';
         await buildPdf(b, (t) => { prog.textContent = t; });
-        prog.textContent = 'PDF généré ✔';
+        prog.textContent = 'Génération du log Excel…';
+        try { await buildXlsx(b); prog.textContent = 'PDF + log Excel générés ✔'; } catch (e) { console.warn(e); prog.textContent = 'PDF généré ✔ (log Excel : ' + e.message + ')'; }
+      } else if (makePdf === 'xlsx') {
+        prog.textContent = 'Génération du log Excel…';
+        await buildXlsx(b);
+        prog.textContent = 'Log Excel généré ✔';
       }
     } catch (e) {
       console.error(e); prog.textContent = '';
@@ -384,10 +404,13 @@
       [`Carburant ${T.fuel.tanks[0].name} (${f.fuel} L)`, f.fuel * d, T.fuel.tanks[0].arm],
     ];
     if (T.fuel.tanks[1] && f.aux) rows.push([`Carburant ${T.fuel.tanks[1].name} (${f.aux} L)`, f.aux * d, T.fuel.tanks[1].arm]);
-    const mass = rows.reduce((s, r) => s + r[1], 0), mom = rows.reduce((s, r) => s + r[1] * r[2], 0);
-    const env = T.envelope.map(([arm, m]) => [arm, m]);
-    const inEnv = (cg, m) => inPolyXY(cg, m, env);
-    return { rows, mass, cg: mom / mass, mom, inEnv, env };
+    const mass = rows.reduce((s, r) => s + r[1], 0);
+    const known = rows.every((r) => r[1] === 0 || typeof r[2] === 'number');
+    const mom = known ? rows.reduce((s, r) => s + r[1] * (r[2] || 0), 0) : null;
+    const env = T.envelope ? T.envelope.map(([arm, m]) => [arm, m]) : null;
+    // centrage non calculable si des bras de levier manquent (avions ajoutés : à compléter avec le manuel de vol)
+    const inEnv = (cg, m) => (cg == null || !env ? true : inPolyXY(cg, m, env));
+    return { rows, mass, cg: known ? mom / mass : null, mom, inEnv, env, known };
   }
 
   async function compute(f, userIds) {
@@ -563,8 +586,8 @@
       const elev = v && v.alt != null ? v.alt : (a && +a.elev) || 0;
       const tIsa = 15 - 2 * elev / 1000, temp = m && m.temp != null ? m.temp : tIsa;
       const factor = (1 + 0.10 * elev / 1000) * (1 + 0.10 * Math.max(0, temp - tIsa) / 10);
-      const base = grass ? f.T.takeoff.grass : f.T.takeoff.hard;
-      const tod = Math.round(base * factor / 10) * 10;
+      const base = f.T.takeoff ? (grass ? (f.T.takeoff.grass || f.T.takeoff.hard * 1.15) : f.T.takeoff.hard) : null;
+      const tod = base ? Math.round(base * factor / 10) * 10 : null;
       const cons = classifyConsignes(v);
       return { id, role, a, v, m, rw, len, grass, elev, temp, tod, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
     };
@@ -613,12 +636,14 @@
     if (b.sunDep && b.depT < new Date(b.sunDep.rise.getTime() - 30 * 6e4)) al.push('Départ avant le jour aéronautique.');
     if (b.loaded < b.reqFuel) al.push(`Carburant insuffisant : ${b.loaded} L à bord pour ${b.reqFuel} L requis (étape + dégagement + réserve).`);
     if (b.mb.mass > b.f.T.mtow) al.push(`Masse au décollage ${Math.round(b.mb.mass)} kg > MTOW ${b.f.T.mtow} kg.`);
-    if (!b.mb.inEnv(b.mb.cg, b.mb.mass)) al.push(`Centrage hors limites au décollage (${b.mb.cg.toFixed(3)} m).`);
+    if (b.mb.cg == null) al.push(`Centrage non calculé : bras de levier ${b.f.T.label} à compléter (manuel de vol / fiche de pesée).`);
+    else if (!b.mb.inEnv(b.mb.cg, b.mb.mass)) al.push(`Centrage hors limites au décollage (${b.mb.cg.toFixed(3)} m).`);
+    if (b.f.ac.note) al.push(`${b.f.ac.reg} : ${b.f.ac.note}. Performances : ${b.f.T.source || 'log ACB'}.`);
     const tanks = b.f.T.fuel.tanks;
-    if (b.f.fuel > tanks[0].cap || (tanks[1] && b.f.aux > tanks[1].cap)) al.push('Quantité de carburant supérieure à la capacité des réservoirs.');
+    if ((tanks[0].cap && b.f.fuel > tanks[0].cap) || (tanks[1] && b.f.aux > tanks[1].cap)) al.push('Quantité de carburant supérieure à la capacité des réservoirs.');
     for (const t of [b.depInfo, b.arrInfo]) {
-      if (t.rw && t.rw.best.cross != null && t.rw.best.cross > b.f.T.speeds['Vw 90° max']) al.push(`${t.id} : vent traversier ${Math.round(t.rw.best.cross)} kt > ${b.f.T.speeds['Vw 90° max']} kt démontré.`);
-      if (t.len && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
+      if (t.rw && t.rw.best.cross != null && b.f.T.speeds['Vw 90° max'] && t.rw.best.cross > b.f.T.speeds['Vw 90° max']) al.push(`${t.id} : vent traversier ${Math.round(t.rw.best.cross)} kt > ${b.f.T.speeds['Vw 90° max']} kt démontré.`);
+      if (t.len && t.tod && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
     }
     b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
@@ -636,10 +661,230 @@
         <td>${l.wind ? `${r3(l.wind.dir)}/${Math.round(l.wind.spd)}` : '–'}</td><td>${r3(l.hm)}°</td><td>${l.min}'</td><td>${l.fuel} L</td></tr>`).join('')}
       <tr><th>Total</th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
-        Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg.toFixed(3)} m.</p>
+        Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}.</p>
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       <h4>Fréquences en route</h4>
       ${b.legs.map((l) => `<p class="meta" style="margin:2px 0"><b>${l.from}→${l.to}</b> : ${l.airspaces.map((s) => `${esc(s.name)} ${esc(s.freq)}`).join(' · ') || 'classe G (A/A 123.500 / SIV)'}</p>`).join('')}`;
+  }
+
+  // ================================================================== LOG EXCEL (modèle ACB rempli tel quel)
+  // Le classeur d'origine (formules, mise en forme, graphiques de centrage) est conservé : seules les cellules
+  // de saisie sont remplies. Excel recalcule tout à l'ouverture.
+  const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const colNum = (c) => c.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  const splitRef = (ref) => { const m = ref.match(/^([A-Z]+)(\d+)$/); return [m[1], +m[2]]; };
+  function sheetApi(xml) {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const sd = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
+    const rowEl = (r) => {
+      let prev = null;
+      for (const el of sd.getElementsByTagNameNS(NS, 'row')) {
+        const n = +el.getAttribute('r');
+        if (n === r) return el;
+        if (n > r) { prev = el; break; }
+      }
+      const el = doc.createElementNS(NS, 'row'); el.setAttribute('r', r);
+      sd.insertBefore(el, prev); return el;
+    };
+    const cellEl = (ref, create = true) => {
+      const [c, r] = splitRef(ref); const row = rowEl(r); let before = null;
+      for (const el of row.getElementsByTagNameNS(NS, 'c')) {
+        const [cc] = splitRef(el.getAttribute('r'));
+        if (cc === c) return el;
+        if (colNum(cc) > colNum(c)) { before = el; break; }
+      }
+      if (!create) return null;
+      const el = doc.createElementNS(NS, 'c'); el.setAttribute('r', ref); row.insertBefore(el, before); return el;
+    };
+    const clearChildren = (el) => { while (el.firstChild) el.removeChild(el.firstChild); el.removeAttribute('t'); };
+    return {
+      doc,
+      get(ref) { const el = cellEl(ref, false); if (!el) return null; const f = el.getElementsByTagNameNS(NS, 'f')[0]; return f ? '=' + f.textContent : (el.textContent || null); },
+      isFormula(ref) { const el = cellEl(ref, false); return !!(el && el.getElementsByTagNameNS(NS, 'f')[0]); },
+      set(ref, v) {
+        const el = cellEl(ref); clearChildren(el);
+        if (v === null || v === undefined || v === '') return;
+        if (typeof v === 'number' && isFinite(v)) { const x = doc.createElementNS(NS, 'v'); x.textContent = String(v); el.appendChild(x); return; }
+        el.setAttribute('t', 'inlineStr');
+        const is = doc.createElementNS(NS, 'is'), t = doc.createElementNS(NS, 't');
+        t.setAttribute('xml:space', 'preserve'); t.textContent = String(v); is.appendChild(t); el.appendChild(is);
+      },
+      formula(ref, f) { const el = cellEl(ref); clearChildren(el); const x = doc.createElementNS(NS, 'f'); x.textContent = f.replace(/^=/, ''); el.appendChild(x); },
+      xml() { return new XMLSerializer().serializeToString(doc); },
+    };
+  }
+  const short = (s, n = 22) => (s || '').length > n ? s.slice(0, n) : (s || '');
+  function vacFreqShort(v) {
+    return ((v && v.freqs) || []).map((l) => {
+      const m = l.match(/^([A-Z/]+)\s*:\s*(?:([A-ZÀ-Ü' -]+?)\s+(?:Approche|Tour|Info|Sol)\S*\s+)?.*?(\d{3}\.\d{2,3})/);
+      return m ? `${m[2] ? m[2].trim().slice(0, 10) + ' ' : ''}${m[1]} ${m[3]}` : l.slice(0, 22);
+    });
+  }
+  const aspShort = (s) => {
+    let c = (s.call || s.name).replace(/INFORMATION/, 'INFO');
+    const info = c.match(/([A-ZÀ-Ü'-]+ INFO)$/);
+    if (info) c = info[1]; else c = c.replace(/^APP /, '');
+    return `${c.slice(0, 18)} ${String(s.freq).split(' / ')[0]}`;
+  };
+  async function renameSheet(zip, oldName, newName) {
+    const wbx = await zip.file('xl/workbook.xml').async('string');
+    zip.file('xl/workbook.xml', wbx.replace(`<sheet name="${oldName}"`, `<sheet name="${newName}"`).split(`'${oldName}'!`).join(`'${newName}'!`));
+    for (const p of Object.keys(zip.files).filter((n) => /^xl\/(charts|worksheets)\/[^/]+\.xml$/.test(n))) {
+      const x = await zip.file(p).async('string');
+      if (x.includes(`'${oldName}'!`)) zip.file(p, x.split(`'${oldName}'!`).join(`'${newName}'!`));
+    }
+  }
+
+  async function buildXlsx(b) {
+    if (!window.JSZip) throw new Error('Bibliothèque JSZip absente.');
+    const [buf, meta] = await Promise.all([
+      fetch('data/template/log_nav_acb.xlsx').then((r) => { if (!r.ok) throw new Error('modèle Excel introuvable'); return r.arrayBuffer(); }),
+      fetch('data/template/log_meta.json').then((r) => r.json()),
+    ]);
+    const zip = await JSZip.loadAsync(buf);
+    const T = b.f.T, ac = b.f.ac, reg = ac.reg;
+    const layoutName = T.sheet || 'F-XXXX';
+    const own = meta.sheets[ac.baseReg] && meta.sheets[ac.baseReg].legs.length ? ac.baseReg : layoutName;
+    const M = meta.sheets[own];
+    const generic = !meta.sheets[ac.baseReg] || own !== ac.baseReg;
+    let sh = sheetApi(await zip.file(M.path).async('string'));
+
+    // ---- en-tête, date, étape
+    const date = b.depT.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
+    sh.set('N5', `${date}  ${utc(b.depT)}`); sh.set('J3', date);
+    sh.set('E34', reg);
+    sh.set('N6', b.f.dep); sh.set('O6', b.f.arr); sh.set('P6', '');
+    if (b.f.pil) sh.set('R5', short(b.f.pil, 14));
+
+    // ---- masses (cellules propres à chaque feuille)
+    const m = M.mass;
+    sh.set('H5', ac.empty); sh.set('I5', typeof ac.arm === 'number' ? ac.arm : null);
+    sh.set(m.pilot, b.f.m1); sh.set(m.copilot, b.f.m2);
+    (m.pax || []).forEach((c, i) => sh.set(c, i === 0 ? b.f.m3 : 0));
+    if (m.bag) sh.set(m.bag, b.f.m4);
+    if (m.fuel) sh.set(m.fuel, b.f.fuel);
+    if (m.aux) sh.set(m.aux, b.f.aux || 0);
+    sh.set('H34', b.f.ff); sh.set('J34', Math.round(b.f.tas * 1.852 * 10) / 10);
+    sh.set('E37', short(b.f.rg.name, 24)); sh.set('G37', ''); sh.set('H37', b.f.tas); sh.set('I37', 'kt');
+
+    // ---- avion hors flotte du modèle : on adapte la feuille DR400/120 (type, MTOW, centrage, perfs)
+    if (generic && T.sheet === 'F-XXXX' && ac.type !== 'DR400-120') {
+      sh.set('E35', T.label); sh.set('E15', T.mtow);
+      const armCells = [['I6', T.arms.pilot], ['I7', T.arms.copilot], ['I8', T.arms.pax], ['I9', T.arms.pax], ['I10', T.arms.bag], ['I11', T.fuel.tanks[0].arm]];
+      armCells.forEach(([c, v]) => sh.set(c, typeof v === 'number' ? v : null));
+      sh.formula('H11', `=G11*${T.fuel.density}`);
+      const env = T.envelope || [];
+      for (let i = 0; i < 5; i++) { sh.set(`H${18 + i}`, env[i] ? env[i][0] : null); sh.set(`I${18 + i}`, env[i] ? env[i][1] : null); }
+      for (let r = 41; r <= 52; r++) ['G', 'H', 'I', 'J'].forEach((c) => sh.set(`${c}${r}`, r === 41 || r === 42 ? null : null));
+      sh.set('G42', T.takeoff ? `${T.takeoff.hard} m (dur)` : 'voir manuel de vol');
+      for (let r = 56; r <= 59; r++) ['G', 'H', 'I', 'J'].forEach((c) => sh.set(`${c}${r}`, null));
+      sh.set('M47', `${T.label} : Ch = ${b.f.ff} l/h,`); sh.set('M49', `soit 1 litre <==> ${T.minPerLitre} mn`);
+      sh.set('U50', T.minPerLitre);
+      const sp = T.speeds;
+      const perf = { 94: T.fuel.tanks[0].cap, 95: sp.VSO, 96: sp['V finesse max'], 99: T.takeoff ? T.takeoff.hard : null, 101: sp.VR, 102: sp.Vx, 103: sp.Vy, 111: sp.VNE, 112: sp.VNO, 113: sp.VFE, 114: sp.Vapp || null, 116: null, 118: sp['Vw 90° max'] };
+      Object.entries(perf).forEach(([r, v]) => sh.set(`Q${r}`, v == null ? '?' : v));
+      sh.set('S99', T.takeoff && T.takeoff.grass ? T.takeoff.grass : null);
+      [107, 108, 109].forEach((r, i) => { const g = T.regimes[i]; sh.set(`N${r}`, g ? g.name : null); sh.set(`Q${r}`, g ? g.tas : null); sh.set(`S${r}`, null); sh.set(`U${r}`, g ? g.ff : null); });
+      sh.set('A63', `Données ${T.label} : ${short(T.source || '', 90)} — À VÉRIFIER (manuel de vol)`);
+    }
+
+    // ---- effacer l'exemple (route PAU…) de la zone du log
+    for (let r = 9; r < M.tot; r++) {
+      ['M', 'N', 'O', 'Q', 'U'].forEach((c) => sh.set(`${c}${r}`, null));
+      if (!sh.isFormula(`P${r}`)) sh.set(`P${r}`, null);
+    }
+
+    // ---- points et branches
+    let legs = b.legs.slice(), pts = b.ids.slice(), coords = b.pts.slice();
+    const slots = M.legs.length;
+    const warn = [];
+    if (legs.length > slots) {   // trop de branches : on regroupe les points de contournement consécutifs
+      warn.push(`Route de ${legs.length} branches : le modèle n'en contient que ${slots}, les dernières sont regroupées.`);
+    }
+    const elevOf = (id) => { const v = VAC && VAC.data && VAC.data[id]; const a = A.aptByIcao[id]; return v && v.alt != null ? v.alt : (a && a.elev ? +a.elev : null); };
+    const nameOf = (id, i) => {
+      if (id.startsWith('DT')) return `${id} ${coords[i][0].toFixed(2)}N ${Math.abs(coords[i][1]).toFixed(2)}${coords[i][1] < 0 ? 'W' : 'E'}`;
+      const a = A.aptByIcao[id]; return short((a ? a.name : id).toUpperCase(), 16);
+    };
+    const nUse = Math.min(legs.length, slots);
+    const legFreqs = (lg) => lg.airspaces.map(aspShort).concat(lg.ceilings.map((s) => `plafond ${aspShort(s)}`));
+    const putFreqs = (rows, list) => rows.forEach((r, i) => sh.set(`U${r}`, list[i] || null));
+    for (let k = 0; k < nUse; k++) {
+      const lr = M.legs[k], pr = lr - 2;
+      // point de départ de la branche
+      const id = pts[k];
+      sh.set(`M${pr}`, id.startsWith('DT') ? null : elevOf(id));
+      sh.set(`N${pr}`, nameOf(id, k)); sh.set(`P${pr}`, id.startsWith('DT') ? 'contournement' : id);
+      if (k > 0) sh.formula(`Q${pr}`, '=' + M.legs.slice(0, k).map((r) => `P${r}`).join('+'));
+      else sh.set(`Q${pr}`, utc(b.depT));
+      // branche (si dernière branche disponible et route plus longue, on cumule la distance)
+      let lg = legs[k];
+      if (k === nUse - 1 && legs.length > nUse) {
+        const rest = legs.slice(k);
+        lg = { ...lg, dist: rest.reduce((s, l) => s + l.dist, 0), airspaces: [...new Set(rest.flatMap((l) => l.airspaces))], ceilings: [], safe: { alt: Math.max(...rest.map((l) => (l.safe ? l.safe.alt : 0))) } };
+      }
+      sh.set(`M${lr}`, lg.safe ? lg.safe.alt : null);
+      sh.set(`N${lr}`, Math.round(lg.tm) % 360 || 360);
+      sh.set(`O${lr}`, Math.round(lg.dist));
+      const fr = k === 0 ? vacFreqShort(b.depInfo.v).concat(legFreqs(lg)) : legFreqs(lg);
+      putFreqs([pr, pr + 1, lr, lr + 1], fr.length ? fr : ['A/A 123.500']);
+    }
+    // arrivée
+    const ar = M.legs[nUse - 1] + 2;
+    sh.set(`M${ar}`, elevOf(b.f.arr)); sh.set(`N${ar}`, nameOf(b.f.arr, coords.length - 1)); sh.set(`P${ar}`, b.f.arr);
+    sh.formula(`Q${ar}`, '=' + M.legs.slice(0, nUse).map((r) => `P${r}`).join('+'));
+    putFreqs([ar, ar + 1], vacFreqShort(b.arrInfo.v));
+    // déroutement
+    const dr = M.deg[0];
+    if (dr && b.altLeg) {
+      sh.set(`M${dr}`, b.legs[b.legs.length - 1].safe ? b.legs[b.legs.length - 1].safe.alt : null);
+      sh.set(`N${dr}`, Math.round(b.altLeg.tm) % 360 || 360); sh.set(`O${dr}`, Math.round(b.altLeg.dist));
+      sh.set(`M${dr + 2}`, elevOf(b.f.alt)); sh.set(`N${dr + 2}`, nameOf(b.f.alt, 0)); sh.set(`P${dr + 2}`, b.f.alt);
+      putFreqs([dr, dr + 1, dr + 2, dr + 3], vacFreqShort(b.altInfo && b.altInfo.v));
+    } else if (dr) { sh.set(`P${dr}`, 0); sh.set(`S${dr}`, 0); }
+
+    // ---- cases INFO départ / arrivée (pré-remplies avec le METAR)
+    const fillInfo = (box, t) => {
+      if (!box) return;
+      sh.set(box.ident, t.id);
+      ['FLT', 'TBO', 'Birds', 'Para'].forEach((k) => box[k] && sh.set(box[k], null));
+      const rwyTxt = t.v && t.v.qfu && t.v.qfu.length ? t.v.qfu.slice(0, 2).map((q) => String(Math.round(+q / 10) || 36).padStart(2, '0')).join('    /    ') : '';
+      if (box.RWY) sh.set(box.RWY, rwyTxt || null);
+      const mt = t.m;
+      if (!mt) return;
+      if (box.VW) sh.set(box.VW, mt.wdir != null ? `   ${mt.wdir === 'VRB' ? 'VRB' : r3(mt.wdir)}    /    ${mt.wspd ?? 0}${mt.wgst ? 'G' + mt.wgst : ''}` : null);
+      if (box.VISI) sh.set(box.VISI, mt.rawOb.includes('CAVOK') ? '      CAVOK' : (mt.visib != null ? (String(mt.visib).includes('+') ? '9999' : `${Math.round(parseFloat(mt.visib) * 1609)} m`) : null));
+      const layers = { FEW: null, SCT: null, BKN: null, OVC: null };
+      (mt.clouds || []).forEach((c) => { if (c.cover in layers && !layers[c.cover] && c.base != null) layers[c.cover] = String(Math.round(c.base / 100)).padStart(3, '0'); });
+      Object.entries(layers).forEach(([k, v]) => box[k] && sh.set(box[k], v));
+      if (box['TT/TD']) sh.set(box['TT/TD'], mt.temp != null ? `      ${mt.temp}    /    ${mt.dewp ?? ''}` : null);
+      if (box.QNH && mt.altim != null) sh.set(box.QNH, Math.round(mt.altim));
+    };
+    fillInfo(M.info[0], b.depInfo); fillInfo(M.info[1], b.arrInfo);
+
+    zip.file(M.path, sh.xml());
+    // ---- renommer / activer la feuille
+    const wbx0 = await zip.file('xl/workbook.xml').async('string');
+    const names = [...wbx0.matchAll(/<sheet name="([^"]+)"/g)].map((x) => x[1]);
+    let target = own;
+    if (own !== reg) {
+      if (names.includes(reg)) await renameSheet(zip, reg, `${reg} (modèle)`.slice(0, 31));
+      await renameSheet(zip, own, reg); target = reg;
+    }
+    let wbx = await zip.file('xl/workbook.xml').async('string');
+    const idx = [...wbx.matchAll(/<sheet name="([^"]+)"/g)].map((x) => x[1]).indexOf(target);
+    wbx = wbx.replace(/activeTab="\d+"/, `activeTab="${idx}"`).replace(/firstSheet="\d+"/, 'firstSheet="0"');
+    zip.file('xl/workbook.xml', wbx);
+    const sx = await zip.file(M.path).async('string');
+    zip.file(M.path, sx.replace(/<sheetView /, '<sheetView tabSelected="1" '));
+
+    const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `log_nav_${b.userIds.join('-')}_${reg}_${b.depT.toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    if (warn.length) $('#pf-out').insertAdjacentHTML('beforeend', `<div class="warn">${esc(warn.join(' '))}</div>`);
+    return blob;
   }
 
   // ================================================================== PDF
@@ -763,24 +1008,25 @@
     // page 2 du log : masse & centrage, performances, carburant
     newPage('landscape', 'LOG DE NAVIGATION - MASSE, CENTRAGE ET PERFORMANCES');
     const mb = b.mb;
-    table(['Élément', 'Masse (kg)', 'Bras (m)', 'Moment'], mb.rows.map((r) => [r[0], r[1].toFixed(0), r[2].toFixed(3), (r[1] * r[2]).toFixed(1)]).concat([
-      [{ content: 'Total décollage', styles: { fontStyle: 'bold' } }, { content: mb.mass.toFixed(0), styles: { fontStyle: 'bold' } }, { content: mb.cg.toFixed(3), styles: { fontStyle: 'bold' } }, mb.mom.toFixed(1)],
-      ['MTOW / marge', `${b.f.T.mtow} / ${Math.round(b.f.T.mtow - mb.mass)}`, mb.inEnv(mb.cg, mb.mass) ? 'Centrage OK' : 'HORS LIMITES', ''],
+    const n3 = (v) => (typeof v === 'number' ? v.toFixed(3) : 'à compléter');
+    table(['Élément', 'Masse (kg)', 'Bras (m)', 'Moment'], mb.rows.map((r) => [r[0], r[1].toFixed(0), n3(r[2]), typeof r[2] === 'number' ? (r[1] * r[2]).toFixed(1) : '-']).concat([
+      [{ content: 'Total décollage', styles: { fontStyle: 'bold' } }, { content: mb.mass.toFixed(0), styles: { fontStyle: 'bold' } }, { content: n3(mb.cg), styles: { fontStyle: 'bold' } }, mb.mom != null ? mb.mom.toFixed(1) : '-'],
+      ['MTOW / marge', `${b.f.T.mtow} / ${Math.round(b.f.T.mtow - mb.mass)}`, mb.cg == null ? (b.f.T.cgLimits ? `limites ${b.f.T.cgLimits.join(' - ')} m` : 'centrage à calculer') : mb.inEnv(mb.cg, mb.mass) ? 'Centrage OK' : 'HORS LIMITES', ''],
       ['Masse à l\'atterrissage (est.)', b.landMass.toFixed(0), '', ''],
     ]), { x: M, width: 125, size: 8, keepY: true });
     const yMb = doc.lastAutoTable.finalY;
     // enveloppe de centrage
     const gx = M + 132, gy = 22, gw = 70, gh = 55;
-    const env = b.f.T.envelope, arms = env.map((p) => p[0]), masses = env.map((p) => p[1]).filter((m) => m > 0);
+    const env = b.f.T.envelope || [[0.2, 0], [0.2, b.f.T.mtow], [0.6, b.f.T.mtow], [0.6, 0]], arms = env.map((p) => p[0]), masses = env.map((p) => p[1]).filter((m) => m > 0);
     const aMin = Math.min(...arms) - 0.03, aMax = Math.max(...arms) + 0.03, mMin = Math.min(...masses) - 150, mMax = b.f.T.mtow + 30;
     const X = (a) => gx + (a - aMin) / (aMax - aMin) * gw, Y = (m) => gy + gh - (Math.max(mMin, m) - mMin) / (mMax - mMin) * gh;
     doc.setDrawColor(150); doc.setLineWidth(.2); doc.rect(gx, gy, gw, gh);
     doc.setDrawColor(0, 102, 153); doc.setLineWidth(.6);
     const envPts = env.map((p) => [X(p[0]), Y(p[1])]);
     for (let i = 0; i < envPts.length - 1; i++) doc.line(envPts[i][0], envPts[i][1], envPts[i + 1][0], envPts[i + 1][1]);
-    const ptsMb = [[mb.cg, mb.mass, 'TO'], [(mb.mom - b.totFuel * b.f.T.fuel.density * b.f.T.fuel.tanks[0].arm) / b.landMass, b.landMass, 'LDG']];
+    const ptsMb = mb.cg == null ? [] : [[mb.cg, mb.mass, 'TO'], [(mb.mom - b.totFuel * b.f.T.fuel.density * b.f.T.fuel.tanks[0].arm) / b.landMass, b.landMass, 'LDG']];
     ptsMb.forEach(([a, m, l]) => { doc.setFillColor(l === 'TO' ? 220 : 30, l === 'TO' ? 30 : 140, 30); doc.circle(X(a), Y(m), 1.1, 'F'); doc.setFontSize(6.5); doc.text(l, X(a) + 1.5, Y(m) - 1); });
-    doc.line(X(ptsMb[0][0]), Y(ptsMb[0][1]), X(ptsMb[1][0]), Y(ptsMb[1][1]));
+    if (ptsMb.length) doc.line(X(ptsMb[0][0]), Y(ptsMb[0][1]), X(ptsMb[1][0]), Y(ptsMb[1][1]));
     doc.setFontSize(6.5); doc.setTextColor(90);
     doc.text(latin(`Enveloppe de centrage ${b.f.T.label} (bras m / masse kg)`), gx, gy - 1.5);
     doc.text(aMin.toFixed(2), gx, gy + gh + 3); doc.text(aMax.toFixed(2), gx + gw, gy + gh + 3, { align: 'right' });
@@ -794,7 +1040,7 @@
     const tanks = b.f.T.fuel.tanks;
     const yFuelStart = y;
     table(['Carburant', 'Valeur'], [
-      ['Type', b.f.T.fuel.name], ['Capacité', tanks.map((t) => `${t.name} ${t.cap} L`).join(' + ')],
+      ['Type', b.f.T.fuel.name], ['Capacité', tanks.map((t) => `${t.name} ${t.cap ? t.cap + ' L' : 'à vérifier'}`).join(' + ')],
       ['À bord au départ', `${b.loaded} L (${(b.loaded * b.f.T.fuel.density).toFixed(0)} kg)`],
       ['Étape', `${b.totFuel} L`], ['Dégagement', b.altLeg ? `${b.altLeg.fuel} L (${b.altLeg.to})` : '-'], ['Réserve finale', `${b.resFuel} L (${b.f.res} min)`],
       [{ content: 'Requis', styles: { fontStyle: 'bold' } }, { content: `${b.reqFuel} L`, styles: { fontStyle: 'bold' } }],
@@ -803,12 +1049,12 @@
     ], { x: M, width: 110, size: 8, keepY: true });
     const yFuel = doc.lastAutoTable.finalY;
     // performances décollage
-    const perfRow = (t) => t ? [t.id, `${t.elev} ft`, `${Math.round(t.temp)}°C`, t.grass ? 'herbe' : 'dur', t.len ? `${t.len} m` : '?', `${t.tod} m`,
+    const perfRow = (t) => t ? [t.id, `${t.elev} ft`, `${Math.round(t.temp)}°C`, t.grass ? 'herbe' : 'dur', t.len ? `${t.len} m` : '?', t.tod ? `${t.tod} m` : 'manuel de vol',
       t.rw ? `QFU ${t.rw.best.qfu}° : ${t.rw.best.head != null ? `${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, travers ${Math.round(t.rw.best.cross)} kt` : 'vent ?'}` : '-'] : null;
     table(['Terrain', 'Alt.', 'Temp.', 'Piste', 'Longueur', 'Décollage 15 m (est.)', 'Piste probable / vent'],
       [perfRow(b.depInfo), perfRow(b.arrInfo), perfRow(b.altInfo)].filter(Boolean), { x: M + 115, y: yFuelStart, size: 7.5, keepY: true });
     y = Math.max(yFuel, doc.lastAutoTable.finalY) + 3;
-    para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur) / ${b.f.T.takeoff.grass} m (herbe), majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
+    if (b.f.T.takeoff) para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur)${b.f.T.takeoff.grass ? ` / ${b.f.T.takeoff.grass} m (herbe)` : ''}, majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
 
     // ---------------------------------------------------------------- 2. BRIEFINGS DÉPART / ARRIVÉE (portrait)
     const briefTerrain = (t, kind) => {
@@ -826,16 +1072,16 @@
       rows.push(['Statut', [v.cap ? 'Ouvert à la CAP' : null, v.restreint ? 'Usage restreint' : null, v.prive ? 'Usage privé' : null, v.vfr ? 'Atterrissage à vue' : null].filter(Boolean).join(' · ') || '-']);
       rows.push(['Altitude terrain', v.alt != null ? `${v.alt} ft (QNH-QFE ≈ ${v.hpa} hPa)` : '-']);
       rows.push(['Pistes', [(v.qfu || []).map((q) => q + '°').join(' / '), (v.rwy || []).join(', '), (v.surface || []).join(' / ')].filter(Boolean).join(' · ') || '-']);
-      if (t.rw) rows.push(['Piste probable', `QFU ${t.rw.best.qfu}° — ${t.rw.best.head != null ? `vent de ${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, traversier ${Math.round(t.rw.best.cross)} kt (max démontré ${b.f.T.speeds['Vw 90° max']} kt)` : 'vent inconnu'}`]);
+      if (t.rw) rows.push(['Piste probable', `QFU ${t.rw.best.qfu}° — ${t.rw.best.head != null ? `vent de ${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, traversier ${Math.round(t.rw.best.cross)} kt ${b.f.T.speeds['Vw 90° max'] ? ` (max démontré ${b.f.T.speeds['Vw 90° max']} kt)` : ''}` : 'vent inconnu'}`]);
       rows.push(['Fréquences', (v.freqs || []).join('\n') || 'A/A 123.500 si non publiée']);
       rows.push(['Tour de piste', (v.tdp || []).join(' ; ') || 'voir VAC']);
       rows.push(['Moyens radio', (v.nav || []).join(', ') || '-']);
       rows.push(['Espaces autour (VAC)', (v.espaces || []).join('\n') || '-']);
       rows.push(['Obstacles (VAC)', (v.obst || []).join('\n') || '-']);
       if (kind === 'DÉPART') {
-        rows.push(['Décollage (estimé)', `${t.tod} m (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
+        rows.push(['Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
         const l0 = b.legs[0];
-        rows.push(['Sortie / 1re branche', `Rm ${r3(l0.tm)}° vers ${l0.to}, ${l0.dist.toFixed(0)} NM, montée vers ${b.f.ft} ft (Vy ${b.f.T.speeds.Vy} kt), alti sécu ${l0.safe ? l0.safe.alt + ' ft' : '?'}`]);
+        rows.push(['Sortie / 1re branche', `Rm ${r3(l0.tm)}° vers ${l0.to}, ${l0.dist.toFixed(0)} NM, montée vers ${b.f.ft} ft${b.f.T.speeds.Vy ? ` (Vy ${b.f.T.speeds.Vy} kt)` : ''}, alti sécu ${l0.safe ? l0.safe.alt + ' ft' : '?'}`]);
         rows.push(['Premiers contacts', l0.airspaces.slice(0, 4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
       } else {
         const lN = b.legs[b.legs.length - 1];

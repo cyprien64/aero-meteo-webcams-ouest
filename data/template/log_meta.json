@@ -1,0 +1,522 @@
+{
+ "sheets": {
+  "F-HAFF": {
+   "index": 1,
+   "path": "xl/worksheets/sheet2.xml",
+   "type": "DR400 Rotax 912iS",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8"
+    ],
+    "bag": "G9",
+    "fuel": "G10"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  },
+  "F-HPYR": {
+   "index": 2,
+   "path": "xl/worksheets/sheet3.xml",
+   "type": "DR400 Rotax 912iS",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8"
+    ],
+    "bag": "G9",
+    "fuel": "G10"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  },
+  "F-HCOY": {
+   "index": 3,
+   "path": "xl/worksheets/sheet4.xml",
+   "type": "DR400-140B CDI155",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8",
+     "G9"
+    ],
+    "bag": "G10",
+    "fuel": "G11",
+    "aux": "G12"
+   },
+   "legs": [],
+   "deg": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35,
+    39,
+    43,
+    47
+   ],
+   "tot": 51,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    49
+   ],
+   "fuelDensity": 0.84
+  },
+  "F-HNDI": {
+   "index": 4,
+   "path": "xl/worksheets/sheet5.xml",
+   "type": "DR400-140B CDI155",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8",
+     "G9"
+    ],
+    "bag": "G10",
+    "fuel": "G11",
+    "aux": "G12"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.84
+  },
+  "SIMU": {
+   "index": 7,
+   "path": "xl/worksheets/sheet8.xml",
+   "type": "AL250",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8",
+     "G9"
+    ],
+    "bag": "G10",
+    "fuel": "G11"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  },
+  "F-XXXX": {
+   "index": 8,
+   "path": "xl/worksheets/sheet9.xml",
+   "type": "DR400/120",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8",
+     "G9"
+    ],
+    "bag": "G10",
+    "fuel": "G11"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  },
+  "F-GLDS": {
+   "index": 9,
+   "path": "xl/worksheets/sheet10.xml",
+   "type": "DR400 Rotax 912iS",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8"
+    ],
+    "bag": "G9",
+    "fuel": "G10"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  },
+  "F-GKQR": {
+   "index": 10,
+   "path": "xl/worksheets/sheet11.xml",
+   "type": "DR400 Rotax 912iS",
+   "mass": {
+    "pilot": "G6",
+    "copilot": "G7",
+    "pax": [
+     "G8"
+    ],
+    "bag": "G9",
+    "fuel": "G10"
+   },
+   "legs": [
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35
+   ],
+   "deg": [
+    39,
+    43
+   ],
+   "tot": 45,
+   "info": [
+    {
+     "ident": "A4",
+     "RWY": "B5",
+     "FLT": "B9",
+     "TBO": "B11",
+     "Birds": "B13",
+     "Para": "B15",
+     "VW": "B17",
+     "VISI": "B19",
+     "FEW": "B21",
+     "SCT": "B23",
+     "BKN": "B25",
+     "OVC": "B27",
+     "TT/TD": "B29",
+     "QNH": "B31"
+    },
+    {
+     "ident": "A35",
+     "RWY": "B36",
+     "FLT": "B40",
+     "VW": "B48",
+     "VISI": "B50",
+     "FEW": "B52",
+     "SCT": "B54",
+     "BKN": "B56",
+     "OVC": "B58",
+     "TT/TD": "B60",
+     "QNH": "B62"
+    }
+   ],
+   "clearRows": [
+    9,
+    45
+   ],
+   "fuelDensity": 0.72
+  }
+ }
+}

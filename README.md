@@ -27,8 +27,15 @@ Clic sur un aérodrome → METAR/TAF décodés, NOTAM, SUP AIP proches, webcams 
 ## Préparation de vol (briefing PDF)
 Bouton **✈️ Préparer un vol** : départ, arrivée, points tournants, dégagement, heure, avion du club, régime, altitude, masses, carburant.
 
-Avions (repris du log de nav ACB) : DR400 Rotax 912iS (F-HAFF, F-HPYR, F-GLDS, F-GKQR) et DR401 / DR400-140B CDI 155 (F-HCOY, F-HNDI)
-— performances, consommations, enveloppes de centrage et vitesses dans `data/aircraft.js`.
+Avions (repris du log de nav ACB) : DR400 Rotax 912iS (F-HAFF, F-HPYR, F-GLDS, F-GKQR), DR401 / DR400-140B CDI 155 (F-HCOY, F-HNDI),
+DR400/120 2+2 — performances, consommations, enveloppes de centrage et vitesses dans `data/aircraft.js`.
+Ajoutés d'après des sources publiques, **à vérifier avec le manuel de vol** (bras de levier et masses à vide à compléter) :
+Jodel D112 (F-PKFC), Grob G120A (G-EPDH), Robin R3000/180 (F-HMRA).
+
+**Log de nav Excel** : le bouton génère, en plus du PDF, le classeur du log ACB (`data/template/log_nav_acb.xlsx`)
+rempli tel quel — feuille de l'avion activée, formules, mise en forme et graphiques de centrage conservés
+(points, Rm, distances, alti sécu, fréquences, déroutement, masses, cases INFO départ/arrivée depuis le METAR).
+Excel recalcule les temps et le carburant à l'ouverture.
 
 La route contourne automatiquement les zones interdites (P) et, au choix, les zones RTBA actives pendant le vol (points DT1, DT2…).
 

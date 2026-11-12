@@ -30,7 +30,7 @@ Bouton **✈️ Préparer un vol** : départ, arrivée, points tournants, dégag
 Avions (repris du log de nav ACB) : DR400 Rotax 912iS (F-HAFF, F-HPYR, F-GLDS, F-GKQR), DR401 / DR400-140B CDI 155 (F-HCOY, F-HNDI),
 DR400/120 2+2 — performances, consommations, enveloppes de centrage et vitesses dans `data/aircraft.js`.
 Ajoutés d'après des sources publiques, **à vérifier avec le manuel de vol** (bras de levier et masses à vide à compléter) :
-Jodel D112 (F-PKFC), Grob G120A (G-EPDH), Robin R3000/180 (F-HMRA).
+Jodel D112 (F-PKFC), Grob G120A (D-EPDH), Robin R3000/180 (F-HMRA).
 
 **Log de nav Excel** : le bouton génère, en plus du PDF, le classeur du log ACB (`data/template/log_nav_acb.xlsx`)
 rempli tel quel — feuille de l'avion activée, formules, mise en forme et graphiques de centrage conservés

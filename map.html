@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Aéro Météo Webcams — Pyrénées → Bretagne</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="icons/icon48.png">
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <link rel="stylesheet" href="map.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="clock" title="Heure UTC">--:--:-- UTC</div>
+
+  <aside id="panel" class="box">
+    <header>
+      <img src="icons/icon48.png" alt="" width="28" height="28">
+      <div>
+        <h1>Aéro Météo Webcams</h1>
+        <p class="sub">Pyrénées → Atlantique → Bretagne</p>
+      </div>
+      <button id="collapse" class="icon-btn" title="Réduire / agrandir le panneau">–</button>
+    </header>
+
+    <div id="panel-body">
+      <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
+      <ul id="results"></ul>
+
+      <h2>Calques</h2>
+      <label><input type="checkbox" data-layer="metar" checked> <span class="sw sw-metar"></span> METAR / TAF (direct)</label>
+      <label><input type="checkbox" data-layer="apt" checked> <span class="sw sw-apt"></span> Aérodromes sans METAR</label>
+      <label><input type="checkbox" data-layer="camAero" checked> <span class="sw sw-cam-aero"></span> Webcams aérodromes</label>
+      <label><input type="checkbox" data-layer="cam" checked> <span class="sw sw-cam"></span> Webcams paysage / côte / montagne</label>
+      <label><input type="checkbox" data-layer="obs" checked> <span class="sw sw-obs"></span> Observations Météociel</label>
+      <label><input type="checkbox" data-layer="wind" checked> <span class="sw sw-wind"></span> Balises vent (PiouPiou, FFVL)</label>
+      <label><input type="checkbox" data-layer="radar"> <span class="sw sw-radar"></span> Radar pluie animé</label>
+
+      <h2>NOTAM & SUP AIP</h2>
+      <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h)</label>
+      <div class="sub-opts">
+        <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
+        <label>Plancher ≤ <select id="notam-fl" class="inline">
+          <option value="35">FL035</option><option value="65" selected>FL065</option>
+          <option value="115">FL115</option><option value="999">tous</option></select></label>
+      </div>
+      <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
+      <div class="tools">
+        <button id="btn-notam-list">⚠️ Liste NOTAM</button>
+        <button id="btn-sup-list">📄 Liste SUP AIP</button>
+      </div>
+      <div id="radar-ctrl" hidden>
+        <button id="radar-play" class="small">⏸</button>
+        <span id="radar-time">--:--</span>
+      </div>
+
+      <h2>Fond de carte</h2>
+      <select id="basemap">
+        <option value="schema">Schéma (style Inter Aéro)</option>
+        <option value="carto">Carte sombre</option>
+        <option value="topo">Relief (OpenTopoMap)</option>
+        <option value="sat">Satellite (Esri)</option>
+      </select>
+
+      <h2>Outils météo</h2>
+      <div id="tools" class="tools"></div>
+
+      <p class="legend">
+        Catégories METAR :
+        <b class="c-VFR">VFR</b> <b class="c-MVFR">MVFR</b> <b class="c-IFR">IFR</b> <b class="c-LIFR">LIFR</b><br>
+        <span id="status">Chargement…</span><br>
+        <span id="status2"></span>
+      </p>
+      <p class="legend small-print">Vérifier la date et l'heure de chaque webcam. Outil d'aide uniquement : la préparation réglementaire reste aeroweb / SIA / NOTAM.</p>
+    </div>
+  </aside>
+
+  <aside id="detail" class="box" hidden>
+    <button id="detail-close" class="icon-btn" title="Fermer">✕</button>
+    <div id="detail-body"></div>
+  </aside>
+
+  <script src="config.js"></script>
+  <script src="lib/leaflet/leaflet.js"></script>
+  <script src="data/basemap.js"></script>
+  <script src="data/sources.js"></script>
+  <script src="map.js"></script>
+</body>
+</html>

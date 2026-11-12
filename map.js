@@ -58,6 +58,12 @@
     },
   });
   const tileOpt = { maxZoom: 15 };
+  const geopf = (layer, tms, style, priv) => `https://data.geopf.fr/${priv ? 'private/wmts?apikey=ign_scan_ws&' : 'wmts?'}SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&TILEMATRIXSET=${tms}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg`;
+  const GEOPF = window.AWW_GEOPF = {
+    oaci: geopf('GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-OACI', 'PM_6_11', 'normal', true),
+    scan1000: geopf('IGNF_CARTES_SCAN-1000', 'PM_0_10', 'SCAN1000'),
+    scanreg: geopf('IGNF_CARTES_SCAN-REGIONAL', 'PM_0_12', 'SCANREG'),
+  };
   const bases = {
     schema,
     carto: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -66,6 +72,10 @@
       { ...tileOpt, maxNativeZoom: 15, attribution: '© OpenStreetMap, SRTM, © OpenTopoMap' }),
     sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       { ...tileOpt, attribution: 'Imagerie © Esri' }),
+    // Cartes IGN (Géoplateforme) : OACI-VFR 1/500 000, SCAN 1000 (1/1 000 000), SCAN Régional (1/250 000)
+    oaci: L.tileLayer(GEOPF.oaci, { minZoom: 5, minNativeZoom: 6, maxNativeZoom: 11, maxZoom: 13, attribution: 'Carte OACI-VFR © IGN / SIA' }),
+    scan1000: L.tileLayer(GEOPF.scan1000, { maxNativeZoom: 10, maxZoom: 13, attribution: 'SCAN 1000 © IGN' }),
+    scanreg: L.tileLayer(GEOPF.scanreg, { maxNativeZoom: 12, maxZoom: 14, attribution: 'SCAN Régional © IGN' }),
   };
   let currentBase = null;
   function setBase(k) {

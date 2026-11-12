@@ -754,6 +754,21 @@
   }
 
   // ================================================================== carte + résumé
+  // Repères toutes les 5 min de vol (vitesse sol de chaque branche) et cartouche par branche (temps, cap, distance)
+  function routeMarks(b, every = 5) {
+    const ticks = [], boxes = [];
+    let t0 = 0;
+    b.legs.forEach((lg, i) => {
+      const dur = lg.dist / lg.gs * 60;
+      for (let m = Math.ceil((t0 + 0.01) / every) * every; m < t0 + dur - 0.5; m += every) {
+        ticks.push({ p: destPt(lg.a, lg.tc, (m - t0) / 60 * lg.gs), tc: lg.tc, min: m, major: m % 10 === 0 });
+      }
+      boxes.push({ p: destPt(lg.a, lg.tc, lg.dist / 2), tc: lg.tc, leg: i, l1: `${lg.from} > ${lg.to}`, l2: `${lg.min}'  Cm ${r3(lg.hm)}°`, l3: `${lg.dist.toFixed(0)} NM  Vs ${Math.round(lg.gs)} kt` });
+      t0 += dur;
+    });
+    return { ticks, boxes };
+  }
+
   function drawRoute(b) {
     if (routeLayer) map.removeLayer(routeLayer);
     routeLayer = L.layerGroup().addTo(map);
@@ -768,6 +783,14 @@
         .bindTooltip(`<b>${esc(x.z.id)} ${esc(x.z.name)}</b><br>${esc(x.z.lower)} – ${esc(x.z.upper)}`, { className: 'tip', sticky: true }).addTo(routeLayer);
     });
     L.polyline(b.pts, { color: '#ff2bd6', weight: 4, opacity: .95 }).addTo(routeLayer);
+    const mk = routeMarks(b);
+    mk.ticks.forEach((t) => {
+      const half = t.major ? 1.6 : 1;
+      L.polyline([destPt(t.p, t.tc - 90, half), destPt(t.p, t.tc + 90, half)], { color: '#ff2bd6', weight: t.major ? 3 : 2, interactive: false }).addTo(routeLayer);
+      if (t.major) L.marker(destPt(t.p, t.tc + 90, 2.6), { interactive: false, icon: L.divIcon({ className: 'tick-label', html: `${t.min}'`, iconSize: [26, 12], iconAnchor: [13, 6] }) }).addTo(routeLayer);
+    });
+    mk.boxes.forEach((x) => L.marker(destPt(x.p, x.tc + 90, 4), { icon: L.divIcon({ className: 'leg-box', html: `<b>${esc(x.l2)}</b><br>${esc(x.l3)}`, iconSize: null }) })
+      .bindTooltip(esc(x.l1), { className: 'tip', direction: 'top' }).addTo(routeLayer));
     if (b.altLeg) { const a = A.aptByIcao[b.altLeg.to]; L.polyline([b.pts[b.pts.length - 1], [a.la, a.lo]], { color: '#ff2bd6', weight: 2, dashArray: '6 6' }).addTo(routeLayer); }
     b.pts.forEach((p, i) => L.circleMarker(p, { radius: b.ids[i].startsWith('DT') ? 4 : 6, color: '#fff', weight: 2, fillColor: b.ids[i].startsWith('DT') ? '#ffd34d' : '#ff2bd6', fillOpacity: 1 })
       .bindTooltip(b.ids[i], { permanent: true, direction: 'right', className: 'tip' }).addTo(routeLayer));
@@ -1280,6 +1303,18 @@
       if (cams.length) { h2('Webcams à proximité'); cams.forEach((c) => para(`- ${c.s.n} (${c.d.toFixed(0)} km) : ${c.s.u}`, { size: 7.5, gap: .3 })); }
       if (t.v) para(`VAC officielle (cycle ${b.vacCycle || '?'}) : ${t.v.url}`, { size: 7.5, color: [0, 80, 160] });
     };
+    try {
+      const nm = await renderNavMap(b, progress);
+      if (nm) {
+        newPage('landscape', 'CARTE DE NAVIGATION - OACI-VFR 1/500 000');
+        const maxW = W - 2 * M, maxH = H - 30;
+        const sc = Math.min(maxW / nm.w, maxH / nm.h);
+        doc.addImage(nm.url, 'JPEG', M + (maxW - nm.w * sc) / 2, 18, nm.w * sc, nm.h * sc);
+        doc.setFontSize(6.5); doc.setTextColor(90);
+        doc.text(latin(`Fond : carte OACI-VFR © IGN / SIA (édition en vigueur sur la Géoplateforme) · repères toutes les 5 min de vol (étiquette toutes les 10 min) · cartouches : temps, cap magnétique, distance, vitesse sol par branche.`), M, H - 9);
+        doc.setTextColor(0);
+      }
+    } catch (e) { console.warn('carte OACI', e); }
     progress('PDF : briefings départ / arrivée…');
     briefTerrain(b.depInfo, 'DÉPART');
     briefTerrain(b.arrInfo, 'ARRIVÉE');
@@ -1362,6 +1397,72 @@
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => window.open(url, '_blank'), 300);
     if (failed.length) $('#pf-out').insertAdjacentHTML('beforeend', `<div class="warn">VAC ${failed.join(', ')} non jointes ${A.IS_EXT ? '' : '(le SIA bloque le téléchargement depuis une page web : l\'extension Chrome les joint automatiquement)'} — liens dans le PDF.</div>`);
+  }
+
+  // Carte de navigation sur fond OACI-VFR 1/500 000 (tuiles IGN dessinées dans un canvas)
+  async function renderNavMap(b, progress) {
+    const tpl = (window.AWW_GEOPF || {}).oaci; if (!tpl) return null;
+    const all = b.pts.concat(b.altLeg ? [[A.aptByIcao[b.altLeg.to].la, A.aptByIcao[b.altLeg.to].lo]] : []);
+    let s = Math.min(...all.map((p) => p[0])), n = Math.max(...all.map((p) => p[0])), w = Math.min(...all.map((p) => p[1])), e = Math.max(...all.map((p) => p[1]));
+    const pl = Math.max(0.12, (n - s) * 0.12), pg = Math.max(0.18, (e - w) * 0.12); s -= pl; n += pl; w -= pg; e += pg;
+    const X = (lo, z) => (lo + 180) / 360 * 256 * 2 ** z;
+    const Y = (la, z) => (1 - Math.log(Math.tan(rad(la)) + 1 / Math.cos(rad(la))) / Math.PI) / 2 * 256 * 2 ** z;
+    let z = 11;
+    while (z > 6 && (Math.ceil(X(e, z) / 256) - Math.floor(X(w, z) / 256) + 1) * (Math.ceil(Y(s, z) / 256) - Math.floor(Y(n, z) / 256) + 1) > 70) z--;
+    // élargit au format paysage A4
+    let x0 = X(w, z), x1 = X(e, z), y0 = Y(n, z), y1 = Y(s, z);
+    const ratio = 277 / 172;
+    if ((x1 - x0) / (y1 - y0) < ratio) { const d = ((y1 - y0) * ratio - (x1 - x0)) / 2; x0 -= d; x1 += d; } else { const d = ((x1 - x0) / ratio - (y1 - y0)) / 2; y0 -= d; y1 += d; }
+    const W = Math.round(x1 - x0), H = Math.round(y1 - y0);
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#f4f1e8'; ctx.fillRect(0, 0, W, H);
+    const tx0 = Math.floor(x0 / 256), tx1 = Math.floor(x1 / 256), ty0 = Math.floor(y0 / 256), ty1 = Math.floor(y1 / 256);
+    const jobs = [];
+    for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+      const url = tpl.replace('{z}', z).replace('{x}', tx).replace('{y}', ty);
+      jobs.push(new Promise((res) => {
+        const im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = () => { ctx.drawImage(im, tx * 256 - x0, ty * 256 - y0); res(true); };
+        im.onerror = () => res(false); im.src = url;
+      }));
+    }
+    progress && progress(`PDF : carte OACI (${jobs.length} tuiles)…`);
+    const ok = (await Promise.all(jobs)).filter(Boolean).length;
+    if (!ok) return null;
+    const P = (p) => [X(p[1], z) - x0, Y(p[0], z) - y0];
+    const u = W / 1000;   // unité graphique : tailles proportionnelles à l'image (lisibles une fois sur A4)
+    ctx.lineCap = 'round';
+    // route
+    ctx.strokeStyle = 'rgba(255,0,180,.9)'; ctx.lineWidth = 5 * u;
+    ctx.beginPath(); b.pts.forEach((p, i) => { const q = P(p); i ? ctx.lineTo(...q) : ctx.moveTo(...q); }); ctx.stroke();
+    if (b.altLeg) { ctx.setLineDash([12 * u, 10 * u]); ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.moveTo(...P(b.pts[b.pts.length - 1])); ctx.lineTo(...P(all[all.length - 1])); ctx.stroke(); ctx.setLineDash([]); }
+    const mk = routeMarks(b);
+    mk.ticks.forEach((t) => {
+      const half = t.major ? 2.6 : 1.7;
+      const a2 = P(destPt(t.p, t.tc - 90, half)), c2 = P(destPt(t.p, t.tc + 90, half));
+      ctx.strokeStyle = '#ff00b4'; ctx.lineWidth = (t.major ? 4.5 : 3) * u; ctx.beginPath(); ctx.moveTo(...a2); ctx.lineTo(...c2); ctx.stroke();
+      if (t.major) { const q = P(destPt(t.p, t.tc + 90, 4.2)); ctx.lineWidth = 4 * u; ctx.strokeStyle = '#fff'; ctx.font = `bold ${14 * u}px Helvetica, Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText(`${t.min}'`, ...q); ctx.fillStyle = '#b0007a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${t.min}'`, ...q); }
+    });
+    const fs = 17 * u;
+    mk.boxes.forEach((x) => {
+      const q = P(destPt(x.p, x.tc + 90, 6));
+      ctx.font = `bold ${fs}px Helvetica, Arial`; const w1 = ctx.measureText(x.l2).width;
+      ctx.font = `${fs * .85}px Helvetica, Arial`; const w2 = ctx.measureText(x.l3).width;
+      const bw = Math.max(w1, w2) + 16 * u, bh = fs * 2.4;
+      ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.strokeStyle = '#ff00b4'; ctx.lineWidth = 3 * u;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(q[0] - bw / 2, q[1] - bh / 2, bw, bh, 6 * u) : ctx.rect(q[0] - bw / 2, q[1] - bh / 2, bw, bh); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `bold ${fs}px Helvetica, Arial`; ctx.fillText(x.l2, q[0], q[1] - fs * .5);
+      ctx.font = `${fs * .85}px Helvetica, Arial`; ctx.fillText(x.l3, q[0], q[1] + fs * .6);
+    });
+    all.forEach((p, i) => {
+      const q = P(p), id = i < b.ids.length ? b.ids[i] : b.altLeg.to;
+      ctx.fillStyle = id.startsWith('DT') ? '#ffb300' : '#ff00b4'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3 * u;
+      ctx.beginPath(); ctx.arc(q[0], q[1], 8 * u, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.font = `bold ${fs}px Helvetica, Arial`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 5 * u; ctx.strokeStyle = '#fff'; ctx.strokeText(id, q[0] + 11 * u, q[1] - 6 * u); ctx.fillStyle = '#000'; ctx.fillText(id, q[0] + 11 * u, q[1] - 6 * u);
+    });
+    return { url: cv.toDataURL('image/jpeg', 0.82), w: W, h: H, z };
   }
 
   // Coupe verticale dans le PDF
@@ -1458,6 +1559,21 @@
     doc.setDrawColor(255, 0, 180); doc.setLineWidth(0.9);
     for (let i = 0; i < b.pts.length - 1; i++) { const a = pr(b.pts[i]), c = pr(b.pts[i + 1]); doc.line(a[0], a[1], c[0], c[1]); }
     if (b.altLeg) { const a = pr(b.pts[b.pts.length - 1]), c = pr(pts[pts.length - 1]); doc.setLineWidth(0.4); doc.setLineDashPattern([1.5, 1.2], 0); doc.line(a[0], a[1], c[0], c[1]); doc.setLineDashPattern([], 0); }
+    const mkS = routeMarks(b);
+    doc.setDrawColor(255, 0, 180);
+    mkS.ticks.forEach((t) => {
+      const h1 = pr(destPt(t.p, t.tc - 90, t.major ? 1.8 : 1.1)), h2 = pr(destPt(t.p, t.tc + 90, t.major ? 1.8 : 1.1));
+      doc.setLineWidth(t.major ? .6 : .35); doc.line(h1[0], h1[1], h2[0], h2[1]);
+      if (t.major) { const q = pr(destPt(t.p, t.tc + 90, 3)); doc.setFontSize(5); doc.setTextColor(170, 0, 120); doc.text(`${t.min}'`, q[0], q[1], { align: 'center' }); }
+    });
+    mkS.boxes.forEach((x) => {
+      const q = pr(destPt(x.p, x.tc + 90, 5));
+      doc.setFontSize(6); const w2 = Math.max(doc.getTextWidth(latin(x.l2)), doc.getTextWidth(latin(x.l3))) + 2.4;
+      doc.setFillColor(255, 255, 255); doc.setDrawColor(255, 0, 180); doc.setLineWidth(.3);
+      doc.roundedRect(q[0] - w2 / 2, q[1] - 3.4, w2, 6.6, .8, .8, 'FD');
+      doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.text(latin(x.l2), q[0], q[1] - .6, { align: 'center' });
+      doc.setFont('helvetica', 'normal'); doc.text(latin(x.l3), q[0], q[1] + 2.2, { align: 'center' });
+    });
     doc.setFontSize(7.5); doc.setTextColor(0);
     pts.forEach((p, i) => {
       const q = pr(p), id = i < b.ids.length ? b.ids[i] : b.altLeg.to;

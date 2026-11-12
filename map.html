@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="icons/icon48.png">
   <link rel="manifest" href="app.webmanifest">
-  <meta name="theme-color" content="#006699">
+  <meta name="theme-color" content="#0b1c2e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Aéro Ouest">
   <link rel="apple-touch-icon" href="icons/icon192.png">
@@ -19,73 +19,91 @@
   <div id="clock" title="Heure UTC">--:--:-- UTC</div>
 
   <aside id="panel" class="box">
-    <header>
-      <img src="icons/icon48.png" alt="" width="28" height="28">
-      <div>
+    <header class="brand">
+      <div class="logo"><img src="icons/icon48.png" alt="" width="30" height="30"></div>
+      <div class="brand-txt">
         <h1>Aéro Météo Webcams</h1>
-        <p class="sub">Pyrénées → Atlantique → Bretagne</p>
+        <p class="sub">Pyrénées · Atlantique · Bretagne</p>
       </div>
       <button id="collapse" class="icon-btn" title="Réduire / agrandir le panneau">–</button>
     </header>
 
     <div id="panel-body">
-      <button id="btn-prep" class="prep-btn">✈️ Préparer un vol (briefing PDF)</button>
-      <button id="btn-last" class="btn" style="width:100%;margin-top:6px" hidden>📂 Dernier briefing (disponible hors ligne)</button>
-      <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
+      <button id="btn-prep" class="prep-btn">✈️ Préparer un vol <small>briefing PDF · log Excel</small></button>
+      <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
+      </div>
       <ul id="results"></ul>
 
-      <h2>Calques</h2>
-      <label><input type="checkbox" data-layer="metar" checked> <span class="sw sw-metar"></span> METAR / TAF (direct)</label>
-      <label><input type="checkbox" data-layer="apt" checked> <span class="sw sw-apt"></span> Aérodromes sans METAR</label>
-      <label><input type="checkbox" data-layer="camAero" checked> <span class="sw sw-cam-aero"></span> Webcams aérodromes</label>
-      <label><input type="checkbox" data-layer="cam" checked> <span class="sw sw-cam"></span> Webcams paysage / côte / montagne</label>
-      <label><input type="checkbox" data-layer="obs" checked> <span class="sw sw-obs"></span> Observations Météociel</label>
-      <label><input type="checkbox" data-layer="wind" checked> <span class="sw sw-wind"></span> Balises vent (PiouPiou, FFVL)</label>
-      <label><input type="checkbox" data-layer="radar"> <span class="sw sw-radar"></span> Radar pluie animé</label>
+      <details class="sec" open>
+        <summary>🌦️ Météo &amp; webcams</summary>
+        <label><input type="checkbox" data-layer="metar" checked> <span class="sw sw-metar"></span> METAR / TAF (direct)</label>
+        <label><input type="checkbox" data-layer="apt" checked> <span class="sw sw-apt"></span> Aérodromes sans METAR</label>
+        <label><input type="checkbox" data-layer="camAero" checked> <span class="sw sw-cam-aero"></span> Webcams aérodromes</label>
+        <label><input type="checkbox" data-layer="cam" checked> <span class="sw sw-cam"></span> Webcams paysage / côte / montagne</label>
+        <label><input type="checkbox" data-layer="obs" checked> <span class="sw sw-obs"></span> Observations Météociel</label>
+        <label><input type="checkbox" data-layer="wind" checked> <span class="sw sw-wind"></span> Balises vent (PiouPiou, FFVL)</label>
+        <label><input type="checkbox" data-layer="radar"> <span class="sw sw-radar"></span> Radar pluie animé</label>
+        <div id="radar-ctrl" hidden>
+          <button id="radar-play" class="small">⏸</button>
+          <span id="radar-time">--:--</span>
+        </div>
+      </details>
 
-      <h2>NOTAM & SUP AIP</h2>
-      <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h)</label>
-      <div class="sub-opts">
-        <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
-        <label>Plancher ≤ <select id="notam-fl" class="inline">
-          <option value="35">FL035</option><option value="65" selected>FL065</option>
-          <option value="115">FL115</option><option value="999">tous</option></select></label>
-      </div>
-      <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
+      <details class="sec" open>
+        <summary>⚠️ NOTAM &amp; SUP AIP</summary>
+        <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h)</label>
+        <div class="sub-opts">
+          <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
+          <label>Plancher ≤ <select id="notam-fl" class="inline">
+            <option value="35">FL035</option><option value="65" selected>FL065</option>
+            <option value="115">FL115</option><option value="999">tous</option></select></label>
+        </div>
+        <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
+        <div class="tools">
+          <button id="btn-notam-list">⚠️ Liste NOTAM</button>
+          <button id="btn-sup-list">📄 Liste SUP AIP</button>
+        </div>
+      </details>
 
-      <h2>Espaces aériens</h2>
-      <label><input type="checkbox" data-layer="asp"> <span class="sw sw-asp"></span> CTR / TMA / CTA (fréquences)</label>
-      <label><input type="checkbox" data-layer="siv"> <span class="sw sw-siv"></span> SIV (fréquences Info)</label>
-      <label><input type="checkbox" data-layer="zones"> <span class="sw sw-zones"></span> Zones P / R / D</label>
-      <label><input type="checkbox" data-layer="rtba" checked> <span class="sw sw-rtba"></span> RTBA actives aujourd'hui</label>
-      <label><input type="checkbox" data-layer="vfr"> <span class="sw sw-vfr"></span> Points de report VFR</label>
-      <div class="tools">
-        <button id="btn-notam-list">⚠️ Liste NOTAM</button>
-        <button id="btn-sup-list">📄 Liste SUP AIP</button>
-      </div>
-      <div id="radar-ctrl" hidden>
-        <button id="radar-play" class="small">⏸</button>
-        <span id="radar-time">--:--</span>
-      </div>
+      <details class="sec">
+        <summary>🛩️ Espaces aériens</summary>
+        <label><input type="checkbox" data-layer="asp"> <span class="sw sw-asp"></span> CTR / TMA / CTA (fréquences)</label>
+        <label><input type="checkbox" data-layer="siv"> <span class="sw sw-siv"></span> SIV (fréquences Info)</label>
+        <label><input type="checkbox" data-layer="zones"> <span class="sw sw-zones"></span> Zones P / R / D</label>
+        <label><input type="checkbox" data-layer="rtba" checked> <span class="sw sw-rtba"></span> RTBA actives aujourd'hui</label>
+        <label><input type="checkbox" data-layer="vfr"> <span class="sw sw-vfr"></span> Points de report VFR</label>
+      </details>
 
-      <h2>Fond de carte</h2>
-      <select id="basemap">
-        <option value="schema">Schéma (style Inter Aéro)</option>
-        <option value="carto">Carte sombre</option>
-        <option value="topo">Relief (OpenTopoMap)</option>
-        <option value="sat">Satellite (Esri)</option>
-      </select>
+      <details class="sec" open>
+        <summary>🗺️ Fond de carte</summary>
+        <select id="basemap">
+          <optgroup label="Cartes aéronautiques / IGN">
+            <option value="oaci">Carte OACI-VFR 1/500 000 (IGN-SIA)</option>
+            <option value="scan1000">Carte de France 1/1 000 000 (IGN)</option>
+            <option value="scanreg">Carte régionale 1/250 000 (IGN)</option>
+          </optgroup>
+          <optgroup label="Autres fonds">
+            <option value="schema">Schéma (style Inter Aéro, hors ligne)</option>
+            <option value="carto">Carte sombre</option>
+            <option value="topo">Relief (OpenTopoMap)</option>
+            <option value="sat">Satellite (Esri)</option>
+          </optgroup>
+        </select>
+      </details>
 
-      <h2>Outils météo</h2>
-      <div id="tools" class="tools"></div>
+      <details class="sec">
+        <summary>🧰 Outils météo &amp; trafic</summary>
+        <div id="tools" class="tools"></div>
+      </details>
 
-      <p class="legend">
-        Catégories METAR :
-        <b class="c-VFR">VFR</b> <b class="c-MVFR">MVFR</b> <b class="c-IFR">IFR</b> <b class="c-LIFR">LIFR</b><br>
+      <div class="legend">
+        <div class="cats"><b class="c-VFR">VFR</b><b class="c-MVFR">MVFR</b><b class="c-IFR">IFR</b><b class="c-LIFR">LIFR</b></div>
         <span id="status">Chargement…</span><br>
         <span id="status2"></span>
-      </p>
-      <p class="legend small-print">Vérifier la date et l'heure de chaque webcam. Outil d'aide uniquement : la préparation réglementaire reste aeroweb / SIA / NOTAM.</p>
+      </div>
+      <p class="legend small-print">Vérifier la date et l'heure de chaque webcam. Outil d'aide uniquement : la préparation réglementaire reste SOFIA / SIA / aviation.meteo.fr.</p>
     </div>
   </aside>
 

@@ -1,5 +1,5 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v1';
+const VERSION = 'aww-v2';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',

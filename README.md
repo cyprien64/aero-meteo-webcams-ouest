@@ -62,6 +62,12 @@ Le PDF contient :
 - **Export** GPX (SkyDemon, Garmin…) et Garmin `.fpl` (ForeFlight, Garmin Pilot).
 - **Fonds de carte** : carte OACI-VFR 1/500 000, carte de France 1/1 000 000 (SCAN 1000) et carte régionale (SCAN Régional) de l'IGN (Géoplateforme), schéma hors ligne, sombre, relief, satellite.
 - **Repères toutes les 5 min de vol** (étiquette toutes les 10 min) et **cartouche par branche** (temps, cap magnétique, distance, vitesse sol), sur la carte, le croquis et une page « Carte de navigation » sur fond OACI 1/500 000 dans le PDF.
+- **Coupe des espaces aériens** (bouton ✂️ ou clic droit sur la carte, bouton dans chaque fiche aérodrome) : empilement des espaces
+  du sol au FL195 au-dessus d'un point, ou coupe A → B avec le relief ; pour chaque espace : classe, limites, indicatif et fréquence,
+  règles de pénétration (clairance, radio, transpondeur, VMC, RMZ/TMZ, zones P/R/D, RTBA).
+- **GRAMET** : coupe météo de la route à l'heure de passage (Open-Meteo, 1000 à 500 hPa) — nuages par niveau, givrage probable,
+  isothermes 0 / -10 °C, vent en barbules, pluie et orages, relief et altitude de croisière ; à l'écran et en page du PDF,
+  avec lien vers le GRAMET Ogimet (GFS) et vers TEMSI / WINTEM.
 - **Calques** : CTR/TMA/CTA et SIV avec fréquences, zones P/R/D, RTBA actives du jour, points VFR.
 - **Tablette hors ligne** : le site s'installe comme une application (« Ajouter à l'écran d'accueil ») ; le dernier briefing (PDF + Excel) reste consultable sans réseau.
 

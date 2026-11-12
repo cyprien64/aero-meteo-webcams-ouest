@@ -390,6 +390,8 @@
     detailBody.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showAerodrome(b.dataset.goto)));
     bindEscale(detailBody, icao);
     bindDocLinks(detailBody);
+    detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">✂️ Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
+    $('#ad-stack').addEventListener('click', () => showStack(a.la, a.lo, `Espaces au-dessus de ${icao}`));
     detail.hidden = false;
     if (fly) map.flyTo([a.la, a.lo], Math.max(map.getZoom(), 9), { duration: .6 });
   }
@@ -708,10 +710,193 @@
     }
   }
 
+
+  // ---------- Coupe des espaces aériens (clic sur la carte) + règles de pénétration ----------
+  const inPolyM = (p, poly) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [ya, xa] = poly[i], [yb, xb] = poly[j];
+      if ((ya > p[0]) !== (yb > p[0]) && p[1] < (xb - xa) * (p[0] - ya) / (yb - ya) + xa) c = !c;
+    }
+    return c;
+  };
+  const altFt = (s) => {
+    if (!s) return null;
+    if (/^\s*(SFC|GND)\s*$/i.test(s)) return 0;
+    if (/UNL/i.test(s)) return 99999;
+    let m = s.match(/FL\s?(\d{2,3})/i); if (m) return +m[1] * 100;
+    m = s.match(/(\d{3,5})\s?FT/i); if (m) return +m[1];
+    if (/SFC|GND/i.test(s)) return 0;
+    return null;
+  };
+  const isAglS = (s) => /ASFC|AGL/i.test(s || '');
+  const CLS_RULES = {
+    A: ['VFR interdit (sauf dérogation particulière).'],
+    B: ['Clairance obligatoire avant d\'entrer.', 'Contact radio bilatéral permanent.'],
+    C: ['Clairance obligatoire avant d\'entrer.', 'Contact radio bilatéral permanent.', 'Transpondeur (mode A+C ou S) obligatoire.', 'Séparation VFR / IFR assurée, information de trafic VFR / VFR.', 'VMC : visibilité 5 km (8 km au-dessus du FL100), 1 500 m horizontalement et 1 000 ft verticalement des nuages.'],
+    D: ['Clairance obligatoire avant d\'entrer.', 'Contact radio bilatéral permanent.', 'Transpondeur allumé (mode C ou S) — vérifier sur la VAC / l\'AIP s\'il est exigé.', 'Information de trafic VFR / IFR et VFR / VFR (pas de séparation).', 'VMC : 5 km, 1 500 m horizontalement et 1 000 ft verticalement des nuages ; 250 kt max sous le FL100.'],
+    E: ['Pas de clairance pour le VFR.', 'Contact radio non obligatoire (sauf RMZ / TMZ ou mention contraire) mais recommandé.', 'VMC : 5 km (8 km au-dessus du FL100), 1 500 m et 1 000 ft des nuages.'],
+    G: ['Pas de clairance.', 'Au-dessus de 3 000 ft AMSL / 1 000 ft ASFC : 5 km, 1 500 m et 1 000 ft des nuages.', 'En dessous : 5 km (1 500 m si ≤ 140 kt), hors nuages et en vue du sol.', 'Auto-information 123.500 hors fréquence publiée.'],
+  };
+  const KIND_RULES = {
+    CTR: 'Zone de contrôle d\'aérodrome : contacter la tour avant la limite, entrer / sortir par les points de report VFR de la VAC.',
+    TMA: 'Région de contrôle terminale : contacter l\'approche avant la limite avec une demande de transit (indicatif, type, position, altitude, intentions).',
+    CTA: 'Région de contrôle : contacter l\'organisme avant la limite avec une demande de transit.',
+    RMZ: 'Zone à utilisation obligatoire de radio : annoncer indicatif, type, position, niveau et intentions avant d\'entrer, puis garder l\'écoute.',
+    TMZ: 'Zone à utilisation obligatoire de transpondeur : transpondeur allumé (mode A+C ou S) obligatoire.',
+    SIV: 'Secteur d\'information de vol : contact recommandé (information de vol, trafic, alerte), code transpondeur attribué.',
+    P: 'Zone interdite : pénétration interdite.',
+    R: 'Zone réglementée : pénétration interdite pendant l\'activité sauf autorisation (horaires, conditions et contact dans les remarques / AIP ENR 5.1, SUP AIP, NOTAM).',
+    D: 'Zone dangereuse : pénétration non interdite mais à éviter pendant l\'activité ; se renseigner auprès de l\'organisme indiqué.',
+    RTBA: 'RTBA (réseau très basse altitude défense) : pénétration interdite pendant l\'activité — consulter l\'AZBA (créneaux de la veille / du jour).',
+  };
+  function aspColor(v) {
+    if (v.rtba) return '#ff3b30';
+    if (v.kind === 'P') return '#d81b60';
+    if (v.kind === 'R') return '#8e24aa';
+    if (v.kind === 'D') return '#fb8c00';
+    if (v.kind === 'SIV') return '#66bb6a';
+    if (v.kind === 'RMZ') return '#00acc1';
+    if (v.kind === 'TMZ') return '#7e57c2';
+    return { A: '#c62828', B: '#ad1457', C: '#6a1b9a', D: '#1e88e5', E: '#43a047' }[v.cls] || '#64b5f6';
+  }
+  function aspVolumes() {
+    const out = [];
+    const act = rtbaToday();
+    for (const s of AIR.asp) out.push({ name: s.name, kind: s.kind, cls: s.cls, lowerS: s.lower, upperS: s.upper, freq: s.freq, call: s.call, poly: s.poly });
+    for (const z of AIR.zones) {
+      const slots = act[z.id.replace(/\s/g, '')];
+      out.push({ name: `${z.id} ${z.name}`, kind: z.type, cls: z.type, lowerS: z.lower, upperS: z.upper, rmk: z.rmk, poly: z.poly, rtba: !!z.rtba, slots });
+    }
+    return out.map((v) => ({ ...v, lo: altFt(v.lowerS), hi: Math.min(altFt(v.upperS) ?? 19500, 66000), loAgl: isAglS(v.lowerS), hiAgl: isAglS(v.upperS), color: aspColor(v) }))
+      .filter((v) => v.lo !== null && v.poly && v.poly.length > 2);
+  }
+  function rulesOf(v) {
+    const r = [];
+    if (v.rtba) r.push(KIND_RULES.RTBA);
+    else if (KIND_RULES[v.kind]) r.push(KIND_RULES[v.kind]);
+    if (!['P', 'R', 'D'].includes(v.kind)) {
+      const c = (v.cls || '').split('/')[0];
+      if (CLS_RULES[c] && !(v.kind === 'SIV' && c === 'G')) r.push(...CLS_RULES[c].map((x) => `Classe ${c} : ${x}`));
+      if (v.kind === 'SIV') r.push('Classe G/E selon la tranche : voir la carte OACI.');
+    }
+    return r;
+  }
+  function aspCard(v, extra = '') {
+    return `<div class="asp-card" style="border-left-color:${v.color}">
+      <div class="asp-h"><b>${esc(v.name)}</b> <span class="asp-cls" style="background:${v.color}">${esc(['P', 'R', 'D'].includes(v.kind) ? (v.rtba ? 'RTBA' : 'Zone ' + v.kind) : `${v.kind} · classe ${v.cls}`)}</span></div>
+      <div class="asp-lim">⬇ ${esc(v.lowerS)} &nbsp; ⬆ ${esc(v.upperS)}${extra}</div>
+      ${v.freq ? `<div class="asp-f">📻 ${esc(v.call || '')} <b>${esc(v.freq)}</b></div>` : ''}
+      ${v.slots ? `<div class="asp-f" style="color:#ff6b6b"><b>Active aujourd'hui : ${esc(v.slots.join(', '))} UTC</b></div>` : ''}
+      <ul>${rulesOf(v).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${v.rmk ? `<details><summary>Remarques AIP</summary><p class="meta">${esc(v.rmk)}</p></details>` : ''}
+    </div>`;
+  }
+  async function elevFt(points) {
+    try {
+      const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${points.map((p) => p[0].toFixed(4)).join(',')}&longitude=${points.map((p) => p[1].toFixed(4)).join(',')}`);
+      return (await r.json()).elevation.map((m) => Math.max(0, Math.round(m * 3.281)));
+    } catch { return points.map(() => 0); }
+  }
+  // échelle verticale : 0–6 000 ft sur 55 % de la hauteur, puis jusqu'au FL195
+  const vScale = (ft, top, bot) => { const f = Math.min(ft, 19500); const k = f <= 6000 ? f / 6000 * .55 : .55 + (f - 6000) / 13500 * .45; return bot - k * (bot - top); };
+  const vTicks = [[0, 'SOL'], [1000, '1000'], [2000, '2000'], [3000, '3000'], [4000, '4000'], [5000, '5000'], [6500, 'FL065'], [10000, 'FL100'], [11500, 'FL115'], [14500, 'FL145'], [19500, 'FL195']];
+  async function showStack(lat, lon, title) {
+    await loadAirLayers();
+    const p = [lat, lon];
+    const [ter] = await elevFt([p]);
+    const vols = aspVolumes().filter((v) => inPolyM(p, v.poly)).map((v) => ({ ...v, a: v.lo + (v.loAgl ? ter : 0), b: v.hi + (v.hiAgl ? ter : 0) }))
+      .sort((x, y) => x.a - y.a || y.b - x.b);
+    const W = 430, H = 380, top = 10, bot = H - 14, x0 = 52;
+    const lanes = [];
+    vols.forEach((v) => { let i = lanes.findIndex((e) => e <= v.a); if (i < 0) { i = lanes.length; lanes.push(0); } lanes[i] = v.b; v.lane = i; });
+    const nl = Math.max(1, lanes.length), lw = (W - x0 - 6) / nl;
+    const rects = vols.map((v) => {
+      const y1 = vScale(v.b, top, bot), y2 = vScale(v.a, top, bot), x = x0 + v.lane * lw + 2;
+      const lbl = y2 - y1 > 22 ? `<text x="${x + 4}" y="${y1 + 12}" font-size="10" font-weight="700" fill="#fff">${esc(v.name.slice(0, Math.floor(lw / 6.2)))}</text><text x="${x + 4}" y="${y1 + 23}" font-size="9" fill="#dfe">${esc(v.freq || (v.kind === 'P' ? 'INTERDITE' : ''))}</text>` : '';
+      return `<g><title>${esc(v.name)} — ${esc(v.lowerS)} / ${esc(v.upperS)}${v.freq ? ' — ' + esc(v.call || '') + ' ' + esc(v.freq) : ''}</title><rect x="${x}" y="${y1}" width="${lw - 4}" height="${Math.max(2, y2 - y1)}" rx="4" fill="${v.color}" fill-opacity=".45" stroke="${v.color}" stroke-width="1.5"/>${lbl}</g>`;
+    }).join('');
+    const ticks = vTicks.map(([f, t]) => `<line x1="${x0 - 4}" x2="${W}" y1="${vScale(f, top, bot)}" y2="${vScale(f, top, bot)}" stroke="#fff" stroke-opacity=".08"/><text x="2" y="${vScale(f, top, bot) + 3}" font-size="9" fill="#9bd">${t}</text>`).join('');
+    const ground = `<rect x="${x0 - 4}" y="${vScale(ter, top, bot)}" width="${W - x0 + 4}" height="${bot - vScale(ter, top, bot) + 14}" fill="#8d6e63" fill-opacity=".9"/><text x="${W - 4}" y="${bot + 10}" font-size="9" fill="#fff" text-anchor="end">sol ${ter} ft</text>`;
+    const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" class="cut-svg">${ticks}${rects}${ground}</svg>`;
+    const below = vols.length ? '' : '<div class="okk">Aucun espace contrôlé ni zone : classe G jusqu\'au FL065 au moins (auto-information 123.500, SIV conseillé).</div>';
+    showList(title || `Coupe des espaces — ${lat.toFixed(3)}, ${lon.toFixed(3)}`, `
+      <p class="meta">Empilement des espaces au-dessus de ce point, du sol au FL195 (échelle dilatée sous 6 000 ft). Les limites « ASFC » sont ramenées au relief (${ter} ft). Survole un bloc pour le détail.</p>
+      ${svg}${below}
+      <h4>Règles de pénétration et fréquences</h4>
+      ${vols.map((v) => aspCard(v, ` <span class="meta">(${Math.round(v.a)}–${v.b >= 19500 ? 'FL195+' : Math.round(v.b)} ft)</span>`)).join('')}
+      <p class="legend small-print">Espaces : fichier OpenAir FFVP (non officiel), zones P/R/D : eAIP ENR 5.1. Vérifier sur la carte OACI en vigueur, l'AIP et les NOTAM / SUP AIP.</p>`);
+  }
+  async function showSection(a, b) {
+    await loadAirLayers();
+    const n = 80, pts = [];
+    for (let i = 0; i <= n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+    const totNm = distKm(a[0], a[1], b[0], b[1]) / 1.852;
+    const ter = await elevFt(pts);
+    const vols = [];
+    for (const v of aspVolumes()) {
+      if (v.lo > 19000) continue;
+      let cur = null;
+      pts.forEach((p, i) => {
+        const ins = inPolyM(p, v.poly);
+        if (ins && !cur) cur = { i0: i, i1: i, tmax: 0 };
+        if (ins) { cur.i1 = i; cur.tmax = Math.max(cur.tmax, ter[i]); }
+        if ((!ins || i === n) && cur) { vols.push({ ...v, i0: cur.i0, i1: cur.i1, a: v.lo + (v.loAgl ? cur.tmax : 0), b: v.hi + (v.hiAgl ? cur.tmax : 0) }); cur = null; }
+      });
+    }
+    const W = 460, H = 300, top = 8, bot = H - 22, x0 = 46, X = (i) => x0 + i / n * (W - x0 - 6);
+    vols.sort((x, y) => (y.b - y.a) - (x.b - x.a));
+    const rects = vols.map((v) => {
+      const xa = X(Math.max(0, v.i0 - .5)), xb = X(Math.min(n, v.i1 + .5)), y1 = vScale(v.b, top, bot), y2 = vScale(v.a, top, bot);
+      const lbl = xb - xa > 46 && y2 - y1 > 14 ? `<text x="${xa + 3}" y="${y1 + 11}" font-size="9" font-weight="700" fill="#fff">${esc(v.name.slice(0, Math.floor((xb - xa) / 5.6)))}</text>` : '';
+      return `<g><title>${esc(v.name)} — ${esc(v.lowerS)} / ${esc(v.upperS)}${v.freq ? ' — ' + esc(v.call || '') + ' ' + esc(v.freq) : ''}</title><rect x="${xa}" y="${y1}" width="${Math.max(2, xb - xa)}" height="${Math.max(2, y2 - y1)}" fill="${v.color}" fill-opacity=".3" stroke="${v.color}" stroke-width="1.2"/>${lbl}</g>`;
+    }).join('');
+    const ticks = vTicks.map(([f, t]) => `<line x1="${x0 - 4}" x2="${W}" y1="${vScale(f, top, bot)}" y2="${vScale(f, top, bot)}" stroke="#fff" stroke-opacity=".08"/><text x="2" y="${vScale(f, top, bot) + 3}" font-size="9" fill="#9bd">${t}</text>`).join('');
+    const terPath = `M${X(0)},${bot} ` + ter.map((t, i) => `L${X(i).toFixed(1)},${vScale(t, top, bot).toFixed(1)}`).join(' ') + ` L${X(n)},${bot} Z`;
+    const nmTicks = [0, .25, .5, .75, 1].map((k) => `<text x="${X(n * k)}" y="${H - 6}" font-size="9" fill="#9bd" text-anchor="${k === 0 ? 'start' : k === 1 ? 'end' : 'middle'}">${Math.round(totNm * k)} NM</text>`).join('');
+    const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" class="cut-svg">${ticks}${rects}<path d="${terPath}" fill="#8d6e63" fill-opacity=".9"/>${nmTicks}<text x="${X(0) + 2}" y="${bot - 4}" font-size="10" font-weight="700" fill="#fff">A</text><text x="${X(n) - 10}" y="${bot - 4}" font-size="10" font-weight="700" fill="#fff">B</text></svg>`;
+    const uniq = [...new Map(vols.sort((x, y) => x.i0 - y.i0 || x.a - y.a).map((v) => [v.name + v.lowerS, v])).values()];
+    showList(`Coupe A → B (${totNm.toFixed(0)} NM)`, `
+      <p class="meta">Coupe verticale des espaces aériens et du relief le long du segment, du sol au FL195 (échelle dilatée sous 6 000 ft). Survole un bloc pour le détail. Clique ailleurs sur la carte pour une nouvelle coupe.</p>
+      ${svg}
+      <h4>Espaces traversés (${uniq.length}) — règles et fréquences</h4>
+      ${uniq.map((v) => aspCard(v, ` <span class="meta">· de ${Math.round(v.i0 / n * totNm)} à ${Math.round(v.i1 / n * totNm)} NM</span>`)).join('') || '<div class="okk">Aucun espace contrôlé ni zone : classe G.</div>'}
+      <p class="legend small-print">Espaces : fichier OpenAir FFVP (non officiel), zones P/R/D : eAIP ENR 5.1. Vérifier sur la carte OACI en vigueur, l'AIP et les NOTAM / SUP AIP.</p>`);
+  }
+  const cutLayer = L.layerGroup().addTo(map);
+  let cutMode = false, cutA = null;
+  const cutBtn = $('#btn-cut'), cutHint = $('#cut-hint');
+  function setCut(on) {
+    cutMode = on; cutA = null; cutLayer.clearLayers();
+    cutBtn.classList.toggle('on', on);
+    cutHint.hidden = !on;
+    map.getContainer().style.cursor = on ? 'crosshair' : '';
+    if (on) cutHint.textContent = '1er clic : empilement au-dessus du point · 2e clic : coupe A → B.';
+  }
+  cutBtn.addEventListener('click', () => setCut(!cutMode));
+  map.on('click', (e) => {
+    if (!cutMode) return;
+    const p = [e.latlng.lat, e.latlng.lng];
+    if (!cutA) {
+      cutLayer.clearLayers(); cutA = p;
+      L.circleMarker(p, { radius: 6, color: '#fff', weight: 2, fillColor: '#ffd34d', fillOpacity: 1 }).bindTooltip('A', { permanent: true, direction: 'right', className: 'tip' }).addTo(cutLayer);
+      cutHint.textContent = 'Clique le point B pour la coupe A → B (ou Échap).';
+      showStack(p[0], p[1]);
+    } else {
+      L.polyline([cutA, p], { color: '#ffd34d', weight: 3, dashArray: '8 6' }).addTo(cutLayer);
+      L.circleMarker(p, { radius: 6, color: '#fff', weight: 2, fillColor: '#ffd34d', fillOpacity: 1 }).bindTooltip('B', { permanent: true, direction: 'right', className: 'tip' }).addTo(cutLayer);
+      showSection(cutA, p); cutA = null;
+      cutHint.textContent = 'Nouveau clic : nouvelle coupe. Re-clique sur le bouton pour quitter.';
+    }
+  });
+  map.on('contextmenu', (e) => showStack(e.latlng.lat, e.latlng.lng));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cutMode) setCut(false); });
+
   // ---------- API interne pour le module de préparation de vol (flightprep.js) ----------
   window.AWW = {
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
     metars, tafs, aptByIcao, APTS, SOURCES,
+    showStack: (la, lo, t) => showStack(la, lo, t),
     get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor,
     showPanel(title, html) { showList(title, html); },
     detailBody, detail,

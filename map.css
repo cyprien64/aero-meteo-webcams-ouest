@@ -219,3 +219,14 @@ details.sec select#basemap { margin-top: 2px; }
 @media (max-width: 700px) { .leaflet-top.leaflet-left { left: 0; top: auto; } #panel { width: calc(100% - 24px); max-height: 46%; } }
 
 #radar-ctrl[hidden], [hidden] { display: none !important; }
+
+/* Coupe des espaces aériens */
+.hint { font-size: 11px; color: var(--muted, #9ab); margin: 2px 0 6px; line-height: 1.35; }
+#btn-cut.on { background: linear-gradient(135deg, #ffb340, #ff8a00); color: #1a1200; border-color: transparent; font-weight: 700; }
+.cut-svg { background: linear-gradient(#0d2236, #16324c); border-radius: 10px; margin: 4px 0 8px; }
+.asp-card { border-left: 4px solid #64b5f6; background: rgba(255,255,255,.05); border-radius: 9px; padding: 7px 10px; margin: 6px 0; font-size: 12px; }
+.asp-card ul { margin: 4px 0 0; padding-left: 17px; } .asp-card li { margin: 1px 0; }
+.asp-h { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.asp-cls { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 99px; color: #fff; }
+.asp-lim { color: #cfe3f5; margin-top: 2px; } .asp-f { margin-top: 2px; }
+.gramet-cv { width: 100%; border-radius: 8px; background: #fff; display: block; }

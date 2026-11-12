@@ -423,8 +423,15 @@
       const userIds = [f.dep, exit, ...wps.map((w) => w.id), entry, f.arr].filter(Boolean);
       prog.textContent = 'Calcul de la route, du vent et du relief…';
       const b = await compute(f, userIds);
+      prog.textContent = 'GRAMET : coupe météo le long de la route…';
+      b.gramet = await gramet(b).catch((e) => ({ err: e.message }));
       drawRoute(b);
       out.innerHTML = summaryHtml(b);
+      if (b.gramet && !b.gramet.err) drawGramet($('#pf-gramet'), b.gramet, b);
+      $('#pf-gramet-big') && $('#pf-gramet-big').addEventListener('click', () => {
+        const cv = document.createElement('canvas'); cv.width = 1800; cv.height = 860; drawGramet(cv, b.gramet, b);
+        const w = window.open(''); if (w) { w.document.title = 'GRAMET ' + b.ids.join(' - '); w.document.body.style.margin = 0; const im = w.document.createElement('img'); im.src = cv.toDataURL('image/png'); im.style.width = '100%'; w.document.body.appendChild(im); }
+      });
       $('#pf-gpx').addEventListener('click', () => exportGpx(b));
       $('#pf-fpl').addEventListener('click', () => exportFpl(b));
       lastBrief = b;
@@ -753,6 +760,169 @@
       <text x="${X(0)}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[0])}</text><text x="${X(v.total) - 26}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[b.ids.length - 1])}</text></svg>`;
   }
 
+
+  // ================================================================== GRAMET (coupe météo le long de la route)
+  // Modèle Open-Meteo (AROME / ARPEGE / ECMWF selon disponibilité) par niveau de pression, à l'heure de passage :
+  // nuages par niveau, givrage probable (0 à -15 °C dans le nuage ou HR ≥ 85 %), isothermes 0 / -10 °C, vent, précipitations.
+  const GLV = [1000, 950, 900, 850, 800, 700, 600, 500];
+  const grametCache = new Map();
+  function routePosAt(b, along) {
+    let acc = 0, tmin = 0;
+    for (const lg of b.legs) {
+      if (along <= acc + lg.dist + 1e-6 || lg === b.legs[b.legs.length - 1]) {
+        const d = Math.max(0, Math.min(lg.dist, along - acc));
+        return { p: destPt(lg.a, lg.tc, d), at: new Date(b.depT.getTime() + (tmin + d / lg.gs * 60) * 6e4) };
+      }
+      acc += lg.dist; tmin += lg.dist / lg.gs * 60;
+    }
+  }
+  async function gramet(b) {
+    const horizon = (b.depT - Date.now()) / 864e5;
+    if (horizon < -1 || horizon > 15) return { err: 'prévisions disponibles à 16 jours' };
+    const total = b.totDist, n = Math.min(24, Math.max(8, Math.round(total / 8)));
+    const cols = [];
+    for (let k = 0; k <= n; k++) cols.push({ along: total * k / n, ...routePosAt(b, total * k / n) });
+    const days = [...new Set(cols.map((c) => c.at.toISOString().slice(0, 10)))].sort();
+    const vars = GLV.flatMap((l) => ['temperature', 'relative_humidity', 'cloud_cover', 'wind_speed', 'wind_direction', 'geopotential_height'].map((v) => `${v}_${l}hPa`));
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${cols.map((c) => c.p[0].toFixed(3)).join(',')}&longitude=${cols.map((c) => c.p[1].toFixed(3)).join(',')}`
+      + `&hourly=${vars.join(',')},freezing_level_height,precipitation,cape,weather_code`
+      + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`;
+    let d = grametCache.get(url);
+    if (!d) {
+      let r = await fetch(url);
+      if (r.status === 429) { await new Promise((ok) => setTimeout(ok, 4000)); r = await fetch(url); }
+      if (!r.ok) throw new Error(r.status === 429 ? 'serveur météo saturé, réessayer dans une minute' : 'open-meteo ' + r.status);
+      d = await r.json(); if (!Array.isArray(d)) d = [d];
+      grametCache.set(url, d);
+    }
+    cols.forEach((c, i) => {
+      const h = d[i].hourly, key = new Date(Math.round(c.at / 36e5) * 36e5).toISOString().slice(0, 13) + ':00';
+      const idx = Math.max(0, h.time.indexOf(key)), g = (k) => (h[k] ? h[k][idx] : null);
+      c.lv = GLV.map((l) => {
+        const rh = g(`relative_humidity_${l}hPa`); let cc = g(`cloud_cover_${l}hPa`);
+        if (cc == null && rh != null) cc = Math.max(0, Math.min(100, (rh - 75) / 25 * 100));
+        return { l, z: g(`geopotential_height_${l}hPa`) * 3.281, T: g(`temperature_${l}hPa`), rh, cc: cc ?? 0, ws: g(`wind_speed_${l}hPa`), wd: g(`wind_direction_${l}hPa`) };
+      }).filter((x) => x.z != null && !isNaN(x.z) && x.T != null);
+      c.frz = g('freezing_level_height') != null ? g('freezing_level_height') * 3.281 : null;
+      c.rr = g('precipitation'); c.cape = g('cape'); c.wc = g('weather_code');
+      c.elev = (d[i].elevation || 0) * 3.281;
+      const iso = (t) => { for (let k = 0; k < c.lv.length - 1; k++) { const a = c.lv[k], z = c.lv[k + 1]; if (a.T >= t && z.T < t) return a.z + (z.z - a.z) * (a.T - t) / (a.T - z.T); } return c.lv.length && c.lv[0].T < t ? 0 : null; };
+      c.iso0 = iso(0) ?? c.frz; c.iso10 = iso(-10);
+      c.icing = c.lv.some((x) => x.T <= 0 && x.T >= -15 && (x.cc >= 50 || x.rh >= 90) && Math.abs(x.z - b.f.ft) < 1500);
+    });
+    const ex = cols.flatMap((c) => c.lv.filter((x) => Math.abs(x.z - b.f.ft) < 1200)).map((x) => x.cc);
+    return { cols, total, maxCcCruise: ex.length ? Math.max(...ex) : 0, icing: cols.some((c) => c.icing), storm: cols.some((c) => (c.wc ?? 0) >= 95 || (c.cape ?? 0) >= 800), minIso0: Math.min(...cols.map((c) => c.iso0 ?? 99999)) };
+  }
+  function ogimetUrl(b) {
+    const ids = b.ids.filter((x) => /^[A-Z]{4}$/.test(x) && A.aptByIcao[x]);
+    const fl = String(Math.max(10, Math.round(b.f.ft / 100))).padStart(3, '0');
+    return `https://www.ogimet.com/display_gramet.php?lang=fr&icao=${ids.join('_')}&hini=0&tref=${Math.floor(b.depT / 1000)}&hfin=${Math.max(1, Math.ceil(b.totMin / 60))}&fl=${fl}&submit=submit`;
+  }
+  function drawGramet(cv, g, b) {
+    const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, u = W / 1000;
+    const L0 = 52 * u, R0 = W - 14 * u, T0 = 34 * u, B0 = H - 62 * u;
+    const top = Math.min(18000, Math.max(10000, Math.ceil((b.f.ft + 5000) / 1000) * 1000));
+    const X = (nm) => L0 + nm / g.total * (R0 - L0), Y = (ft) => B0 - Math.max(0, Math.min(ft, top)) / top * (B0 - T0);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    const sky = ctx.createLinearGradient(0, T0, 0, B0); sky.addColorStop(0, '#d9ecff'); sky.addColorStop(1, '#f4f9ff');
+    ctx.fillStyle = sky; ctx.fillRect(L0, T0, R0 - L0, B0 - T0);
+    ctx.save(); ctx.beginPath(); ctx.rect(L0, T0, R0 - L0, B0 - T0); ctx.clip();
+    // hachures givrage
+    const pc = document.createElement('canvas'); pc.width = pc.height = Math.round(10 * u);
+    const px = pc.getContext('2d'); px.strokeStyle = 'rgba(214,0,90,.8)'; px.lineWidth = 1.6 * u;
+    px.beginPath(); px.moveTo(0, pc.height); px.lineTo(pc.width, 0); px.stroke();
+    const hatch = ctx.createPattern(pc, 'repeat');
+    const cols = g.cols;
+    cols.forEach((c, i) => {
+      const xa = i ? (X(cols[i - 1].along) + X(c.along)) / 2 : L0, xb = i < cols.length - 1 ? (X(c.along) + X(cols[i + 1].along)) / 2 : R0;
+      const lv = [{ ...c.lv[0], z: Math.min(0, c.lv[0] ? c.lv[0].z : 0) }, ...c.lv];
+      for (let k = 0; k < lv.length - 1; k++) {
+        const a = lv[k], z = lv[k + 1], cc = (a.cc + z.cc) / 2, T = (a.T + z.T) / 2, rh = (a.rh + z.rh) / 2;
+        const ya = Y(a.z), yz = Y(z.z);
+        if (cc > 5) { ctx.fillStyle = `rgba(80,92,110,${Math.min(.85, cc / 100 * .85).toFixed(2)})`; ctx.fillRect(xa, yz, xb - xa + .6, ya - yz + .6); }
+        if (T <= 0 && T >= -15 && (cc >= 50 || rh >= 90)) { ctx.fillStyle = hatch; ctx.fillRect(xa, yz, xb - xa + .6, ya - yz + .6); }
+      }
+    });
+    // isothermes
+    const isoLine = (k, col, w, dash) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w * u; ctx.setLineDash(dash.map((x) => x * u)); ctx.beginPath(); let on = false;
+      cols.forEach((c) => { const v = c[k]; if (v == null) { on = false; return; } const x = X(c.along), y = Y(v); if (on) ctx.lineTo(x, y); else { ctx.moveTo(x, y); on = true; } });
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    isoLine('iso0', '#0057d9', 3, [10, 6]); isoLine('iso10', '#00a2c7', 1.8, [4, 5]);
+    // relief
+    const prof = b.vprofile && b.vprofile.profile && b.vprofile.profile.length ? b.vprofile.profile.map((p) => [p.along, p.ft]) : cols.map((c) => [c.along, c.elev]);
+    ctx.fillStyle = '#8d6e63'; ctx.beginPath(); ctx.moveTo(X(0), B0);
+    prof.forEach(([a, f]) => ctx.lineTo(X(a), Y(f))); ctx.lineTo(X(g.total), B0); ctx.closePath(); ctx.fill();
+    // altitude de croisière
+    ctx.strokeStyle = '#ff2bd6'; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.moveTo(L0, Y(b.f.ft)); ctx.lineTo(R0, Y(b.f.ft)); ctx.stroke();
+    // vent (barbules)
+    const barb = (x, y, dir, spd) => {
+      if (spd == null || dir == null) return;
+      const L = 24 * u, th = rad(dir), dx = Math.sin(th), dy = -Math.cos(th);
+      ctx.strokeStyle = '#1b2a3a'; ctx.fillStyle = '#1b2a3a'; ctx.lineWidth = 1.4 * u;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx * L, y + dy * L); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 2 * u, 0, 7); ctx.fill();
+      let s = Math.round(spd / 5) * 5, pos = L;
+      const nx = -dy, ny = dx, fl = 10 * u;
+      const ex = (p) => [x + dx * p, y + dy * p];
+      while (s >= 50) { const [a1, b1] = ex(pos), [a2, b2] = ex(pos - 6 * u); ctx.beginPath(); ctx.moveTo(a1, b1); ctx.lineTo(a1 + nx * fl, b1 + ny * fl); ctx.lineTo(a2, b2); ctx.fill(); pos -= 8 * u; s -= 50; }
+      while (s >= 10) { const [a1, b1] = ex(pos); ctx.beginPath(); ctx.moveTo(a1, b1); ctx.lineTo(a1 + nx * fl + dx * 4 * u, b1 + ny * fl + dy * 4 * u); ctx.stroke(); pos -= 4.5 * u; s -= 10; }
+      if (s >= 5) { if (pos === L) pos -= 4.5 * u; const [a1, b1] = ex(pos); ctx.beginPath(); ctx.moveTo(a1, b1); ctx.lineTo(a1 + nx * fl / 2 + dx * 2 * u, b1 + ny * fl / 2 + dy * 2 * u); ctx.stroke(); }
+    };
+    const step = Math.max(1, Math.round(cols.length / 9));
+    cols.forEach((c, i) => { if (i % step) return; c.lv.forEach((x) => { if ([900, 850, 700, 600, 500].includes(x.l) && x.z > (c.elev || 0) + 300 && x.z < top - 400) barb(X(c.along), Y(x.z), x.wd, x.ws); }); });
+    ctx.restore();
+    // points tournants
+    ctx.font = `700 ${12 * u}px Helvetica, Arial`; ctx.fillStyle = '#1b2a3a'; ctx.strokeStyle = 'rgba(27,42,58,.35)'; ctx.lineWidth = 1 * u;
+    let acc = 0, lastR = -1e9;
+    const endName = b.legs[b.legs.length - 1].to, endL = R0 - ctx.measureText(endName).width - 8 * u;
+    ctx.textAlign = 'right'; ctx.fillText(endName, R0, T0 - 6 * u);
+    b.legs.forEach((lg, i) => {
+      const x = X(acc), w = ctx.measureText(lg.from).width;
+      if (i) { ctx.beginPath(); ctx.moveTo(x, T0); ctx.lineTo(x, B0); ctx.stroke(); }
+      const xl = i ? x - w / 2 : x;
+      if (xl > lastR + 6 * u && xl + w < endL) { ctx.textAlign = 'left'; ctx.fillText(lg.from, xl, T0 - 6 * u); lastR = xl + w; }
+      acc += lg.dist;
+    });
+    // axe vertical
+    ctx.font = `${11 * u}px Helvetica, Arial`; ctx.textAlign = 'right'; ctx.fillStyle = '#334';
+    for (let f = 0; f <= top; f += 2000) { ctx.fillText(f ? `${f / 1000}k ft` : 'MSL', L0 - 5 * u, Y(f) + 4 * u); ctx.strokeStyle = 'rgba(0,0,0,.07)'; ctx.beginPath(); ctx.moveTo(L0, Y(f)); ctx.lineTo(R0, Y(f)); ctx.stroke(); }
+    ctx.strokeStyle = '#334'; ctx.lineWidth = 1.2 * u; ctx.strokeRect(L0, T0, R0 - L0, B0 - T0);
+    // bandeau précipitations / orages + heures
+    const P0 = B0 + 6 * u, PH = 20 * u;
+    ctx.fillStyle = '#f0f4f8'; ctx.fillRect(L0, P0, R0 - L0, PH);
+    cols.forEach((c, i) => {
+      const xa = i ? (X(cols[i - 1].along) + X(c.along)) / 2 : L0, xb = i < cols.length - 1 ? (X(c.along) + X(cols[i + 1].along)) / 2 : R0;
+      if (c.rr > 0.05) { const h = Math.min(1, c.rr / 4) * PH; ctx.fillStyle = c.rr >= 1 ? '#1565c0' : '#64b5f6'; ctx.fillRect(xa, P0 + PH - h, xb - xa, h); }
+      if ((c.wc ?? 0) >= 95 || (c.cape ?? 0) >= 800) { ctx.fillStyle = '#e65100'; ctx.font = `700 ${14 * u}px Helvetica, Arial`; ctx.textAlign = 'center'; ctx.fillText('ϟ', (xa + xb) / 2, P0 + 15 * u); }
+    });
+    ctx.font = `${10 * u}px Helvetica, Arial`; ctx.fillStyle = '#334'; ctx.textAlign = 'right'; ctx.fillText('pluie', L0 - 5 * u, P0 + 14 * u);
+    ctx.textAlign = 'center';
+    let lastT = -1e9;
+    cols.forEach((c, i) => {
+      if (i % step && i !== cols.length - 1) return;
+      const t = `${utc(c.at)} · ${Math.round(c.along)} NM`, w = ctx.measureText(t).width;
+      const x = Math.min(R0 - w / 2, Math.max(L0 + w / 2, X(c.along)));
+      if (x - w / 2 < lastT + 8 * u) return;
+      ctx.fillText(t, x, P0 + PH + 14 * u); lastT = x + w / 2;
+    });
+    // légende
+    const lg = [['rgba(80,92,110,.7)', 'Nuages (par niveau)'], [null, 'Givrage probable'], ['#0057d9', 'Isotherme 0 °C'], ['#00a2c7', '-10 °C'], ['#ff2bd6', `Croisière ${b.f.ft} ft`], ['#8d6e63', 'Relief']];
+    let lx = L0; const ly = H - 12 * u; ctx.font = `${11 * u}px Helvetica, Arial`; ctx.textAlign = 'left';
+    lg.forEach(([col, t]) => { if (col) { ctx.fillStyle = col; ctx.fillRect(lx, ly - 9 * u, 16 * u, 10 * u); } else { ctx.fillStyle = hatch; ctx.fillRect(lx, ly - 9 * u, 16 * u, 10 * u); ctx.strokeStyle = '#d6005a'; ctx.strokeRect(lx, ly - 9 * u, 16 * u, 10 * u); } ctx.fillStyle = '#223'; ctx.fillText(t, lx + 20 * u, ly); lx += ctx.measureText(t).width + 38 * u; });
+    ctx.fillStyle = '#556'; ctx.fillText('Vent : barbules (kt) · ϟ orage / instabilité', lx, ly);
+  }
+  function grametSummary(g, b) {
+    if (!g || g.err) return `Indisponible (${esc((g && g.err) || '?')}).`;
+    const t = [];
+    t.push(`Nébulosité max à l'altitude de croisière ~${Math.round(g.maxCcCruise)} %`);
+    if (g.minIso0 < 99999) t.push(`isotherme 0 °C au plus bas ~${Math.round(g.minIso0 / 100) * 100} ft`);
+    if (g.icing) t.push('risque de givrage près de l\'altitude de croisière');
+    if (g.storm) t.push('instabilité / orages possibles');
+    return t.join(' · ') + '.';
+  }
+
   // ================================================================== carte + résumé
   // Repères toutes les 5 min de vol (vitesse sol de chaque branche) et cartouche par branche (temps, cap, distance)
   function routeMarks(b, every = 5) {
@@ -819,6 +989,8 @@
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
     b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
     if (b.wxRoute && b.wxRoute.worst) al.push(`Météo en route : ${WXTXT[b.wxRoute.worst]} (${[...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 4).join(', ')}).`);
+    if (b.gramet && !b.gramet.err && b.gramet.icing) al.push(`GRAMET : givrage probable près de ${b.f.ft} ft (nuage entre 0 et -15 °C) — vol VFR hors nuages impératif, prévoir une altitude plus basse.`);
+    if (b.gramet && !b.gramet.err && b.gramet.storm) al.push('GRAMET : instabilité / orages possibles sur le trajet (voir TEMSI).');
     if (b.vprofile && b.vprofile.conflicts.length) al.push(`Coupe verticale : à ${b.f.ft} ft la route pénètre ${b.vprofile.conflicts.map((c) => c.name).slice(0, 4).join(', ')} — clairance ou changement d'altitude.`);
     if (b.legs.some((l) => l.safe && l.safe.alt > b.f.ft)) al.push(`Altitude de croisière ${b.f.ft} ft inférieure à l'alti sécu de ${b.legs.filter((l) => l.safe && l.safe.alt > b.f.ft).map((l) => `${l.from}-${l.to} (${l.safe.alt} ft)`).join(', ')}.`);
     return al;
@@ -842,6 +1014,10 @@
       <h4>Coupe verticale</h4>
       ${profileSvg(b.vprofile, b)}
       ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
+      <h4>GRAMET — coupe météo de la route</h4>
+      ${b.gramet && !b.gramet.err ? `<canvas id="pf-gramet" class="gramet-cv" width="1000" height="470"></canvas>` : ''}
+      <p class="meta">${grametSummary(b.gramet, b)} Modèle Open-Meteo à l'heure de passage.</p>
+      <div class="row">${b.gramet && !b.gramet.err ? '<button class="btn" id="pf-gramet-big">🔍 Agrandir</button>' : ''}<a class="btn" href="${esc(ogimetUrl(b))}" target="_blank" rel="noopener">GRAMET Ogimet (GFS)</a><a class="btn" href="https://aviation.meteo.fr" target="_blank" rel="noopener">TEMSI / WINTEM (aviation.meteo.fr)</a></div>
       <h4>Exporter la route</h4>
       <div class="row"><button class="btn" id="pf-gpx">GPX (SkyDemon, Garmin, etc.)</button><button class="btn" id="pf-fpl">Garmin .fpl (ForeFlight, Garmin Pilot)</button></div>
       <h4>Fréquences en route</h4>
@@ -1315,6 +1491,18 @@
         doc.setTextColor(0);
       }
     } catch (e) { console.warn('carte OACI', e); }
+    if (b.gramet && !b.gramet.err) {
+      try {
+        const cv = document.createElement('canvas'); cv.width = 2000; cv.height = 1000; drawGramet(cv, b.gramet, b);
+        newPage('landscape', 'GRAMET - COUPE MÉTÉO DE LA ROUTE');
+        const gw = W - 2 * M, gh = gw * cv.height / cv.width;
+        doc.addImage(cv.toDataURL('image/jpeg', .9), 'JPEG', M, 18, gw, Math.min(gh, H - 42));
+        doc.setFontSize(8.5); doc.text(doc.splitTextToSize(latin(grametSummary(b.gramet, b)), W - 2 * M), M, H - 19);
+        doc.setFontSize(6.5); doc.setTextColor(90);
+        doc.text(latin(`Prévision modèle Open-Meteo (niveaux 1000 à 500 hPa) à l'heure de passage · givrage = nuage ou HR >= 90 % entre 0 et -15 °C · indicatif : à confronter aux TEMSI / WINTEM. GRAMET officiel : ${ogimetUrl(b)}`), M, H - 9, { maxWidth: W - 2 * M });
+        doc.setTextColor(0);
+      } catch (e) { console.warn('gramet pdf', e); }
+    }
     progress('PDF : briefings départ / arrivée…');
     briefTerrain(b.depInfo, 'DÉPART');
     briefTerrain(b.arrInfo, 'ARRIVÉE');

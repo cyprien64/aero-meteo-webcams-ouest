@@ -230,3 +230,26 @@ details.sec select#basemap { margin-top: 2px; }
 .asp-cls { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 99px; color: #fff; }
 .asp-lim { color: #cfe3f5; margin-top: 2px; } .asp-f { margin-top: 2px; }
 .gramet-cv { width: 100%; border-radius: 8px; background: #fff; display: block; }
+.prep-form details.full { grid-column: 1 / -1; } .arms-box summary { cursor: pointer; font-size: 12px; color: var(--text, #fff); padding: 4px 0; }
+
+/* Route modifiable, étapes, historique, mode en vol */
+.wp-drag { background: #ff2bd6; border: 2px solid #fff; border-radius: 50%; cursor: grab; box-shadow: 0 0 0 3px rgba(255,43,214,.35); }
+.wp-add { background: rgba(255,255,255,.9); color: #b0127e; border: 1.5px solid #ff2bd6; border-radius: 50%; font: 700 12px/11px system-ui; text-align: center; cursor: grab; opacity: .75; }
+.wp-add:hover { opacity: 1; }
+details.stage { background: rgba(255,255,255,.04); border-radius: 10px; padding: 4px 8px; margin: 6px 0; }
+details.stage > summary { cursor: pointer; font-weight: 700; padding: 4px 0; }
+.hist { background: rgba(255,255,255,.05); border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
+.hist .row { margin-top: 4px; }
+#inflight { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 1200; width: min(520px, calc(100% - 20px));
+  background: rgba(8, 20, 34, .92); backdrop-filter: blur(10px); color: #fff; border: 1px solid rgba(0,229,255,.5); border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 13px; }
+#inflight .if-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+#inflight .if-big { font-size: 17px; }
+#inflight .if-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0; }
+#inflight .if-grid div { background: rgba(255,255,255,.07); border-radius: 9px; padding: 5px 8px; display: flex; flex-direction: column; }
+#inflight .if-grid small { color: #8fb3cc; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+#inflight .if-grid b { font-size: 20px; color: #00e5ff; font-variant-numeric: tabular-nums; }
+#inflight .if-off { color: #ffb340; font-weight: 700; }
+#inflight .if-f { display: block; color: #cfe3f5; }
+#inflight .if-note, #inflight .if-wait { font-size: 10.5px; color: #8fb3cc; }
+#inflight .if-wait { font-size: 13px; color: #fff; }
+.own-ac { filter: drop-shadow(0 0 4px rgba(0,229,255,.8)); }

@@ -512,6 +512,7 @@
   async function loadEscale() {
     try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); }
     try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
+    try { const club = (await getLive('fees_club.json')).aerodromes || {}; FEES = { ...FEES, ...club }; } catch (e) { /* pas encore de tarif partagé */ }
     drawAerodromes();
   }
   function escaleHtml(icao) {
@@ -534,6 +535,7 @@
         <input id="fee-in" placeholder="ex. 10 € TTC, gratuit…" value="${fee && fee.source === 'saisie personnelle' ? esc(fee.tarif) : ''}" style="flex:1;min-width:140px;margin:0">
         <button class="btn" id="fee-save">Enregistrer la taxe</button>
       </div>
+      ${(window.AWW_CONFIG || {}).repo ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">📤 Proposer ce tarif au club</button><span class="meta" style="flex:1">publié après validation · compte GitHub requis</span></div>` : ''}
       <div class="row" style="margin-top:4px">
         <button class="btn" data-ext="https://airfield.directory/airfield/${icao}">Tarifs (airfield.directory)</button>
         <button class="btn" data-ext="https://www.aerops.com/fr/airports-1/fee-info/${icao}/">Tarifs (aeroPS)</button>
@@ -550,6 +552,12 @@
         else localStorage.removeItem('aww.fee.' + icao);
       } catch { /* ignore */ }
       showAerodrome(icao, false); drawAerodromes();
+    });
+    const share = el.querySelector('#fee-share');
+    if (share) share.addEventListener('click', () => {
+      const v = el.querySelector('#fee-in').value.trim();
+      const q = new URLSearchParams({ template: 'taxe-atterrissage.yml', title: `Taxe ${icao}`, icao, tarif: v, date: new Date().toISOString().slice(0, 7) });
+      openWin(`https://github.com/${AWW_CONFIG.repo}/issues/new?${q}`, 1100, 0);
     });
   }
 

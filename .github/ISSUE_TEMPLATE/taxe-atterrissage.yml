@@ -1,0 +1,39 @@
+name: Taxe d'atterrissage
+description: Proposer le tarif constaté sur un aérodrome (publié sur la carte après validation)
+title: "Taxe "
+labels: ["taxe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Indique le tarif pour un **avion léger (< 1,2 t), vol privé**. Il apparaîtra dans la fiche de l'aérodrome
+        et dans les briefings après validation par l'administrateur (étiquette « valide »).
+  - type: input
+    id: icao
+    attributes:
+      label: Code OACI
+      placeholder: LFBP
+    validations:
+      required: true
+  - type: input
+    id: tarif
+    attributes:
+      label: Tarif
+      placeholder: 15 € TTC
+    validations:
+      required: true
+  - type: input
+    id: note
+    attributes:
+      label: Remarque
+      placeholder: gratuit pour les membres FFA, forfait tours de piste…
+  - type: input
+    id: date
+    attributes:
+      label: Date du constat
+      placeholder: 2026-11
+  - type: input
+    id: source
+    attributes:
+      label: Source
+      placeholder: payé sur place, brochure tarifaire, site de l'aérodrome…

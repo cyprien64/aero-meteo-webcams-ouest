@@ -71,6 +71,25 @@ Le PDF contient :
 - **Calques** : CTR/TMA/CTA et SIV avec fréquences, zones P/R/D, RTBA actives du jour, points VFR.
 - **Tablette hors ligne** : le site s'installe comme une application (« Ajouter à l'écran d'accueil ») ; le dernier briefing (PDF + Excel) reste consultable sans réseau.
 
+## Voyage, mise à jour, montagne, vol
+- **Escales / aller-retour** : champ « Escales suivantes » (ex. `LFCH LFBP`), temps d'escale, avitaillement ou non ;
+  tableau du voyage (horaires, carburant à bord / consommé / restant, dernier décollage avant la nuit aéronautique),
+  un PDF unique (synthèse + check-list carburant et horaires + briefing de chaque étape) et un log Excel par étape.
+- **Mise à jour J-1 / J** : bouton 🔄 et comparaison automatique avec le briefing précédent (nouveaux NOTAM, AZBA, météo,
+  alertes, SUP AIP, temps de vol) à l'écran et dans le PDF ; bouton 📅 pour ajouter les rappels (veille 18 h et jour J) au calendrier.
+- **AZBA** : zones RTBA proches avec créneaux publiés ou non, lien SOFIA-Briefing.
+- **Vol en montagne** (relief > 3 000 ft) : relief max par branche, altitude de franchissement conseillée, vent et isotherme 0 °C
+  à hauteur des crêtes (GRAMET), cols proches, dégagements en vallée, règles de base.
+- **Vent** interpolé à l'altitude exacte et à l'heure de passage de chaque branche.
+- **Route modifiable à la souris** : glisser un point tournant, ou une poignée « + » au milieu d'une branche pour en ajouter un
+  (points libres `43.2050/-0.4570` dans les points tournants).
+- **Mode en vol (GPS)** sur tablette : position, branche active, cap direct, distance et heure au prochain point, écart,
+  vitesse sol, fréquences en cours et suivantes, écran maintenu allumé. Aide de secours uniquement.
+- **Historique** (📚) : les 25 dernières préparations (PDF, Excel) sur l'appareil, avec « Refaire ».
+- **Bras de levier** saisissables par avion dans le formulaire (fiche de pesée), mémorisés sur l'appareil.
+- **Taxes d'atterrissage partagées** : bouton « Proposer ce tarif au club » dans la fiche d'un aérodrome → formulaire GitHub (issue
+  « taxe ») ; une fois l'étiquette **valide** ajoutée par l'administrateur, le tarif est publié à la collecte suivante (`data/live/fees_club.json`).
+
 ## Surveillance automatique
 - `data/live/status.json` : état de chaque source à chaque collecte ; `scripts/health.py` fait échouer le workflow
   (→ e-mail de GitHub) si les NOTAM ou les METAR ne se mettent plus à jour.

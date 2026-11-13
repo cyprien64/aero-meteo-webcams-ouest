@@ -775,6 +775,39 @@ def collect_cams():
     save('cams_status.json', {'checked': NOW.isoformat(), 'total': len(urls), 'dead': dead})
 
 
+def collect_fees():
+    """Taxes d'atterrissage proposées par les membres (issues GitHub « taxe » validées par l'étiquette « valide »)."""
+    repo, token = os.environ.get('GITHUB_REPOSITORY'), os.environ.get('GITHUB_TOKEN')
+    if not repo:
+        print('fees : GITHUB_REPOSITORY absent, ignoré')
+        return
+    try:
+        h = {'Accept': 'application/vnd.github+json'}
+        if token:
+            h['Authorization'] = 'Bearer ' + token
+        issues = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels=taxe,valide&state=all&per_page=100&sort=created&direction=asc', timeout=30, headers=h))
+        out = {}
+        for it in issues:
+            fields, cur = {}, None
+            for line in (it.get('body') or '').splitlines():
+                m = re.match(r'^###\s+(.*)$', line)
+                if m:
+                    cur = m.group(1).strip().lower()
+                    fields[cur] = ''
+                elif cur is not None and line.strip() and line.strip() != '_No response_':
+                    fields[cur] = (fields[cur] + ' ' + line.strip()).strip()
+            icao = (fields.get('code oaci') or '').upper().strip()
+            if not re.fullmatch(r'[A-Z]{4}', icao) or not fields.get('tarif'):
+                continue
+            out[icao] = {'tarif': fields['tarif'][:60], 'note': (fields.get('remarque') or '')[:160],
+                         'maj': (fields.get('date du constat') or it['created_at'][:7])[:10],
+                         'source': ('club : ' + (fields.get('source') or 'membre'))[:80], 'ref': it['number']}
+        save('fees_club.json', {'generated': NOW.isoformat(), 'aerodromes': out})
+    except Exception as e:  # noqa: BLE001
+        print('fees :', e)
+        fallback('fees_club.json')
+
+
 def write_status():
     prev = {}
     if FALLBACK_URL:
@@ -793,7 +826,7 @@ def write_status():
 
 
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -804,4 +837,6 @@ if __name__ == '__main__':
         collect_aip()
     if 'cams' in what:
         collect_cams()
+    if 'fees' in what:
+        collect_fees()
     write_status()

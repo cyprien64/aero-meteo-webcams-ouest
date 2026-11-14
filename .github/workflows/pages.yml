@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "*/30 * * * *"   # toutes les 30 min (GitHub peut décaler de quelques minutes)
+    - cron: "4,19,34,49 * * * *"   # toutes les 15 min, hors des minutes 00/30 très chargées chez GitHub (qui peut sauter des créneaux)
   workflow_dispatch:
 
 permissions:

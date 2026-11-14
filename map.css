@@ -253,3 +253,56 @@ details.stage > summary { cursor: pointer; font-weight: 700; padding: 4px 0; }
 #inflight .if-note, #inflight .if-wait { font-size: 10.5px; color: #8fb3cc; }
 #inflight .if-wait { font-size: 13px; color: #fff; }
 .own-ac { filter: drop-shadow(0 0 4px rgba(0,229,255,.8)); }
+
+/* ===== v2.0 : retours des membres ===== */
+/* Bulles au survol plus larges (lecture horizontale) */
+.leaflet-tooltip.tip { max-width: min(560px, 80vw); min-width: 240px; width: max-content; font-size: 12.5px; line-height: 1.4; }
+.leaflet-tooltip.tip img { width: 380px; max-width: 100%; }
+.leaflet-tooltip.tip code { white-space: normal; word-break: break-word; }
+/* Éléments superposés */
+.halo { border-radius: 50%; border: 2.5px solid #ffd60a; background: rgba(255, 214, 10, .14); box-shadow: 0 0 10px rgba(255,214,10,.55); }
+.halo b { position: absolute; right: -6px; top: -6px; background: #ffd60a; color: #1a1200; font: 800 10px/16px system-ui; min-width: 16px; height: 16px; border-radius: 99px; text-align: center; padding: 0 3px; }
+.chooser .btn { text-align: left; }
+/* Résultat de recherche mis en évidence */
+.hi-pulse i { position: absolute; inset: 0; border-radius: 50%; border: 3px solid #ffd60a; animation: hiP 1.4s ease-out infinite; }
+.hi-pulse b { position: absolute; left: 50%; top: -30px; transform: translateX(-50%); white-space: nowrap; background: #ffd60a; color: #1a1200; font: 800 15px/1 system-ui; padding: 5px 9px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+@keyframes hiP { 0% { transform: scale(.3); opacity: 1; } 100% { transform: scale(1.3); opacity: 0; } }
+/* Barre de chargement / erreurs */
+#loadbar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 1500; max-width: min(640px, calc(100% - 24px));
+  background: rgba(12, 26, 44, .94); color: #eef4fb; border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 7px 12px; font: 12.5px system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+#loadbar i { color: #9db2c9; font-style: normal; }
+#loadbar.has-bad { border-color: #ffb340; }
+#loadbar .lb-bad { margin-top: 4px; color: #ffd08a; }
+#loadbar .lb-act { margin-top: 6px; display: flex; gap: 6px; }
+#loadbar button { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 3px 8px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+#loadbar .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.25); border-top-color: #ffb703; border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -1px; margin-right: 5px; }
+@keyframes sp { to { transform: rotate(360deg); } }
+/* Outils */
+.tool-row { display: flex; gap: 6px; margin: 2px 0 6px; } .tool-row .btn { flex: 1; font-size: 12px; padding: 7px 6px; }
+.btn.on { background: linear-gradient(135deg, #ffb340, #ff8a00) !important; color: #1a1200 !important; font-weight: 700; border-color: transparent; }
+.notam-win { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 11.5px; margin-top: 4px; }
+.notam-win > span { width: 100%; color: var(--muted); }
+.notam-win input { background: rgba(0,0,0,.28); color: #fff; border: 1px solid var(--line2); border-radius: 8px; padding: 3px 5px; font-size: 11.5px; }
+.alt-filter select { margin-left: 4px; }
+.nl { display: inline-block; width: 12px; height: 10px; border-radius: 3px; vertical-align: -1px; }
+.nl-tw { background: rgba(255, 140, 60, .6); } .nl-n { background: rgba(10, 20, 80, .8); border: 1px solid #556; }
+#night-ctrl .row { display: flex; gap: 6px; align-items: center; } #night-lbl { flex: 1; font-size: 13px; }
+#night-ctrl input[type=date] { background: rgba(0,0,0,.28); color: #fff; border: 1px solid var(--line2); border-radius: 8px; padding: 3px 5px; }
+/* Mesure */
+.ms-pt { background: #00e5ff; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 3px rgba(0,229,255,.35); cursor: grab; }
+.ms-lbl { background: rgba(0, 20, 34, .9); color: #00e5ff; border: 1px solid #00e5ff; border-radius: 6px; padding: 1px 5px; font: 700 11px system-ui; white-space: nowrap; width: auto !important; height: auto !important; }
+table.ms { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 6px 0; }
+table.ms th, table.ms td { border-bottom: 1px solid rgba(255,255,255,.1); padding: 3px 4px; text-align: left; }
+table.ms td.dv { color: #ffb340; font-weight: 700; }
+.ms-form { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ms-form label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.ms-form input { background: rgba(0,0,0,.28); color: #fff; border: 1px solid var(--line2); border-radius: 8px; padding: 5px 6px; }
+/* Route : poignées plus grandes et choix sur la carte */
+.wp-drag { width: 24px !important; height: 24px !important; margin: -12px 0 0 -12px !important; box-shadow: 0 0 0 5px rgba(255,43,214,.35); }
+.wp-add { width: 22px !important; height: 22px !important; margin: -11px 0 0 -11px !important; font: 800 16px/19px system-ui; opacity: .9; }
+.pick-btn { padding: 0 6px; margin-left: 4px; font-size: 13px; line-height: 20px; border-radius: 7px; cursor: pointer; background: rgba(255,255,255,.08); border: 1px solid var(--line2); color: #fff; }
+.pick-btn.on { background: #ffb340; color: #1a1200; }
+.picking .leaflet-interactive { pointer-events: none !important; }
+.picking, .picking .leaflet-container { cursor: crosshair !important; }
+#pick-banner { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 1500; background: #ffb340; color: #1a1200; font: 700 13px system-ui; padding: 8px 14px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+#pick-banner button { margin-left: 8px; border: none; background: rgba(0,0,0,.2); color: #1a1200; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-weight: 700; }

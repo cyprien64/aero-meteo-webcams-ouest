@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Aéro Ouest">
   <link rel="apple-touch-icon" href="icons/icon192.png">
+  <script src="log.js"></script>
   <link rel="stylesheet" href="lib/leaflet/leaflet.css">
   <link rel="stylesheet" href="map.css">
 </head>
@@ -32,6 +33,10 @@
       <button id="btn-prep" class="prep-btn">✈️ Préparer un vol <small>briefing PDF · log Excel</small></button>
       <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
       <button id="btn-hist" class="btn ghost wide">📚 Historique des préparations</button>
+      <div class="tool-row">
+        <button id="btn-measure" class="btn" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles">📏 Mesurer un trajet</button>
+        <button id="btn-clear" class="btn" title="Effacer la route, les mesures et les coupes tracées sur la carte">🧹 Effacer les tracés</button>
+      </div>
       <div class="search-wrap">
         <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
       </div>
@@ -61,6 +66,13 @@
             <option value="35">FL035</option><option value="65" selected>FL065</option>
             <option value="115">FL115</option><option value="999">tous</option></select></label>
         </div>
+        <div class="sub-opts notam-win">
+          <span>Mon vol (heure locale) : seuls les NOTAM actifs pendant le vol</span>
+          <label>de <input type="datetime-local" id="notam-from"></label>
+          <label>à <input type="datetime-local" id="notam-to"></label>
+          <button id="notam-win-clear" class="small" type="button">Toute la journée</button>
+          <p id="notam-win-info" class="hint"></p>
+        </div>
         <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
         <div class="tools">
           <button id="btn-notam-list">⚠️ Liste NOTAM</button>
@@ -75,9 +87,27 @@
         <label><input type="checkbox" data-layer="zones"> <span class="sw sw-zones"></span> Zones P / R / D</label>
         <label><input type="checkbox" data-layer="rtba" checked> <span class="sw sw-rtba"></span> RTBA actives aujourd'hui</label>
         <label><input type="checkbox" data-layer="vfr"> <span class="sw sw-vfr"></span> Points de report VFR</label>
+        <label class="alt-filter">Mon altitude de vol <select id="alt-filter" class="inline">
+          <option value="">tout afficher</option><option value="1000">1 000 ft</option><option value="1500">1 500 ft</option>
+          <option value="2000">2 000 ft</option><option value="2500">2 500 ft</option><option value="3000">3 000 ft</option>
+          <option value="3500">3 500 ft</option><option value="4500">4 500 ft</option><option value="5500">5 500 ft</option>
+          <option value="6500">FL065</option><option value="7500">FL075</option><option value="8500">FL085</option>
+          <option value="9500">FL095</option><option value="11500">FL115</option></select></label>
+        <p class="hint">Avec une altitude choisie, seuls les espaces, zones et NOTAM présents à cette altitude sont affichés (limites « ASFC » comptées depuis le niveau de la mer : approximatif en relief).</p>
         <button id="btn-cut" class="btn wide">✂️ Coupe des espaces (cliquer sur la carte)</button>
         <p id="cut-hint" class="hint" hidden></p>
         <p class="hint">Clic droit (ou appui long) n'importe où : espaces au-dessus du point, règles de pénétration et fréquences.</p>
+      </details>
+
+      <details class="sec">
+        <summary>🌙 Jour / nuit aéronautique</summary>
+        <label><input type="checkbox" id="night-on"> Afficher la nuit sur la carte</label>
+        <div id="night-ctrl" class="sub-opts">
+          <label>Jour <input type="date" id="night-date"></label>
+          <input type="range" id="night-t" min="0" max="1435" step="5" style="width:100%">
+          <div class="row"><b id="night-lbl">--:--</b><button id="night-play" class="small" type="button">▶</button><button id="night-now" class="small" type="button">Maintenant</button><button id="night-flight" class="small" type="button" hidden>Mon vol</button></div>
+          <p class="hint"><span class="nl nl-tw"></span> crépuscule (coucher → +30 min) · <span class="nl nl-n"></span> nuit aéronautique (VFR de nuit : qualification requise)</p>
+        </div>
       </details>
 
       <details class="sec" open>
@@ -95,6 +125,8 @@
             <option value="sat">Satellite (Esri)</option>
           </optgroup>
         </select>
+        <label><input type="checkbox" id="fr-outline" checked> Contour de la France et des régions</label>
+        <label><input type="checkbox" id="fr-mask"> Assombrir hors de France</label>
       </details>
 
       <details class="sec">
@@ -106,6 +138,10 @@
         <div class="cats"><b class="c-VFR">VFR</b><b class="c-MVFR">MVFR</b><b class="c-IFR">IFR</b><b class="c-LIFR">LIFR</b></div>
         <span id="status">Chargement…</span><br>
         <span id="status2"></span>
+      </div>
+      <div class="tool-row">
+        <button id="btn-log" class="btn ghost" title="Fichier texte avec les erreurs et les chargements, à envoyer en cas de problème">📋 Journal (erreurs)</button>
+        <button id="btn-zip" class="btn ghost" title="Télécharger tout le site (zip) pour l'installer comme extension Chrome ou le garder">⬇️ Télécharger le site</button>
       </div>
       <p class="legend small-print">Vérifier la date et l'heure de chaque webcam. Outil d'aide uniquement : la préparation réglementaire reste SOFIA / SIA / aviation.meteo.fr.</p>
     </div>
@@ -120,12 +156,10 @@
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="data/basemap.js"></script>
   <script src="data/sources.js"></script>
+  <script src="data/france.js"></script>
   <script src="map.js"></script>
-  <script src="lib/pdf/jspdf.umd.min.js"></script>
-  <script src="lib/pdf/jspdf.plugin.autotable.min.js"></script>
-  <script src="lib/pdf/pdf-lib.min.js"></script>
-  <script src="lib/pdf/jszip.min.js"></script>
   <script src="data/aircraft.js"></script>
   <script src="prepavol.js"></script>
+  <script src="extras.js"></script>
 </body>
 </html>

@@ -47,6 +47,9 @@
   map.createPane('basePane').style.zIndex = 150;
   const radarPane = map.createPane('radarPane');
   radarPane.style.zIndex = 350; radarPane.style.opacity = 0.75;
+  map.createPane('maskPane').style.zIndex = 360; map.getPane('maskPane').style.pointerEvents = 'none';
+  map.createPane('outlinePane').style.zIndex = 395; map.getPane('outlinePane').style.pointerEvents = 'none';
+  map.createPane('haloPane').style.zIndex = 590; map.getPane('haloPane').style.pointerEvents = 'none';
 
   const schema = L.geoJSON(window.BASEMAP, {
     pane: 'basePane', interactive: false,
@@ -88,15 +91,30 @@
   $('#basemap').addEventListener('change', (e) => setBase(e.target.value));
   setBase(store.get('base', 'schema'));
 
+  // ---------- Contour de la France, régions, masque hors France ----------
+  const frOutline = L.layerGroup();
+  (window.FRANCE || []).forEach((poly) => L.polygon(poly, { pane: 'outlinePane', interactive: false, color: '#00e5ff', weight: 2.6, opacity: .95, fill: false }).addTo(frOutline));
+  (window.BASEMAP && window.BASEMAP.features || []).filter((f) => f.properties.k === 'reg').forEach((f) => L.geoJSON(f, { pane: 'outlinePane', interactive: false, style: { color: '#ffffff', weight: 1.2, opacity: .55, dashArray: '6 4', fill: false } }).addTo(frOutline));
+  const frMask = L.polygon([[[60, -30], [60, 30], [30, 30], [30, -30]], ...(window.FRANCE || [])], { pane: 'maskPane', interactive: false, stroke: false, fillColor: '#000814', fillOpacity: .38 });
+  const syncFr = () => {
+    const o = $('#fr-outline').checked, m = $('#fr-mask').checked;
+    if (o) frOutline.addTo(map); else map.removeLayer(frOutline);
+    if (m) frMask.addTo(map); else map.removeLayer(frMask);
+    store.set('fr', { o, m });
+  };
+  { const s = store.get('fr', { o: true, m: false }); $('#fr-outline').checked = s.o; $('#fr-mask').checked = s.m; }
+  $('#fr-outline').addEventListener('change', syncFr); $('#fr-mask').addEventListener('change', syncFr); syncFr();
+
   // Noms des aérodromes visibles seulement à partir d'un certain zoom
   const updateZoomClass = () => {
     const z = map.getZoom();
     map.getContainer().classList.toggle('z-lo', z < 7);
     map.getContainer().classList.toggle('z-mid', z < 8.5);
+    map.getContainer().classList.toggle('z-hi', z >= 10);
   };
   map.on('zoomend', updateZoomClass); updateZoomClass();
   const zs = document.createElement('style');
-  zs.textContent = `.z-lo .apt-plain .apt-label{display:none}.z-mid .apt-label small{display:none}.z-lo .apt-metar .apt-label{font-size:10px}`;
+  zs.textContent = `.z-lo .apt-plain .apt-label{display:none}.z-mid .apt-label small{display:none}.z-lo .apt-metar .apt-label{font-size:10px}.z-hi .apt-label{font-size:15px}.z-hi .apt-label small{font-size:12.5px}`;
   document.head.appendChild(zs);
 
   // ---------- Icônes ----------
@@ -111,6 +129,63 @@
   function tipHtml(title, img) {
     return `<b>${esc(title)}</b>${img ? `<img src="${esc(img)}" loading="lazy" alt="">` : ''}<div style="opacity:.7;font-size:11px">Clic : ouvrir</div>`;
   }
+
+  // ---------- Éléments superposés : un clic sur un point entouré d'autres points propose la liste ----------
+  const PICK_PX = 16;
+  let pickOff = false;   // désactivé pendant les modes coupe / mesure / choix d'un terrain
+  function bindPick(mk, label, action) {
+    mk._pick = { label, action };
+    mk.on('click', (e) => {
+      L.DomEvent.stop(e);
+      if (pickOff || window.AWW_PICKING) { map.fire('click', { latlng: e.latlng, layerPoint: e.layerPoint, containerPoint: e.containerPoint, originalEvent: e.originalEvent }); return; }
+      const near = pickNear(e.latlng);
+      if (near.length > 1) showChooser(near, e.latlng); else action();
+    });
+    return mk;
+  }
+  function visiblePickables() {
+    const out = [];
+    const walk = (g) => g.eachLayer((l) => { if (l._pick && l.getLatLng) out.push(l); else if (l.eachLayer) walk(l); });
+    Object.entries(layers).forEach(([, g]) => { if (map.hasLayer(g)) walk(g); });
+    return out;
+  }
+  function pickNear(ll) {
+    const z = map.getZoom(), c = map.project(ll, z);
+    return visiblePickables().map((l) => ({ l, d: map.project(l.getLatLng(), z).distanceTo(c) })).filter((x) => x.d <= PICK_PX).sort((a, b) => a.d - b.d).map((x) => x.l);
+  }
+  function showChooser(list, ll) {
+    showList(`${list.length} éléments superposés ici`, `<p class="meta">Plusieurs points se chevauchent à cet endroit : choisis celui à ouvrir (ou zoome sur la carte).</p>
+      <div class="chooser">${list.map((l, i) => `<button class="btn wide" data-pick="${i}">${esc(l._pick.label)}</button>`).join('')}</div>
+      <div class="row"><button class="btn" id="pick-zoom">🔍 Zoomer ici</button><button class="btn" id="pick-stack">✂️ Espaces aériens au-dessus</button></div>`);
+    detailBody.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => list[+b.dataset.pick]._pick.action()));
+    $('#pick-zoom').addEventListener('click', () => map.flyTo(ll, Math.min(map.getZoom() + 2, 14), { duration: .5 }));
+    $('#pick-stack').addEventListener('click', () => showStack(ll.lat, ll.lng));
+  }
+  // Halo jaune avec le nombre d'éléments là où des points se chevauchent (recalculé au zoom / déplacement)
+  const haloLayer = L.layerGroup().addTo(map);
+  let haloTimer = null;
+  function drawHalos() {
+    clearTimeout(haloTimer);
+    haloTimer = setTimeout(() => {
+      haloLayer.clearLayers();
+      const z = map.getZoom(), b = map.getBounds().pad(.1);
+      if (z < 9) return;   // vue large : tout se touche, les halos n'apporteraient que du bruit (le clic propose quand même la liste)
+      const pts = visiblePickables().filter((l) => b.contains(l.getLatLng())).map((l) => ({ l, p: map.project(l.getLatLng(), z) }));
+      const cell = {}, key = (x, y) => `${x},${y}`;
+      pts.forEach((o) => { const k = key(Math.floor(o.p.x / PICK_PX), Math.floor(o.p.y / PICK_PX)); (cell[k] = cell[k] || []).push(o); });
+      const used = new Set();
+      for (const o of pts) {
+        if (used.has(o)) continue;
+        const cx = Math.floor(o.p.x / PICK_PX), cy = Math.floor(o.p.y / PICK_PX), grp = [];
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) (cell[key(cx + dx, cy + dy)] || []).forEach((q) => { if (!used.has(q) && q.p.distanceTo(o.p) <= PICK_PX) grp.push(q); });
+        if (grp.length < 2) continue;
+        grp.forEach((q) => used.add(q));
+        const c = map.unproject(L.point(grp.reduce((s, q) => s + q.p.x, 0) / grp.length, grp.reduce((s, q) => s + q.p.y, 0) / grp.length), z);
+        L.marker(c, { pane: 'haloPane', interactive: false, icon: L.divIcon({ className: 'halo', html: `<b>${grp.length}</b>`, iconSize: [40, 40], iconAnchor: [20, 20] }) }).addTo(haloLayer);
+      }
+    }, 120);
+  }
+  map.on('zoomend moveend', drawHalos);
 
   // ---------- Couches de points (webcams, observations, balises) ----------
   const layers = {
@@ -141,8 +216,8 @@
       icon = divIcon(`<svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5" fill="#7fffd4" stroke="#003a5c" stroke-width="2"/></svg>`, [18, 18], [9, 9]);
     } else continue;
     const mk = s._mk = L.marker([s.la, s.lo], { icon, title: '', riseOnHover: true })
-      .bindTooltip(tipHtml(s.n, s.img), { className: 'tip', direction: 'top', offset: [0, -10] })
-      .on('click', () => openWin(s.u, s.w, s.h));
+      .bindTooltip(tipHtml(s.n, s.img), { className: 'tip', direction: 'top', offset: [0, -10] });
+    bindPick(mk, (s.t === 'cam' ? '📷 ' : s.t === 'obs' ? '🚩 ' : '💨 ') + s.n, () => openWin(s.u, s.w, s.h));
     mk.addTo(layer);
     searchIndex.push({ label: s.n, sub: s.t === 'cam' ? 'Webcam' : s.t === 'obs' ? 'Observations' : 'Vent', lat: s.la, lon: s.lo, action: () => openWin(s.u, s.w, s.h) });
   }
@@ -162,7 +237,7 @@
       const cat = m.fltCat || 'UNK';
       return divIcon(`<div style="position:relative">${svgSock(cat)}${lbl}</div>`, [30, 22], [3, 20], 'mk apt-metar');
     }
-    return divIcon(`<div style="position:relative"><svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.2" fill="#0b4f78" stroke="#9be34b" stroke-width="2"/></svg>${lbl}</div>`, [12, 12], [6, 6], 'mk apt-plain');
+    return divIcon(`<div style="position:relative"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="#073450" stroke="#6fe000" stroke-width="2.6"/></svg>${lbl}</div>`, [14, 14], [7, 7], 'mk apt-plain');
   }
   function aptTip(a) {
     const m = metars[a.icao];
@@ -173,9 +248,8 @@
   function drawAerodromes() {
     layers.metar.clearLayers(); layers.apt.clearLayers();
     for (const a of APTS) {
-      const mk = L.marker([a.la, a.lo], { icon: aptIcon(a), zIndexOffset: metars[a.icao] ? 500 : 0 })
-        .bindTooltip(aptTip(a), { className: 'tip', direction: 'top', offset: [0, -12] })
-        .on('click', () => showAerodrome(a.icao));
+      const mk = bindPick(L.marker([a.la, a.lo], { icon: aptIcon(a), zIndexOffset: metars[a.icao] ? 500 : 0 })
+        .bindTooltip(aptTip(a), { className: 'tip', direction: 'top', offset: [0, -12] }), `✈️ ${a.icao} ${a.name}`, () => showAerodrome(a.icao));
       mk.addTo(metars[a.icao] ? layers.metar : layers.apt);
       aptMarkers[a.icao] = mk;
     }
@@ -184,11 +258,11 @@
       if (aptByIcao[m.icaoId]) continue;
       const a = { icao: m.icaoId, name: (m.name || '').replace(/,.*$/, ''), la: m.lat, lo: m.lon, elev: Math.round((m.elev || 0) * 3.281) };
       APTS.push(a); aptByIcao[a.icao] = a;
-      L.marker([a.la, a.lo], { icon: aptIcon(a), zIndexOffset: 500 })
-        .bindTooltip(aptTip(a), { className: 'tip', direction: 'top', offset: [0, -12] })
-        .on('click', () => showAerodrome(a.icao)).addTo(layers.metar);
+      bindPick(L.marker([a.la, a.lo], { icon: aptIcon(a), zIndexOffset: 500 })
+        .bindTooltip(aptTip(a), { className: 'tip', direction: 'top', offset: [0, -12] }), `✈️ ${a.icao} ${a.name}`, () => showAerodrome(a.icao)).addTo(layers.metar);
       searchIndex.push({ label: `${a.icao} ${a.name}`, sub: 'Aérodrome', lat: a.la, lon: a.lo, action: () => showAerodrome(a.icao) });
     }
+    drawHalos();
   }
   for (const a of APTS) searchIndex.push({ label: `${a.icao} ${a.name}`, sub: 'Aérodrome', lat: a.la, lon: a.lo, action: () => showAerodrome(a.icao) });
 
@@ -216,6 +290,55 @@
     throw last;
   }
 
+  // ---------- METAR / TAF en direct sur le site (met.no, CORS ouvert) : la GitHub Action peut avoir plusieurs heures de retard ----------
+  const toUnix = (dd, hh, mm) => {
+    const n = new Date(); let y = n.getUTCFullYear(), mo = n.getUTCMonth();
+    if (+dd > n.getUTCDate() + 1) { mo--; if (mo < 0) { mo = 11; y--; } }
+    return Date.UTC(y, mo, +dd, +hh, +mm) / 1000;
+  };
+  function parseMetar(raw) {
+    const s = raw.replace(/=\s*$/, '').replace(/\s+/g, ' ').trim();
+    const tok = s.split(' ');
+    let i = 0, type = 'METAR';
+    if (/^(METAR|SPECI)$/.test(tok[0])) type = tok[i++];
+    const icao = tok[i++], tm = /^(\d\d)(\d\d)(\d\d)Z$/.exec(tok[i++] || '');
+    if (!tm || !/^[A-Z]{4}$/.test(icao)) return null;
+    const m = { icaoId: icao, rawOb: s, obsTime: toUnix(tm[1], tm[2], tm[3]), clouds: [], metarType: type };
+    let vis = null; const wx = [];
+    for (; i < tok.length; i++) {
+      const x = tok[i]; let r;
+      if (/^(TEMPO|BECMG|NOSIG|RMK)$/.test(x)) break;
+      if ((r = /^(\d{3}|VRB)(\d{2,3})(G(\d{2,3}))?(KT|MPS)$/.exec(x))) { const k = r[5] === 'MPS' ? 1.944 : 1; m.wdir = r[1] === 'VRB' ? 'VRB' : +r[1]; m.wspd = Math.round(+r[2] * k); if (r[4]) m.wgst = Math.round(+r[4] * k); continue; }
+      if (x === 'CAVOK') { vis = 10000; continue; }
+      if ((r = /^(\d{4})(NDV)?$/.exec(x)) && vis == null) { vis = +r[1]; continue; }
+      if ((r = /^(FEW|SCT|BKN|OVC|VV)(\d{3}|\/\/\/)/.exec(x))) { m.clouds.push({ cover: r[1] === 'VV' ? 'OVX' : r[1], base: r[2] === '///' ? null : +r[2] * 100 }); continue; }
+      if ((r = /^(M?\d\d)\/(M?\d\d)?$/.exec(x))) { const f = (v) => v == null ? null : v[0] === 'M' ? -+v.slice(1) : +v; m.temp = f(r[1]); m.dewp = f(r[2]); continue; }
+      if ((r = /^Q(\d{4})$/.exec(x))) { m.altim = +r[1]; continue; }
+      if (/^[-+]?(VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PO|SQ|FC|SS|DS)+$/.test(x) || /^[-+]?(VC)?(TS|SH)$/.test(x)) wx.push(x);
+    }
+    if (vis != null) m.visib = vis >= 9999 ? '10+' : +(vis / 1609.34).toFixed(2);
+    if (wx.length) m.wxString = wx.join(' ');
+    const ceil = m.clouds.filter((c) => ['BKN', 'OVC', 'OVX'].includes(c.cover) && c.base != null).reduce((a, c) => Math.min(a, c.base), 99999);
+    const vkm = vis == null ? 99 : vis / 1000;
+    m.fltCat = ceil < 500 || vkm < 1.6 ? 'LIFR' : ceil < 1000 || vkm < 4.8 ? 'IFR' : ceil <= 3000 || vkm <= 8 ? 'MVFR' : 'VFR';
+    return m;
+  }
+  async function liveMetNo(ids) {
+    const q = ids.join(',');
+    const [mt, tf] = await Promise.all([
+      fetch(`https://api.met.no/weatherapi/tafmetar/1.0/metar.txt?icao=${q}`).then((r) => r.ok ? r.text() : ''),
+      fetch(`https://api.met.no/weatherapi/tafmetar/1.0/taf.txt?icao=${q}`).then((r) => r.ok ? r.text() : '').catch(() => ''),
+    ]);
+    const met = [], taf = [];
+    mt.split(/=\s*\n?/).map((l) => l.trim()).filter(Boolean).forEach((l) => { const m = parseMetar(l); if (m) met.push(m); });
+    tf.split(/=\s*\n?/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).forEach((l) => {
+      const r = /^(?:TAF )?(?:AMD |COR )?([A-Z]{4}) (\d\d)(\d\d)(\d\d)Z/.exec(l);
+      if (r) taf.push({ icaoId: r[1], rawTAF: 'TAF ' + l.replace(/^TAF /, ''), issueTime: new Date(toUnix(r[2], r[3], r[4]) * 1000).toISOString() });
+    });
+    return { met, taf };
+  }
+  let metarSrc = '';
+
   async function loadMetarTaf() {
     try {
       const [mt, tf] = IS_EXT ? await Promise.all([
@@ -232,15 +355,38 @@
         if (!metars[m.icaoId] || metars[m.icaoId].obsTime < m.obsTime) metars[m.icaoId] = m;
       }
       for (const t of tf) if (!tafs[t.icaoId] || tafs[t.icaoId].issueTime < t.issueTime) tafs[t.icaoId] = t;
+      metarSrc = IS_EXT ? 'direct' : 'collecte';
+      if (!IS_EXT) {   // site : on complète par les observations en direct
+        try {
+          const ids = [...new Set([...Object.keys(metars), ...STATIONS])].filter((k) => /^(LF|LE)/.test(k));
+          const live = await liveMetNo(ids);
+          let n = 0;
+          for (const m of live.met) {
+            const old = metars[m.icaoId], a = aptByIcao[m.icaoId];
+            if (!old && !a) continue;
+            if (old && old.obsTime >= m.obsTime) continue;
+            metars[m.icaoId] = { ...(old || {}), lat: old ? old.lat : a.la, lon: old ? old.lon : a.lo, elev: old ? old.elev : Math.round((+a.elev || 0) / 3.281), name: old ? old.name : a.name, ...m };
+            n++;
+          }
+          for (const t of live.taf) if (!tafs[t.icaoId] || tafs[t.icaoId].issueTime < t.issueTime) tafs[t.icaoId] = { ...(tafs[t.icaoId] || {}), ...t };
+          if (n) metarSrc = 'direct';
+        } catch (e) { console.warn('METAR direct (met.no) indisponibles, données de la collecte', e); }
+      }
+      Object.keys(metars).forEach((k) => STATIONS.add(k)); store.set('stations', [...STATIONS]);
       drawAerodromes();
-      setStatus(`${Object.keys(metars).length} METAR · ${Object.keys(tafs).length} TAF · maj ${new Date().toISOString().slice(11, 16)} UTC`);
+      const newest = Math.max(...Object.values(metars).map((m) => m.obsTime || 0));
+      const age = Math.round((Date.now() / 1000 - newest) / 60);
+      setStatus(`${Object.keys(metars).length} METAR · ${Object.keys(tafs).length} TAF · ${metarSrc === 'direct' ? 'en direct' : 'collecte'} · dernier METAR il y a ${age} min`);
+      status.style.color = age > 90 ? '#ffb21e' : '';
       if (openedIcao) showAerodrome(openedIcao, false);
     } catch (e) {
       console.warn(e);
       drawAerodromes();
       setStatus('METAR indisponibles (connexion ?) — nouvel essai dans 10 min');
+      throw e;
     }
   }
+  const STATIONS = new Set(store.get('stations', []));
 
   const windLive = L.layerGroup().addTo(layers.wind);
   async function loadPiouPiou() {
@@ -262,7 +408,7 @@
           .on('click', () => openWin(`https://www.openwindmap.org/PP${p.id}`, 800, 0))
           .addTo(windLive);
       }
-    } catch (e) { console.warn('pioupiou', e); }
+    } catch (e) { console.warn('pioupiou', e); throw e; }
   }
 
   // ---------- Radar pluie (RainViewer) ----------
@@ -303,6 +449,7 @@
     if (k in layerState) cb.checked = layerState[k];
     const apply = () => {
       if (cb.checked) layers[k].addTo(map); else map.removeLayer(layers[k]);
+      drawHalos();
       if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers();
       layerState[k] = cb.checked; store.set('layers', layerState);
       if (k === 'radar') {
@@ -422,6 +569,16 @@
     ['🪂 Planeurs (Flarm)', 'https://live.glidernet.org/#c=46.2,-1.5&z=7&s=1', 1440, 0],
     ['📡 Flightradar24', 'https://www.flightradar24.com/46.2,-1.5/7', 1440, 0],
     ['🏠 Site Inter Aéro', 'http://international.aero.free.fr/webcams/lfdt.html', 0, 0],
+    ['⚠️ NOTAM carte (notaminfo)', 'https://www.notaminfo.com/francemap', 1400, 0],
+    ['⚠️ Suivi NOTAM (Amenai)', 'https://notam.amenai.net/mobile/tracking', 1200, 0],
+    ['🛩 Spotair (trafic)', 'https://www.spotair.mobi/', 1400, 0],
+    ['💨 Balises Holfuy', 'https://holfuy.com/fr/map', 1300, 0],
+    ['📷 Webcams Infoclimat', 'https://www.infoclimat.fr/annuaire-webcams-meteo.html', 1300, 0],
+    ['📷 Webcams aéroports (Worldcam)', 'https://fr.worldcam.eu/webcams/category/airports', 1300, 0],
+    ['📷 Webcams aéroports (OpenCCTV)', 'https://opencctv.org/cameras/category/airport', 1300, 0],
+    ['📷 Webcams Catalogne (FAC)', 'https://federacioaeria.cat/serveis/meteo/webcams/', 1300, 0],
+    ['🌌 Caméras « all-sky »', 'https://www.thomasjacquin.com/allsky-map/', 1300, 0],
+    ['🦺 Sécurité des vols (VFR-pilote)', 'https://vfr-pilote.fr/security/', 1200, 0],
   ];
   const toolsEl = $('#tools');
   for (const [label, url, w, h] of TOOLS) {
@@ -445,12 +602,22 @@
       const li = document.createElement('li');
       li.innerHTML = `<b>${esc(h.label)}</b> <span style="opacity:.6">· ${h.sub}</span>`;
       li.addEventListener('click', () => {
-        map.flyTo([h.lat, h.lon], Math.max(map.getZoom(), 10), { duration: .6 });
+        map.flyTo([h.lat, h.lon], Math.max(map.getZoom(), h.sub === 'Aérodrome' ? 12 : 11), { duration: .6 });
         h.action();
+        highlight(h.lat, h.lon, h.label);
       });
       results.appendChild(li);
     }
   });
+
+  // Repère bien visible sur le résultat choisi (cercle pulsant + nom en grand pendant 10 s)
+  const hiLayer = L.layerGroup().addTo(map);
+  let hiTimer = null;
+  function highlight(lat, lon, label) {
+    hiLayer.clearLayers(); clearTimeout(hiTimer);
+    L.marker([lat, lon], { interactive: false, zIndexOffset: 2000, icon: L.divIcon({ className: 'hi-pulse', html: `<i></i><b>${esc(label)}</b>`, iconSize: [60, 60], iconAnchor: [30, 30] }) }).addTo(hiLayer);
+    hiTimer = setTimeout(() => hiLayer.clearLayers(), 10000);
+  }
 
   // ---------- Panneau repliable ----------
   const panel = $('#panel');
@@ -470,6 +637,20 @@
     const now = Date.now();
     const to = Date.parse(n.to);
     return (!n.from || Date.parse(n.from) <= now) && (isNaN(to) || to >= now); // "PERM" => permanent
+  };
+  // Fenêtre « mon vol » : NOTAM actifs entre deux heures (sinon : maintenant)
+  const flightWin = () => {
+    const a = Date.parse($('#notam-from').value), b = Date.parse($('#notam-to').value);
+    return isNaN(a) ? null : { a, b: isNaN(b) || b < a ? a + 2 * 3600e3 : b };
+  };
+  const inWin = (n, w) => {
+    const from = n.from ? Date.parse(n.from) : -Infinity, to = Date.parse(n.to);
+    return from <= w.b && (isNaN(to) || to >= w.a);
+  };
+  const altSel = () => +($('#alt-filter') && $('#alt-filter').value) || 0;
+  const darken = (hex, k = .35) => {
+    const n = parseInt(hex.slice(1), 16), f = (v) => Math.round(v * (1 - k));
+    return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => f(v).toString(16).padStart(2, '0')).join('');
   };
   const fl = (v) => v == null ? '?' : v === 0 ? 'SFC' : v >= 999 ? 'UNL' : `FL${String(v).padStart(3, '0')}`;
   function notamColor(q) {
@@ -510,7 +691,7 @@
     } catch (e) { /* pas encore de contrôle */ }
   }
   async function loadEscale() {
-    try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); }
+    try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); drawAerodromes(); throw e; }
     try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
     try { const club = (await getLive('fees_club.json')).aerodromes || {}; FEES = { ...FEES, ...club }; } catch (e) { /* pas encore de tarif partagé */ }
     drawAerodromes();
@@ -587,30 +768,39 @@
     layers.notam.clearLayers();
     const hideObst = $('#notam-obst') && !$('#notam-obst').checked;
     const maxFl = +($('#notam-fl') ? $('#notam-fl').value : 999);
+    const w = flightWin(), alt = altSel();
+    let shown = 0;
     for (const n of NOTAM.fir) {
       if (n.la == null || n.lo == null) continue;
       if (n.lower != null && n.lower > maxFl) continue;
+      if (w && !inWin(n, w)) continue;
+      if (alt && ((n.lower != null && n.lower * 100 > alt) || (n.upper != null && n.upper * 100 < alt))) continue;
+      shown++;
       const isObst = (n.q || '')[0] === 'O';
       if (isObst && hideObst) continue;
       const tip = `<b>NOTAM ${esc(n.ref)}</b> · ${fl(n.lower)}–${fl(n.upper)}<br>${fmtT(n.from)} → ${fmtT(n.to)}<br>${esc((n.efr || n.e || '').slice(0, 220))}${(n.efr || n.e || '').length > 220 ? '…' : ''}`;
       const open = () => showList(`NOTAM ${n.ref}`, notamHtml(n, true));
+      const act = w ? true : isActive(n);
       if (isObst || !n.r || n.r <= 1) {
-        L.marker([n.la, n.lo], { icon: divIcon(isObst ? svgObst : `<svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="${notamColor(n.q)}" stroke="#222"/></svg>`, [14, 14], [7, 7]) })
-          .bindTooltip(tip, { className: 'tip', direction: 'top' }).on('click', open).addTo(layers.notam);
+        bindPick(L.marker([n.la, n.lo], { icon: divIcon(isObst ? svgObst : `<svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="${notamColor(n.q)}" stroke="#000" stroke-width="1.6"/></svg>`, [16, 16], [8, 8]) })
+          .bindTooltip(tip, { className: 'tip', direction: 'top' }), `⚠️ NOTAM ${n.ref}`, open).addTo(layers.notam);
       } else if (n.r <= 30) {
         const col = notamColor(n.q);
-        L.circle([n.la, n.lo], { radius: n.r * 1852, color: col, weight: isActive(n) ? 2 : 1, dashArray: isActive(n) ? null : '5 5', fillColor: col, fillOpacity: .08 })
-          .bindTooltip(tip, { className: 'tip', sticky: true }).on('click', open).addTo(layers.notam);
+        L.circle([n.la, n.lo], { radius: n.r * 1852, color: darken(col, .3), weight: act ? 3 : 1.5, dashArray: act ? null : '6 5', fillColor: col, fillOpacity: act ? .2 : .1 })
+          .bindTooltip(tip, { className: 'tip', sticky: true }).on('click', (e) => { if (!pickOff && !window.AWW_PICKING) open(); }).addTo(layers.notam);
       }
     }
+    const info = $('#notam-win-info');
+    if (info) info.textContent = w ? `${shown} NOTAM localisés actifs entre ${new Date(w.a).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })} et ${new Date(w.b).toLocaleTimeString('fr-FR', { timeStyle: 'short' })}${NOTAM.generated && w.b > Date.parse(NOTAM.generated) + 24 * 3600e3 ? ' — attention : la collecte ne couvre que 24 h, vérifier sur SOFIA' : ''}.` : '';
+    drawHalos();
   }
   function drawSup() {
     layers.supaip.clearLayers();
     for (const s of SUP) {
       s.places.forEach((p) => {
-        L.marker([p.la, p.lo], { icon: divIcon(svgSup, [24, 26], [12, 13]), zIndexOffset: 300 })
-          .bindTooltip(`<b>SUP AIP ${esc(s.num)}</b> (${esc(p.n)})<br>${esc(s.title)}<br>du ${esc(s.from || '?')} au ${esc(s.to || '?')}`, { className: 'tip', direction: 'top' })
-          .on('click', () => openWin(s.url, 1000, 0))
+        bindPick(L.marker([p.la, p.lo], { icon: divIcon(svgSup, [24, 26], [12, 13]), zIndexOffset: 300 })
+          .bindTooltip(`<b>SUP AIP ${esc(s.num)}</b> (${esc(p.n)})<br>${esc(s.title)}<br>du ${esc(s.from || '?')} au ${esc(s.to || '?')}`, { className: 'tip', direction: 'top' }),
+        `📄 SUP AIP ${s.num} — ${s.title.slice(0, 60)}`, () => openWin(s.url, 1000, 0))
           .addTo(layers.supaip);
       });
     }
@@ -635,11 +825,12 @@
   }
   function showNotamList() {
     const v = map.getBounds();
-    const inView = NOTAM.fir.filter((n) => n.la != null && v.contains([n.la, n.lo]));
+    const w = flightWin();
+    const inView = NOTAM.fir.filter((n) => n.la != null && v.contains([n.la, n.lo]) && (!w || inWin(n, w)));
     const noPos = NOTAM.fir.filter((n) => n.la == null);
     const byCat = (a, b) => (a.q || '').localeCompare(b.q || '');
     showList('NOTAM en route — FIR Brest & Bordeaux', `
-      <p class="meta">${NOTAM.fir.length} NOTAM (24 h, SFC–FL195) · ${inView.length} dans la vue actuelle · collecte ${fmtT(NOTAM.generated)}.</p>
+      <p class="meta">${NOTAM.fir.length} NOTAM (24 h, SFC–FL195) · ${inView.length} dans la vue actuelle${w ? ' et actifs pendant ton vol' : ''} · collecte ${fmtT(NOTAM.generated)}.</p>
       ${inView.sort(byCat).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">📍 voir</button></div>`).join('')}
       ${NOTAM.fir.some((n) => n.r > 30) ? `<p class="meta small-print">Les NOTAM de rayon &gt; 30 NM ne sont pas dessinés sur la carte mais figurent dans cette liste.</p>` : ''}
       ${noPos.length ? `<h4>Sans position (${noPos.length})</h4>${noPos.map((n) => notamHtml(n, true)).join('')}` : ''}
@@ -660,17 +851,28 @@
       drawAirLayers();
       st.push(`${SUP.length} SUP AIP`);
     } catch (e) { console.warn('sup', e); st.push('SUP AIP indisponibles'); }
-    $('#status2').textContent = st.join(' · ') + (NOTAM.generated ? ` (collecte ${fmtT(NOTAM.generated)})` : '');
+    const ageH = NOTAM.generated ? (Date.now() - Date.parse(NOTAM.generated)) / 3600e3 : 0;
+    $('#status2').textContent = st.join(' · ') + (NOTAM.generated ? ` (collecte il y a ${ageH < 1 ? Math.round(ageH * 60) + ' min' : ageH.toFixed(1).replace('.', ',') + ' h'})` : '') + (ageH > 2 ? ' ⚠️ collecte en retard : vérifier sur SOFIA' : '');
+    $('#status2').style.color = ageH > 2 ? '#ffb21e' : '';
     if (openedIcao) showAerodrome(openedIcao, false);
+    if (st.some((x) => /indisponibles/.test(x))) throw new Error(st.join(' · '));
   }
   $('#notam-obst').addEventListener('change', drawNotam);
   $('#notam-fl').addEventListener('change', drawNotam);
+  ['#notam-from', '#notam-to'].forEach((s) => $(s).addEventListener('change', () => {
+    if (s === '#notam-from' && $('#notam-from').value && !$('#notam-to').value) {
+      const d = new Date(Date.parse($('#notam-from').value) + 2 * 3600e3);
+      $('#notam-to').value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+    drawNotam();
+  }));
+  $('#notam-win-clear').addEventListener('click', () => { $('#notam-from').value = ''; $('#notam-to').value = ''; drawNotam(); });
   $('#btn-notam-list').addEventListener('click', showNotamList);
   $('#btn-sup-list').addEventListener('click', showSupList);
 
   // ---------- Calques espaces aériens, zones, RTBA du jour, points VFR ----------
   function loadAirLayers() {
-    if (!airLoading) airLoading = (async () => {
+    if (!airLoading) airLoading = window.AWW_LOG.task('Espaces aériens et zones', async () => {
       const [asp, zones, vfr] = await Promise.all([
         getLive('airspaces.json').catch(() => ({ data: [] })),
         getLive('zones.json').catch(() => ({ data: [] })),
@@ -678,7 +880,8 @@
       ]);
       AIR = { asp: asp.data || [], zones: zones.data || [], vfr: vfr.data || {}, vfrDate: vfr.effDate };
       drawAirLayers();
-    })();
+      if (!AIR.asp.length && !AIR.zones.length) throw new Error('fichiers espaces / zones vides');
+    });
     return airLoading;
   }
   function rtbaToday() {
@@ -692,31 +895,51 @@
     }
     return out;
   }
+  // Un clic sur un espace ou une zone affiche tout ce qui est empilé à cet endroit (espaces superposés, règles, fréquences)
+  const stackOnClick = (e) => { if (pickOff || window.AWW_PICKING) return; L.DomEvent.stop(e); showStack(e.latlng.lat, e.latlng.lng); };
+  const atAlt = (lowerS, upperS, alt) => {
+    if (!alt) return true;
+    const lo = altFt(lowerS), hi = altFt(upperS);
+    return (lo == null || lo <= alt) && (hi == null || hi >= alt);
+  };
   function drawAirLayers() {
     if (!AIR) return;
     ['asp', 'siv', 'zones', 'rtba', 'vfr'].forEach((k) => layers[k].clearLayers());
+    const alt = altSel();
     for (const s of AIR.asp) {
-      const siv = s.kind === 'SIV';
-      L.polygon(s.poly, { color: siv ? '#81c784' : s.kind === 'CTR' ? '#1e88e5' : '#64b5f6', weight: siv ? 1 : 1.3, dashArray: siv ? '2 4' : '6 4', fillOpacity: s.kind === 'CTR' ? .06 : .02, interactive: true })
-        .bindTooltip(`<b>${esc(s.name)}</b> (classe ${esc(s.cls)})<br>${esc(s.lower)} – ${esc(s.upper)}<br>${esc(s.call)} <b>${esc(s.freq)}</b>`, { className: 'tip', sticky: true })
+      if (!atAlt(s.lower, s.upper, alt)) continue;
+      const siv = s.kind === 'SIV', ctr = s.kind === 'CTR';
+      const col = siv ? '#2e9e3e' : ctr ? '#0d5bd6' : '#2f7fe0';
+      L.polygon(s.poly, { color: col, weight: siv ? 1.6 : ctr ? 2.4 : 1.8, dashArray: siv ? '3 5' : ctr ? null : '8 5', fillColor: col, fillOpacity: ctr ? .16 : siv ? .03 : .06 })
+        .bindTooltip(`<b>${esc(s.name)}</b> (classe ${esc(s.cls)})<br>${esc(s.lower)} – ${esc(s.upper)}<br>${esc(s.call)} <b>${esc(s.freq)}</b><br><span style="opacity:.7">Clic : espaces superposés ici et règles</span>`, { className: 'tip', sticky: true })
+        .on('click', stackOnClick)
         .addTo(siv ? layers.siv : layers.asp);
     }
     const act = rtbaToday();
     for (const z of AIR.zones) {
+      if (!atAlt(z.lower, z.upper, alt)) continue;
       const key = z.id.replace(/\s/g, ''), slots = act[key];
-      const col = z.type === 'P' ? '#d81b60' : z.type === 'D' ? '#fb8c00' : '#8e24aa';
-      const tip = `<b>${esc(z.id)} ${esc(z.name)}</b><br>${esc(z.lower)} – ${esc(z.upper)}${slots ? `<br><b style="color:#ff6b6b">RTBA active aujourd'hui : ${esc(slots.join(', '))} UTC</b>` : ''}<br><span style="opacity:.75">${esc((z.rmk || '').slice(0, 180))}</span>`;
-      if (z.rtba && slots) L.polygon(z.poly, { color: '#ff3b30', weight: 2, fillColor: '#ff3b30', fillOpacity: .22 }).bindTooltip(tip, { className: 'tip', sticky: true }).addTo(layers.rtba);
-      L.polygon(z.poly, { color: col, weight: 1, fillOpacity: z.type === 'P' ? .18 : .07 }).bindTooltip(tip, { className: 'tip', sticky: true }).addTo(layers.zones);
+      const col = z.type === 'P' ? '#e0105a' : z.type === 'D' ? '#ff8a00' : '#9c27b0';
+      const tip = `<b>${esc(z.id)} ${esc(z.name)}</b><br>${esc(z.lower)} – ${esc(z.upper)}${slots ? `<br><b style="color:#ff6b6b">RTBA active aujourd'hui : ${esc(slots.join(', '))} UTC</b>` : ''}<br><span style="opacity:.75">${esc((z.rmk || '').slice(0, 180))}</span><br><span style="opacity:.7">Clic : espaces superposés ici et règles</span>`;
+      if (z.rtba && slots) L.polygon(z.poly, { color: '#c4001a', weight: 3, fillColor: '#ff3b30', fillOpacity: .3 }).bindTooltip(tip, { className: 'tip', sticky: true }).on('click', stackOnClick).addTo(layers.rtba);
+      L.polygon(z.poly, { color: darken(col, .25), weight: 2, fillColor: col, fillOpacity: z.type === 'P' ? .3 : .14 }).bindTooltip(tip, { className: 'tip', sticky: true }).on('click', stackOnClick).addTo(layers.zones);
     }
     for (const [ad, pts] of Object.entries(AIR.vfr)) {
       for (const p of pts) {
-        L.marker([p.la, p.lo], { icon: L.divIcon({ className: 'mk', iconSize: [10, 10], iconAnchor: [5, 5], html: `<div style="position:relative"><svg width="10" height="10"><path d="M5 0l5 10H0z" fill="#fff" stroke="#003a5c"/></svg><span class="vfr-label" style="position:absolute;left:11px;top:-2px">${esc(p.id)}</span></div>` }) })
-          .bindTooltip(`<b>${ad.slice(2)}-${esc(p.id)}</b> (${ad})<br>${esc(p.desc)}<br><span style="opacity:.7">Points SIA ${esc(AIR.vfrDate || '')} — vérifier sur la VAC</span>`, { className: 'tip', direction: 'top' })
+        bindPick(L.marker([p.la, p.lo], { icon: L.divIcon({ className: 'mk', iconSize: [12, 12], iconAnchor: [6, 6], html: `<div style="position:relative"><svg width="12" height="12"><path d="M6 0l6 12H0z" fill="#fff" stroke="#002a40" stroke-width="1.4"/></svg><span class="vfr-label" style="position:absolute;left:13px;top:-2px">${esc(p.id)}</span></div>` }) })
+          .bindTooltip(`<b>${ad.slice(2)}-${esc(p.id)}</b> (${ad})<br>${esc(p.desc)}<br><span style="opacity:.7">Points SIA ${esc(AIR.vfrDate || '')} — vérifier sur la VAC</span>`, { className: 'tip', direction: 'top' }),
+        `🔺 Point VFR ${ad.slice(2)}-${p.id} (${ad})`, () => showAerodrome(ad))
           .addTo(layers.vfr);
       }
     }
+    drawHalos();
   }
+  $('#alt-filter').value = store.get('altFilter', '');
+  $('#alt-filter').addEventListener('change', (e) => {
+    store.set('altFilter', e.target.value);
+    if (e.target.value) ['asp', 'zones'].forEach((k) => { const cb = document.querySelector(`input[data-layer="${k}"]`); if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); } });
+    drawAirLayers(); drawNotam();
+  });
 
 
   // ---------- Coupe des espaces aériens (clic sur la carte) + règles de pénétration ----------
@@ -875,7 +1098,7 @@
   let cutMode = false, cutA = null;
   const cutBtn = $('#btn-cut'), cutHint = $('#cut-hint');
   function setCut(on) {
-    cutMode = on; cutA = null; cutLayer.clearLayers();
+    cutMode = on; cutA = null; cutLayer.clearLayers(); pickOff = on;
     cutBtn.classList.toggle('on', on);
     cutHint.hidden = !on;
     map.getContainer().style.cursor = on ? 'crosshair' : '';
@@ -898,6 +1121,7 @@
     }
   });
   map.on('contextmenu', (e) => showStack(e.latlng.lat, e.latlng.lng));
+  window.addEventListener('aww-clear', () => { if (cutMode) setCut(false); cutLayer.clearLayers(); hiLayer.clearLayers(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cutMode) setCut(false); });
 
   // ---------- API interne pour le module de préparation de vol (flightprep.js) ----------
@@ -907,7 +1131,13 @@
     showStack: (la, lo, t) => showStack(la, lo, t),
     get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor,
     showPanel(title, html) { showList(title, html); },
-    detailBody, detail,
+    detailBody, detail, store, highlight,
+    setPickOff(v) { pickOff = v; },
+    get AIR() { return AIR; }, loadAirLayers,
+    setNotamWindow(a, b) {
+      const f = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      $('#notam-from').value = f(a); $('#notam-to').value = f(b); drawNotam();
+    },
   };
 
   // ---------- Application hors ligne (tablette) : service worker + dernier briefing ----------
@@ -948,12 +1178,24 @@
   $('#btn-last').addEventListener('click', showLastBriefing);
   if (window.caches) caches.open('aww-briefings').then((c) => c.keys()).then((k) => { if (k.length) $('#btn-last').hidden = false; }).catch(() => {});
 
-  // ---------- Démarrage ----------
+  // ---------- Démarrage (chaque chargement est suivi : indicateur en haut de la carte + journal) ----------
+  const T = window.AWW_LOG.task;
   drawAerodromes();
-  loadMetarTaf();
-  loadPiouPiou();
-  loadNotamSup();
-  loadEscale();
-  loadCamStatus();
-  setInterval(() => { loadMetarTaf(); loadPiouPiou(); loadNotamSup(); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
+  T('METAR / TAF', loadMetarTaf);
+  T('NOTAM / SUP AIP', loadNotamSup);
+  T('Balises vent', loadPiouPiou);
+  // fichiers lourds (VAC 700 ko) chargés une fois la carte affichée
+  const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
+  idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); });
+  setInterval(() => { T('METAR / TAF', loadMetarTaf); T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
+  $('#btn-log').addEventListener('click', () => window.AWW_LOG.download());
+  $('#btn-zip').addEventListener('click', () => {
+    const repo = CFG.repo || 'cyprien64/aero-meteo-webcams-ouest';
+    showList('Télécharger le site', `<p>Archive complète du site (carte, préparation de vol, données du moment) :</p>
+      <p><a class="btn primary" href="https://github.com/${repo}/archive/refs/heads/main.zip" download>⬇️ Télécharger le zip</a></p>
+      <h4>Utiliser la copie téléchargée</h4>
+      <ol class="meta"><li>Décompresser le zip.</li><li>Chrome / Edge / Brave : <code>chrome://extensions</code> → activer le <b>Mode développeur</b> → <b>Charger l'extension non empaquetée</b> → choisir le dossier.</li>
+      <li>L'extension lit les NOTAM / SUP AIP à jour sur le site et les METAR en direct.</li></ol>
+      <p class="meta">Ouvrir directement <code>map.html</code> depuis le disque ne suffit pas : le navigateur bloque la lecture des fichiers de données. Sur tablette, utiliser plutôt « Ajouter à l'écran d'accueil » (fonctionne hors ligne).</p>`);
+  });
 })();

@@ -354,15 +354,15 @@
       <p class="meta">Route directe entre les terrains (codes OACI), contournement automatique des zones interdites et des RTBA actives.</p>
       <datalist id="apt-list">${aptOptions()}</datalist>
       <div class="prep-form">
-        <label>Départ<input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
-        <label>Arrivée<input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
-        <label class="full">Points tournants (terrains OACI ou points VFR comme BP-N, optionnel)<input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX BI-N"></label>
+        <label>Départ <button type="button" class="pick-btn" data-pick="pf-dep" title="Choisir sur la carte">📍</button><input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
+        <label>Arrivée <button type="button" class="pick-btn" data-pick="pf-arr" title="Choisir sur la carte">📍</button><input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
+        <label class="full">Points tournants (terrains OACI ou points VFR comme BP-N, optionnel) <button type="button" class="pick-btn" data-pick="pf-wps" title="Choisir sur la carte">📍</button> <span class="meta">📍 puis clic sur la carte pour ajouter un point</span><input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX BI-N"></label>
         <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${f.turn ?? 45}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
-        <label>Dégagement<input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
+        <label>Dégagement <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
         <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
         <label>Avion<select id="pf-reg">${FLEET.map((a) => `<option value="${a.reg}" ${a.reg === reg ? 'selected' : ''}>${a.reg} — ${esc(TYPES[a.type].label)}</option>`).join('')}</select></label>
         <label>Régime<select id="pf-regime">${regimeOptions(reg, f.regime)}</select></label>
@@ -436,7 +436,60 @@
     $('#pf-arr').addEventListener('change', (e) => fillVfr('#pf-entry', e.target.value));
     $('#pf-dep').addEventListener('input', (e) => { if (A.aptByIcao[e.target.value]) fillVfr('#pf-exit', e.target.value); });
     $('#pf-arr').addEventListener('input', (e) => { if (A.aptByIcao[e.target.value]) fillVfr('#pf-entry', e.target.value); });
+    // Saisie par le nom de la ville (« pau », « arcachon ») → code OACI
+    ['#pf-dep', '#pf-arr', '#pf-alt'].forEach((s) => $(s).addEventListener('change', (e) => {
+      const v = e.target.value.trim(); if (!v || A.aptByIcao[v]) return;
+      const n = normTxt(v), hit = A.APTS.filter((a) => normTxt(a.name).includes(n));
+      if (hit.length) { e.target.value = hit[0].icao; e.target.dispatchEvent(new Event('change')); if (hit.length > 1) $('#pf-prog').textContent = `« ${v} » : ${hit.slice(0, 4).map((a) => a.icao + ' ' + a.name).join(', ')}${hit.length > 4 ? '…' : ''} — ${hit[0].icao} retenu.`; }
+    }));
+    document.querySelectorAll('.pick-btn[data-pick]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); startPick(b.dataset.pick, b); }));
   }
+  const normTxt = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+  // ---------------------------------------------------------------- choix d'un terrain / d'un point directement sur la carte
+  let pick = null;
+  function startPick(id, btn) {
+    stopPick();
+    pick = { id, btn };
+    window.AWW_PICKING = true;
+    map.getContainer().classList.add('picking');
+    btn.classList.add('on');
+    const lbl = { 'pf-dep': 'le terrain de départ', 'pf-arr': 'le terrain d\'arrivée', 'pf-alt': 'le terrain de dégagement', 'pf-wps': 'un point tournant (terrain, point VFR ou point libre)' }[id];
+    const ban = document.createElement('div'); ban.id = 'pick-banner';
+    ban.innerHTML = `Clique sur la carte : ${lbl}<button type="button">Annuler</button>`;
+    ban.querySelector('button').addEventListener('click', stopPick);
+    document.body.appendChild(ban);
+  }
+  function stopPick() {
+    if (!pick) return;
+    pick.btn.classList.remove('on'); pick = null;
+    window.AWW_PICKING = false;
+    map.getContainer().classList.remove('picking');
+    const b = $('#pick-banner'); if (b) b.remove();
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') stopPick(); });
+  map.on('click', (e) => {
+    if (!pick) return;
+    const el = $('#' + pick.id); if (!el) { stopPick(); return; }
+    const p = map.latLngToContainerPoint(e.latlng);
+    const near = (la, lo) => map.latLngToContainerPoint([la, lo]).distanceTo(p);
+    let best = null, bd = 30;
+    for (const a of A.APTS) { const d = near(a.la, a.lo); if (d < bd) { bd = d; best = a.icao; } }
+    if (pick.id === 'pf-wps') {
+      let tok = bd <= 16 ? best : null;   // point tournant : accroche seulement si on clique vraiment sur le terrain
+      if (!tok) bd = 16;
+      if (!tok && VFR) for (const [ad, pts] of Object.entries(VFR.data || {})) for (const v of pts) { const d = near(v.la, v.lo); if (d < Math.min(bd, 20)) { bd = d; tok = `${ad.slice(2)}-${v.id}`; } }
+      if (!tok) tok = `${e.latlng.lat.toFixed(4)}/${e.latlng.lng.toFixed(4)}`;
+      el.value = (el.value.trim() + ' ' + tok).trim();
+      ['#pf-exit', '#pf-entry'].forEach((s) => { const x = $(s); if (x && x.value === 'auto') x.value = 'none'; });
+      $('#pf-prog').textContent = `Point ajouté : ${tok}. Clique 📍 à nouveau pour en ajouter un autre.`;
+    } else {
+      if (!best) { $('#pf-prog').textContent = 'Aucun aérodrome à cet endroit : clique plus près d\'un terrain (zoome si besoin).'; return; }
+      el.value = best; el.dispatchEvent(new Event('change'));
+      $('#pf-prog').textContent = `${best} ${A.aptByIcao[best].name} sélectionné.`;
+    }
+    stopPick();
+  });
   $('#btn-prep').addEventListener('click', openForm);
 
   function readForm() {
@@ -484,9 +537,22 @@
     return [fk.dep, exit, ...wps.map((w) => w.id), entry, fk.arr].filter(Boolean);
   }
 
+  // Bibliothèques PDF / Excel (1 Mo) chargées seulement quand on génère un document : la carte s'ouvre plus vite
+  let libsP = null;
+  function needLibs() {
+    if (window.jspdf && window.PDFLib && window.JSZip) return Promise.resolve();
+    if (!libsP) libsP = ['lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js', 'lib/pdf/pdf-lib.min.js', 'lib/pdf/jszip.min.js']
+      .reduce((p, src) => p.then(() => new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('chargement de ' + src)); document.head.appendChild(s); })), Promise.resolve())
+      .catch((e) => { libsP = null; throw e; });
+    return libsP;
+  }
+  window.AWW_needLibs = needLibs;
+
   async function run(makePdf) {
     const prog = $('#pf-prog'), out = $('#pf-out');
+    stopPick();
     try {
+      if (makePdf) { prog.textContent = 'Chargement des outils PDF / Excel…'; await needLibs(); }
       const f = readForm();
       lastForm = f;
       if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
@@ -520,6 +586,10 @@
       }
       trip.forEach((b) => { b.trip = trip; });
       drawTrip(trip);
+      try {
+        A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
+        if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
+      } catch (e) { console.warn(e); }
       out.innerHTML = (trip.length > 1 ? tripHtml(trip) : '') + trip.map((b, i) => trip.length > 1
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
@@ -563,7 +633,14 @@
   function nightInfo(b) {
     const s = b.sun; if (!s) return null;
     const night = new Date(s.set.getTime() + 30 * 6e4), day = b.sunDep ? new Date(b.sunDep.rise.getTime() - 30 * 6e4) : null;
-    return { set: s.set, night, day, latestDep: new Date(night.getTime() - b.totMin * 6e4), late: b.eta > night, early: day && b.depT < day };
+    // nuit aéronautique point par point (coucher + 30 min à l'endroit où l'on passe)
+    const pts = b.legs.map((lg) => {
+      const st = sunTimes(lg.eto, lg.b[0], lg.b[1]);
+      const n = st ? new Date(st.set.getTime() + 30 * 6e4) : null;
+      return { id: lg.to, eta: lg.eto, night: n, dark: !!(n && lg.eto > n) };
+    });
+    const firstDark = pts.find((x) => x.dark);
+    return { set: s.set, night, day, latestDep: new Date(night.getTime() - b.totMin * 6e4), late: b.eta > night, early: day && b.depT < day, pts, firstDark };
   }
   function tripHtml(trip) {
     const rows = trip.map((b) => {
@@ -581,6 +658,7 @@
       <p class="meta">${totDist.toFixed(0)} NM · escale ${last.f.turn} min · ${last.f.refuel ? 'plein à chaque escale' : 'sans avitaillement aux escales'} · « Dernier déc. » = dernier décollage pour arriver avant la nuit aéronautique (coucher du soleil + 30 min).</p>
       ${warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Carburant et horaires compatibles sur toutes les étapes.</div>'}`;
   }
+  window.addEventListener('aww-clear', () => { if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } stopPick(); });
   function drawTrip(trip) {
     if (routeLayer) map.removeLayer(routeLayer);
     routeLayer = L.layerGroup().addTo(map);
@@ -1278,6 +1356,7 @@
     if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => d.id).join(', ')}).`);
     if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
     if (b.sunDep && b.depT < new Date(b.sunDep.rise.getTime() - 30 * 6e4)) al.push('Départ avant le jour aéronautique.');
+    if (b.night && b.night.firstDark) al.push(`Nuit aéronautique à partir de ${b.night.firstDark.id} (passage ${utc(b.night.firstDark.eta)}, nuit ${utc(b.night.firstDark.night)}).`);
     if (b.loaded < b.reqFuel) al.push(`Carburant insuffisant : ${b.loaded} L à bord pour ${b.reqFuel} L requis (étape + dégagement + réserve).`);
     if (b.mb.mass > b.f.T.mtow) al.push(`Masse au décollage ${Math.round(b.mb.mass)} kg > MTOW ${b.f.T.mtow} kg.`);
     if (b.mb.cg == null) al.push(`Centrage non calculé : bras de levier ${b.f.T.label} à compléter (manuel de vol / fiche de pesée).`);
@@ -1316,6 +1395,7 @@
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}.</p>
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
+      ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       ${azbaHtml(b)}
       ${mountainHtml(b)}

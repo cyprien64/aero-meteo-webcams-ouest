@@ -1,0 +1,255 @@
+/* Outils complémentaires : mesure d'un trajet avec le vent de plusieurs modèles, carte jour / nuit aéronautique, effacement des tracés. */
+(() => {
+  'use strict';
+  const A = window.AWW; if (!A) return;
+  const { map, L, esc } = A;
+  const $ = (s, el = document) => el.querySelector(s);
+  const rad = (d) => d * Math.PI / 180, deg = (r) => r * 180 / Math.PI;
+  const pad = (n) => String(n).padStart(2, '0');
+  const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  // ================================================================ 📏 Mesure d'un trajet
+  const nmBetween = (a, b) => {
+    const p1 = rad(a[0]), p2 = rad(b[0]), dl = rad(b[1] - a[1]);
+    return deg(Math.acos(Math.min(1, Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl)))) * 60;
+  };
+  const course = (a, b) => {
+    const p1 = rad(a[0]), p2 = rad(b[0]), dl = rad(b[1] - a[1]);
+    return (deg(Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl))) + 360) % 360;
+  };
+  const MODELS = [
+    ['meteofrance_seamless', 'Météo-France (AROME / ARPEGE)'],
+    ['ecmwf_ifs025', 'ECMWF (européen)'],
+    ['icon_seamless', 'ICON (DWD, allemand)'],
+    ['gfs_seamless', 'GFS (NOAA, américain)'],
+  ];
+  const LEVELS = [[1000, 360], [975, 1050], [950, 1770], [925, 2500], [900, 3240], [850, 4780], [800, 6400], [700, 9880]];
+  const levelFor = (ft) => LEVELS.reduce((b, l) => Math.abs(l[1] - ft) < Math.abs(b[1] - ft) ? l : b)[0];
+  // triangle des vitesses : vent (d'où il vient, kt) → vitesse sol et dérive
+  function gsOf(tc, tas, wdir, wspd) {
+    const wa = rad(wdir - tc);
+    const s = wspd * Math.sin(wa) / tas;
+    if (Math.abs(s) >= 1) return null;
+    const wca = Math.asin(s);
+    return { gs: tas * Math.cos(wca) - wspd * Math.cos(wa), wca: deg(wca) };
+  }
+  const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+
+  const ms = { on: false, pts: [], layer: L.layerGroup().addTo(map), res: null };
+  const btn = $('#btn-measure');
+  function setMeasure(on) {
+    ms.on = on; btn.classList.toggle('on', on); A.setPickOff(on);
+    map.getContainer().style.cursor = on ? 'crosshair' : '';
+    if (on) { if (map.doubleClickZoom) map.doubleClickZoom.disable(); panel(); } else if (map.doubleClickZoom) map.doubleClickZoom.enable();
+  }
+  btn.addEventListener('click', () => setMeasure(!ms.on));
+  function snap(ll) {   // accroche aux aérodromes proches (12 px)
+    const p = map.latLngToContainerPoint(ll);
+    let best = null, bd = 13;
+    for (const a of A.APTS) { const d = map.latLngToContainerPoint([a.la, a.lo]).distanceTo(p); if (d < bd) { bd = d; best = a; } }
+    return best ? { ll: [best.la, best.lo], id: best.icao } : { ll: [ll.lat, ll.lng], id: null };
+  }
+  map.on('click', (e) => {
+    if (!ms.on) return;
+    const s = snap(e.latlng);
+    ms.pts.push({ ll: s.ll, id: s.id || `P${ms.pts.length + 1}` });
+    ms.res = null; draw(); panel();
+  });
+  function draw() {
+    ms.layer.clearLayers();
+    if (ms.pts.length > 1) L.polyline(ms.pts.map((p) => p.ll), { color: '#00e5ff', weight: 4, opacity: .95, dashArray: '10 6', interactive: false }).addTo(ms.layer);
+    ms.pts.forEach((p, i) => {
+      if (i) {
+        const a = ms.pts[i - 1].ll, b = p.ll, nm = nmBetween(a, b);
+        L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { interactive: false, icon: L.divIcon({ className: 'ms-lbl', html: `${nm.toFixed(1)} NM · ${(nm * 1.852).toFixed(0)} km · ${pad(Math.round(course(a, b)) % 360).padStart(3, '0')}°`, iconSize: null }) }).addTo(ms.layer);
+      }
+      L.marker(p.ll, { draggable: true, icon: L.divIcon({ className: 'ms-pt', iconSize: [16, 16], iconAnchor: [8, 8] }) })
+        .bindTooltip(esc(p.id), { permanent: true, direction: 'right', className: 'tip' })
+        .on('dragend', (e) => { const s = snap(e.target.getLatLng()); p.ll = s.ll; if (s.id) p.id = s.id; ms.res = null; draw(); panel(); })
+        .on('contextmenu', () => { ms.pts.splice(i, 1); ms.res = null; draw(); panel(); })
+        .addTo(ms.layer);
+    });
+  }
+  const st = A.store.get('measure', { tas: 105, ft: 2500 });
+  function panel() {
+    const tot = ms.pts.reduce((s, p, i) => s + (i ? nmBetween(ms.pts[i - 1].ll, p.ll) : 0), 0);
+    const next = new Date(Date.now() + 3600e3); next.setMinutes(0, 0, 0);
+    A.showPanel('📏 Mesure d\'un trajet', `
+      <p class="meta">${ms.on ? 'Clique sur la carte pour ajouter des points (accroche aux aérodromes) · glisse un point pour le déplacer · clic droit sur un point pour le supprimer.' : 'Mode mesure arrêté. Re-clique sur « Mesurer un trajet » pour continuer.'}</p>
+      <p><b>${ms.pts.length} points · ${tot.toFixed(1)} NM · ${(tot * 1.852).toFixed(0)} km</b></p>
+      <div class="ms-form">
+        <label>Vitesse propre (kt)<input id="ms-tas" type="number" min="40" max="250" value="${st.tas}"></label>
+        <label>Altitude (ft)<input id="ms-ft" type="number" min="500" max="10000" step="500" value="${st.ft}"></label>
+        <label>Départ (heure locale)<input id="ms-t" type="datetime-local" value="${esc(st.t && Date.parse(st.t) > Date.now() - 3600e3 ? st.t : localInput(next))}"></label>
+      </div>
+      <div class="row" style="margin-top:6px"><button class="btn primary" id="ms-go" ${ms.pts.length < 2 ? 'disabled' : ''}>🌬️ Temps de vol selon le vent prévu (4 modèles)</button>
+        <button class="btn" id="ms-undo" ${ms.pts.length ? '' : 'disabled'}>↶ Dernier point</button><button class="btn" id="ms-clear">🧹 Effacer</button></div>
+      <div id="ms-out">${ms.res || ''}</div>
+      ${ms.pts.length > 1 ? '<div class="row" style="margin-top:6px"><button class="btn" id="ms-prep">✈️ Préparer ce vol</button></div>' : ''}
+      <p class="legend small-print">Le vent vient d'Open-Meteo pour chaque modèle, au niveau de pression le plus proche de l'altitude, à l'heure de passage au milieu de chaque branche. Quand les modèles ne sont pas d'accord, l'écart est signalé : c'est au pilote de trancher (TEMSI, WINTEM, GRAMET, prévisionniste).</p>`);
+    $('#ms-go') && $('#ms-go').addEventListener('click', compute);
+    $('#ms-undo').addEventListener('click', () => { ms.pts.pop(); ms.res = null; draw(); panel(); });
+    $('#ms-clear').addEventListener('click', () => { ms.pts = []; ms.res = null; draw(); panel(); });
+    const prep = $('#ms-prep');
+    if (prep) prep.addEventListener('click', () => {
+      const ids = ms.pts.map((p) => p.id && /^[A-Z]{4}$/.test(p.id) ? p.id : `${p.ll[0].toFixed(4)}/${p.ll[1].toFixed(4)}`);
+      if (!/^[A-Z]{4}$/.test(ids[0]) || !/^[A-Z]{4}$/.test(ids[ids.length - 1])) { alert('Le premier et le dernier point doivent être des aérodromes (clique sur un terrain pour l\'accrocher).'); return; }
+      const f = A.store.get('prep2.form', {});
+      A.store.set('prep2.form', { ...f, dep: ids[0], arr: ids[ids.length - 1], wps: ids.slice(1, -1).join(' '), exit: 'none', entry: 'none', ft: +$('#ms-ft').value || f.ft });
+      setMeasure(false);
+      $('#btn-prep').click();
+    });
+    ['#ms-tas', '#ms-ft', '#ms-t'].forEach((s) => $(s).addEventListener('change', () => { st.tas = +$('#ms-tas').value; st.ft = +$('#ms-ft').value; st.t = $('#ms-t').value; A.store.set('measure', st); }));
+  }
+  async function compute() {
+    const tas = +$('#ms-tas').value || 100, ft = +$('#ms-ft').value || 2500, t0 = new Date($('#ms-t').value || Date.now());
+    st.tas = tas; st.ft = ft; st.t = $('#ms-t').value; A.store.set('measure', st);
+    const out = $('#ms-out'); out.innerHTML = '<p class="meta">Interrogation des 4 modèles…</p>';
+    const legs = ms.pts.slice(1).map((p, i) => { const a = ms.pts[i].ll, b = p.ll; return { from: ms.pts[i].id, to: p.id, a, b, nm: nmBetween(a, b), tc: course(a, b), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; });
+    let t = t0.getTime();
+    legs.forEach((lg) => { lg.tmid = new Date(t + lg.nm / tas * 1800e3); t += lg.nm / tas * 3600e3; });
+    const lv = levelFor(ft);
+    const vars = MODELS.flatMap(([m]) => [`wind_speed_${lv}hPa`, `wind_direction_${lv}hPa`]).filter((v, i, a) => a.indexOf(v) === i);
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${legs.map((l) => l.mid[0].toFixed(3)).join(',')}&longitude=${legs.map((l) => l.mid[1].toFixed(3)).join(',')}`
+        + `&hourly=${vars.join(',')}&models=${MODELS.map((m) => m[0]).join(',')}&wind_speed_unit=kn&timezone=GMT&forecast_days=7`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(r.status === 429 ? 'serveur météo saturé, réessaie dans une minute' : 'erreur ' + r.status);
+      let d = await r.json(); if (!Array.isArray(d)) d = [d];
+      const tot = Object.fromEntries(MODELS.map(([m]) => [m, 0]));
+      const rows = legs.map((lg, i) => {
+        const h = d[i].hourly, key = lg.tmid.toISOString().slice(0, 13) + ':00';
+        const k = h.time.indexOf(key);
+        const per = MODELS.map(([m]) => {
+          const ws = k >= 0 ? h[`wind_speed_${lv}hPa_${m}`][k] : null, wd = k >= 0 ? h[`wind_direction_${lv}hPa_${m}`][k] : null;
+          if (ws == null || wd == null) return { m, none: true };
+          const g = gsOf(lg.tc, tas, wd, ws);
+          if (!g || g.gs < 20) return { m, ws, wd, none: true };
+          const min = lg.nm / g.gs * 60; tot[m] += min;
+          return { m, ws, wd, gs: g.gs, min, wca: g.wca };
+        });
+        const ok = per.filter((x) => !x.none);
+        const spdSpread = ok.length ? Math.max(...ok.map((x) => x.ws)) - Math.min(...ok.map((x) => x.ws)) : 0;
+        const dirSpread = ok.length > 1 && Math.max(...ok.map((x) => x.ws)) > 8 ? Math.max(...ok.flatMap((x) => ok.map((y) => angDiff(x.wd, y.wd)))) : 0;
+        const minSpread = ok.length ? Math.max(...ok.map((x) => x.min)) - Math.min(...ok.map((x) => x.min)) : 0;
+        lg.diverge = spdSpread >= 10 || dirSpread >= 40 || minSpread >= 4;
+        return `<tr><td colspan="5"><b>${esc(lg.from)} → ${esc(lg.to)}</b> · ${lg.nm.toFixed(1)} NM (${(lg.nm * 1.852).toFixed(0)} km) · Rv ${String(Math.round(lg.tc) % 360).padStart(3, '0')}° · passage ~${hm(lg.tmid)}
+          ${lg.diverge ? `<br><span style="color:#ffb340">⚠️ Les modèles divergent (vent ±${Math.round(spdSpread / 2)} kt${dirSpread >= 40 ? `, direction ${Math.round(dirSpread)}° d'écart` : ''}) : à vérifier.</span>` : ''}</td></tr>`
+          + per.map((x) => `<tr><td>${esc(MODELS.find((m) => m[0] === x.m)[1].split(' (')[0])}</td>${x.none && x.ws == null ? '<td colspan="4" class="meta">pas de donnée à cette échéance</td>'
+            : `<td>${String(Math.round(x.wd)).padStart(3, '0')}° / ${Math.round(x.ws)} kt</td><td>${x.gs ? `Vs ${Math.round(x.gs)} kt` : '–'}</td><td>${x.wca != null ? `dérive ${x.wca > 0 ? '+' : ''}${Math.round(x.wca)}°` : ''}</td><td${lg.diverge ? ' class="dv"' : ''}>${x.min ? `${Math.round(x.min)} min` : '–'}</td>`}</tr>`).join('');
+      }).join('');
+      const totMin = MODELS.map(([m, n]) => ({ m, n, min: tot[m] })).filter((x) => x.min > 0);
+      const noWind = legs.reduce((s, l) => s + l.nm, 0) / tas * 60;
+      const worst = totMin.length ? totMin.reduce((a, b) => b.min > a.min ? b : a) : null;
+      ms.res = `<h4>Vent prévu à ${ft} ft (niveau ${lv} hPa) — ${tas} kt de vitesse propre</h4>
+        <table class="ms">${rows}</table>
+        <h4>Temps total selon chaque modèle</h4>
+        <table class="ms"><tr><th>Modèle</th><th>Temps</th><th>Arrivée</th></tr>
+        <tr><td>Sans vent</td><td>${Math.round(noWind)} min</td><td>${hm(new Date(t0.getTime() + noWind * 6e4))}</td></tr>
+        ${totMin.map((x) => `<tr><td>${esc(x.n)}</td><td${worst && x.m === worst.m ? ' class="dv"' : ''}>${Math.floor(x.min / 60)} h ${pad(Math.round(x.min % 60))}</td><td>${hm(new Date(t0.getTime() + x.min * 6e4))}</td></tr>`).join('')}</table>
+        ${worst ? `<p class="meta">Le plus pessimiste : <b>${esc(worst.n)}</b> (${Math.round(worst.min)} min) — prévoir le carburant sur ce cas.</p>` : ''}
+        ${legs.some((l) => l.diverge) ? '<div class="warn">⚠️ Sur au moins une branche les modèles ne sont pas d\'accord : compare avec la carte WINTEM / TEMSI d\'aviation.meteo.fr et garde une marge.</div>' : '<div class="okk">Les 4 modèles sont cohérents sur ce trajet.</div>'}`;
+      out.innerHTML = ms.res;
+    } catch (e) { console.warn('mesure vent', e); out.innerHTML = `<div class="warn">Vent indisponible : ${esc(e.message)}</div>`; }
+  }
+
+  // ================================================================ 🌙 Jour / nuit aéronautique
+  // Nuit aéronautique (France) : du coucher du soleil + 30 min au lever du soleil - 30 min.
+  function sunTimes(day, la, lo) {
+    const d0 = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+    const n = Math.floor((d0 - Date.UTC(2000, 0, 1, 12)) / 864e5) + 1;
+    const Js = n - lo / 360, M = (357.5291 + 0.98560028 * Js) % 360;
+    const C = 1.9148 * Math.sin(rad(M)) + 0.02 * Math.sin(rad(2 * M)) + 0.0003 * Math.sin(rad(3 * M));
+    const lam = (M + C + 180 + 102.9372) % 360;
+    const Jt = 2451545 + Js + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2 * lam));
+    const dec = Math.asin(Math.sin(rad(lam)) * Math.sin(rad(23.44)));
+    const cosw = (Math.sin(rad(-0.833)) - Math.sin(rad(la)) * Math.sin(dec)) / (Math.cos(rad(la)) * Math.cos(dec));
+    if (Math.abs(cosw) > 1) return null;
+    const w = deg(Math.acos(cosw)), toMs = (j) => (j - 2440587.5) * 864e5;
+    return { rise: toMs(Jt - w / 360), set: toMs(Jt + w / 360) };
+  }
+  window.AWW_sunTimes = sunTimes;
+  const NB = { s: 41.3, n: 51.3, w: -6.0, e: 9.8 }, STEP = 0.1;
+  const nightOverlay = L.imageOverlay('data:image/gif;base64,R0lGODlhAQABAAAAACw=', [[NB.s, NB.w], [NB.n, NB.e]], { opacity: 1, interactive: false, pane: 'maskPane' });
+  const termLine = L.layerGroup();
+  let nightT = null, playTimer = null;
+  const cv = document.createElement('canvas');
+  function renderNight() {
+    const day = new Date($('#night-date').value + 'T12:00:00');
+    if (isNaN(day)) return;
+    const mins = +$('#night-t').value;
+    const t = new Date(day); t.setHours(0, mins, 0, 0);
+    nightT = t;
+    const W = Math.round((NB.e - NB.w) / STEP), H = Math.round((NB.n - NB.s) / STEP);
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d'), img = ctx.createImageData(W, H), now = t.getTime();
+    const mer = (la) => Math.log(Math.tan(Math.PI / 4 + rad(la) / 2)), yN = mer(NB.n), yS = mer(NB.s);
+    for (let y = 0; y < H; y++) {
+      const la = deg(2 * Math.atan(Math.exp(yN - (y + .5) / H * (yN - yS))) - Math.PI / 2);   // lignes régulières en Mercator (comme la carte)
+      for (let x = 0; x < W; x++) {
+        const lo = NB.w + (x + .5) * STEP;
+        const s = sunTimes(t, la, lo);
+        let r = 0, g = 0, b = 0, a = 0;
+        if (s) {
+          const sp = s.set, rp = s.rise;
+          // jour J : nuit avant lever-30 et après coucher+30 ; crépuscule entre coucher et +30 (ou -30 avant lever)
+          if (now >= sp + 30 * 6e4 || now < rp - 30 * 6e4) { r = 8; g = 14; b = 60; a = 150; }
+          else if (now >= sp || now < rp) { r = 255; g = 130; b = 30; a = 110; }
+        }
+        const i = (y * W + x) * 4; img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b; img.data[i + 3] = a;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    nightOverlay.setUrl(cv.toDataURL());
+    // ligne « début de la nuit aéronautique » : pour chaque latitude, longitude où coucher + 30 = t
+    termLine.clearLayers();
+    const pts = [];
+    for (let la = NB.s; la <= NB.n; la += .5) {
+      let best = null;
+      for (let lo = NB.w; lo <= NB.e; lo += .05) { const s = sunTimes(t, la, lo); if (!s) continue; const d = Math.abs(s.set + 30 * 6e4 - now); if (d < 4 * 6e4 && (!best || d < best.d)) best = { lo, d }; }
+      if (best) pts.push([la, best.lo]);
+    }
+    if (pts.length > 3) L.polyline(pts, { color: '#ffd60a', weight: 2.5, dashArray: '8 6', interactive: false, pane: 'outlinePane' }).bindTooltip('Début de la nuit aéronautique', { sticky: true }).addTo(termLine);
+    const utcS = `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())} UTC`;
+    // info à la position du centre de la carte
+    const c = map.getCenter(), sc = sunTimes(t, c.lat, c.lng);
+    $('#night-lbl').innerHTML = `${hm(t)} locale · ${utcS}${sc ? `<br><span class="meta">au centre de la carte : coucher ${hm(new Date(sc.set))}, nuit aéro ${hm(new Date(sc.set + 30 * 6e4))} · jour aéro ${hm(new Date(sc.rise - 30 * 6e4))}</span>` : ''}`;
+  }
+  function setNight(on) {
+    if (on) { nightOverlay.addTo(map); termLine.addTo(map); renderNight(); } else { map.removeLayer(nightOverlay); map.removeLayer(termLine); clearInterval(playTimer); playTimer = null; $('#night-play').textContent = '▶'; }
+  }
+  const today = new Date();
+  $('#night-date').value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  $('#night-t').value = Math.floor((today.getHours() * 60 + today.getMinutes()) / 5) * 5;
+  $('#night-on').addEventListener('change', (e) => setNight(e.target.checked));
+  ['#night-date', '#night-t'].forEach((s) => $(s).addEventListener('input', () => { if ($('#night-on').checked) renderNight(); else { $('#night-on').checked = true; setNight(true); } }));
+  map.on('moveend', () => { if ($('#night-on').checked) renderNight(); });
+  $('#night-now').addEventListener('click', () => {
+    const n = new Date(); $('#night-date').value = `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`; $('#night-t').value = Math.floor((n.getHours() * 60 + n.getMinutes()) / 5) * 5;
+    $('#night-on').checked = true; setNight(true);
+  });
+  $('#night-play').addEventListener('click', () => {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; $('#night-play').textContent = '▶'; return; }
+    $('#night-on').checked = true; setNight(true); $('#night-play').textContent = '⏸';
+    playTimer = setInterval(() => { const el = $('#night-t'); el.value = (+el.value + 10) % 1440; renderNight(); }, 400);
+  });
+  // « Mon vol » : positionne la carte de nuit sur l'heure d'arrivée du dernier vol préparé
+  window.AWW_setFlightTimes = (dep, eta) => {
+    const b = $('#night-flight'); b.hidden = false;
+    b.onclick = () => {
+      $('#night-date').value = `${eta.getFullYear()}-${pad(eta.getMonth() + 1)}-${pad(eta.getDate())}`;
+      $('#night-t').value = Math.round((eta.getHours() * 60 + eta.getMinutes()) / 5) * 5;
+      $('#night-on').checked = true; setNight(true);
+      const sec = $('#night-on').closest('details'); if (sec) sec.open = true;
+    };
+    b.title = `Arrivée prévue ${hm(eta)}`;
+  };
+
+  // ================================================================ 🧹 Effacer les tracés
+  $('#btn-clear').addEventListener('click', () => {
+    ms.pts = []; ms.res = null; draw(); if (ms.on) setMeasure(false);
+    window.dispatchEvent(new Event('aww-clear'));
+    A.detail.hidden = true;
+  });
+})();

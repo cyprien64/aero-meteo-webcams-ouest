@@ -90,6 +90,20 @@ Le PDF contient :
 - **Taxes d'atterrissage partagées** : bouton « Proposer ce tarif au club » dans la fiche d'un aérodrome → formulaire GitHub (issue
   « taxe ») ; une fois l'étiquette **valide** ajoutée par l'administrateur, le tarif est publié à la collecte suivante (`data/live/fees_club.json`).
 
+## Retours des membres (v2.0)
+- **METAR / TAF en direct** sur le site (met.no) : plus de dépendance au rythme de la GitHub Action ; âge du dernier METAR et de la collecte NOTAM affichés (orange si en retard).
+- **Webcams** : doublons Inter Aéro / cam-aero.eu supprimés, 20 webcams d'aéroclubs ajoutées (Saint-Junien, Niort, Arcachon, Oléron, Montaigu, Alençon, Flers, Granville, Lannion, Avranches…), annuaires de webcams et sites utiles dans « Outils ».
+- **Bulles au survol** plus larges, **couleurs** des zones et cercles NOTAM plus marquées, **contour de la France et des régions** (+ masque hors France).
+- **Recherche** : zoom plus serré, repère pulsant et nom en grand ; noms des terrains plus gros quand on zoome.
+- **Éléments superposés** : clic sur un point entouré d'autres → liste au choix ; halo jaune avec le nombre (zoom ≥ 9) ; clic sur une zone → tous les espaces empilés à cet endroit.
+- **Altitude de vol** : n'affiche que les espaces, zones et NOTAM présents à cette altitude.
+- **NOTAM pendant mon vol** : de telle heure à telle heure (rempli automatiquement après le calcul d'une route).
+- **📏 Mesurer un trajet** : distance (NM / km), route, temps de vol et vitesse sol selon le vent de 4 modèles (Météo-France, ECMWF, ICON, GFS), divergences signalées ; « Préparer ce vol » reprend le tracé.
+- **🧹 Effacer les tracés** (route, mesures, coupes).
+- **🌙 Jour / nuit aéronautique** : carte de la nuit (coucher + 30 min) à l'heure choisie, animation, bouton « Mon vol » ; dans la préparation : point à partir duquel il fera nuit.
+- **Saisie de la route** : bouton 📍 pour choisir départ, arrivée, dégagement ou points tournants sur la carte, saisie par nom de ville, poignées de route plus grandes.
+- **Chargement** plus rapide (outils PDF / Excel chargés à la demande, VAC après l'affichage), **barre de chargement** (temps, échec, « Réessayer ») et **📋 Journal** téléchargeable ; **⬇️ Télécharger le site** (zip).
+
 ## Surveillance automatique
 - `data/live/status.json` : état de chaque source à chaque collecte ; `scripts/health.py` fait échouer le workflow
   (→ e-mail de GitHub) si les NOTAM ou les METAR ne se mettent plus à jour.

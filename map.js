@@ -515,8 +515,11 @@
     const cams = near.filter((x) => x.s.t === 'cam').slice(0, 12);
     const others = near.filter((x) => x.s.t !== 'cam').slice(0, 8);
     const lat = fmtCoord(a.la, 'N', 'S'), lon = fmtCoord(a.lo, 'E', 'W');
+    // format reconnu par meteoblue : lat N, longitude signée E, altitude en m, fuseau (sinon il renvoie vers Paris)
+    const mb = `${a.la.toFixed(3)}N${a.lo.toFixed(3)}E${Math.round((+a.elev || 0) / 3.281)}_Europe%2FParis`;
     const links = [
-      ['Météogramme meteoblue', `https://www.meteoblue.com/fr/meteo/semaine/${lat}${lon}`, 1200, 0],
+      ['📈 Météogramme meteoblue', `https://www.meteoblue.com/fr/meteo/prevision/meteogramweb/${mb}`, 1200, 0],
+      ['Meteoblue 7 jours', `https://www.meteoblue.com/fr/meteo/semaine/${mb}`, 1200, 0],
       ['Windy', `https://www.windy.com/?${a.la},${a.lo},10`, 1200, 0],
       ['METAR/TAF 12 h', `https://aviationweather.gov/api/data/metar?ids=${icao}&hours=12&sep=true&taf=true`, 1100, 0],
       ['Fiche Aerobreak', `https://map.aerobreak.com/aerodrome-${icao}.html`, 1280, 0],

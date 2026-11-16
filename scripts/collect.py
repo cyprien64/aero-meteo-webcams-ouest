@@ -19,7 +19,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'data', 'live')
@@ -113,7 +113,8 @@ def parse_coord(s):
 
 
 def sofia_post(params):
-    valid_from = NOW.strftime('%Y-%m-%dT%H:%M:%SZ')
+    # SOFIA refuse une heure de début passée, même de quelques secondes : heure du moment + 1 min
+    valid_from = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime('%Y-%m-%dT%H:%M:00Z')
     data = {'valid_from': valid_from, 'uuid': '', 'isFromSofia': 'true'}
     data.update(params)
     txt = get(SOFIA + '/sofia', data, timeout=120, headers={'X-Requested-With': 'XMLHttpRequest',
@@ -161,16 +162,15 @@ def collect_notam():
     try:
         get(SOFIA + '/sofia/pages/prepavol.html', timeout=60)  # cookie de session
         # Horizon : 72 h si SOFIA l'accepte (préparation la veille / l'avant-veille), sinon 48 h puis 24 h
-        fir, dur = None, '2400'
-        for dur in ('7200', '4800', '2400'):
+        area = lambda d: sofia_post({':operation': 'postAreaPibRequest', 'duration': d, 'traffic': 'VI',  # noqa: E731
+                                     'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB']})
+        fir, dur = area('2400'), '2400'          # indispensable
+        for d in ('7200', '4800'):                # en plus si SOFIA l'accepte (jusqu'à 96 h d'après le formulaire)
             try:
-                fir = sofia_post({':operation': 'postAreaPibRequest', 'duration': dur, 'traffic': 'VI',
-                                  'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB']})
+                fir, dur = area(d), d
                 break
             except Exception as e:  # noqa: BLE001
-                print(f'  durée {dur} refusée : {e}')
-                if dur == '2400':
-                    raise
+                print(f'  durée {d} refusée : {e}')
         horizon = int(dur[:2])
         fir_list = {n['id']: slim_notam(n) for n in walk_notams(fir.get('listnotams', {}))}
         print(f'  FIR LFRR+LFBB : {len(fir_list)} NOTAM sur {horizon} h')

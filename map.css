@@ -325,3 +325,7 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 #tour-bub .nx { background: #ff8a1f; color: #fff; } #tour-bub .sk { background: #e8eef5; color: #10263d; }
 /* Webcam figée */
 .cam-old { color: #ffb340; font-size: 11px; }
+
+/* Fluidité : le flou d'arrière-plan des panneaux est recalculé à chaque image pendant un déplacement de la carte (très coûteux sur tablette) */
+.box, #clock, #inflight { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.box { background: rgba(12, 26, 44, .95); } #clock { background: rgba(12, 26, 44, .95); }

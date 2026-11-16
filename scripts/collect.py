@@ -903,4 +903,8 @@ if __name__ == '__main__':
         collect_cams()
     if 'fees' in what:
         collect_fees()
+    if os.path.exists(os.path.join(OUT, 'vac.json')):   # extrait léger pour la carte (carburant, paiement) : 700 ko -> quelques dizaines
+        vac = json.load(open(os.path.join(OUT, 'vac.json'), encoding='utf-8'))
+        save('escale.json', {'generated': vac.get('generated'), 'cycle': vac.get('cycle'),
+                             'data': {k: {'escale': v['escale']} for k, v in (vac.get('data') or {}).items() if v.get('escale')}})
     write_status()

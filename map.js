@@ -36,7 +36,7 @@
 
   // ---------- Carte ----------
   const view = store.get('view', { c: [45.9, -1.4], z: 7 });
-  const map = L.map('map', { zoomSnap: 0.5, minZoom: 5, maxZoom: 15, worldCopyJump: false, preferCanvas: false })
+  const map = L.map('map', { zoomSnap: 0.5, minZoom: 5, maxZoom: 15, worldCopyJump: false, preferCanvas: true })
     .setView(view.c, view.z);
   map.on('moveend', () => {
     const c = map.getCenter();
@@ -52,7 +52,7 @@
   map.createPane('haloPane').style.zIndex = 590; map.getPane('haloPane').style.pointerEvents = 'none';
 
   const schema = L.geoJSON(window.BASEMAP, {
-    pane: 'basePane', interactive: false,
+    pane: 'basePane', interactive: false, smoothFactor: 2,
     style: (f) => {
       const k = f.properties.k;
       if (k === 'nb') return { color: '#ffffff', weight: 1, opacity: .7, fillColor: '#0a6a9c', fillOpacity: 1 };
@@ -93,8 +93,8 @@
 
   // ---------- Contour de la France, régions, masque hors France ----------
   const frOutline = L.layerGroup();
-  (window.FRANCE || []).forEach((poly) => L.polygon(poly, { pane: 'outlinePane', interactive: false, color: '#00e5ff', weight: 2.6, opacity: .95, fill: false }).addTo(frOutline));
-  (window.BASEMAP && window.BASEMAP.features || []).filter((f) => f.properties.k === 'reg').forEach((f) => L.geoJSON(f, { pane: 'outlinePane', interactive: false, style: { color: '#ffffff', weight: 1.2, opacity: .55, dashArray: '6 4', fill: false } }).addTo(frOutline));
+  (window.FRANCE || []).forEach((poly) => L.polygon(poly, { pane: 'outlinePane', interactive: false, smoothFactor: 2, color: '#00e5ff', weight: 2.6, opacity: .95, fill: false }).addTo(frOutline));
+  (window.BASEMAP && window.BASEMAP.features || []).filter((f) => f.properties.k === 'reg').forEach((f) => L.geoJSON(f, { pane: 'outlinePane', interactive: false, smoothFactor: 2, style: { color: '#ffffff', weight: 1.2, opacity: .55, dashArray: '6 4', fill: false } }).addTo(frOutline));
   const frMask = L.polygon([[[60, -30], [60, 30], [30, 30], [30, -30]], ...(window.FRANCE || [])], { pane: 'maskPane', interactive: false, stroke: false, fillColor: '#000814', fillOpacity: .38 });
   const syncFr = () => {
     const o = $('#fr-outline').checked, m = $('#fr-mask').checked;
@@ -284,8 +284,8 @@
   const setStatus = (t) => { status.textContent = t; };
   const bboxParam = `${BBOX.s},${BBOX.w},${BBOX.n},${BBOX.e}`;
 
-  async function getJSON(url) {
-    const r = await fetch(url, { cache: 'no-store' });
+  async function getJSON(url, cache = 'no-store') {
+    const r = await fetch(url, { cache });
     if (!r.ok) throw new Error(r.status + ' ' + url);
     return r.json();
   }
@@ -294,11 +294,13 @@
   // rafraîchis automatiquement par la GitHub Action (les API officielles bloquent le CORS).
   const IS_EXT = !!(window.chrome && chrome.runtime && chrome.runtime.id);
   const CFG = window.AWW_CONFIG || {};
+  const STATIC_LIVE = ['zones.json', 'airspaces.json', 'vac.json', 'escale.json', 'cams_status.json'];
   async function getLive(name) {
     const bases = IS_EXT && CFG.liveUrl ? [CFG.liveUrl.replace(/\/$/, '') + '/', ''] : [''];
     let last;
     for (const b of bases) {
-      try { return await getJSON(`${b}data/live/${name}?t=${Date.now()}`); } catch (e) { last = e; }
+      const fresh = !STATIC_LIVE.includes(name);
+      try { return await getJSON(`${b}data/live/${name}${fresh ? `?t=${Date.now()}` : ''}`, fresh ? 'no-store' : 'default'); } catch (e) { last = e; }
     }
     throw last;
   }
@@ -726,7 +728,7 @@
     } catch (e) { /* pas encore de contrôle */ }
   }
   async function loadEscale() {
-    try { VACD = (await getLive('vac.json')).data || {}; } catch (e) { console.warn('vac', e); drawAerodromes(); throw e; }
+    try { VACD = (await getLive('escale.json').catch(() => getLive('vac.json'))).data || {}; } catch (e) { console.warn('vac', e); drawAerodromes(); throw e; }
     try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
     try { const club = (await getLive('fees_club.json')).aerodromes || {}; FEES = { ...FEES, ...club }; } catch (e) { /* pas encore de tarif partagé */ }
     drawAerodromes();
@@ -947,7 +949,7 @@
       if (!atAlt(s.lower, s.upper, alt)) continue;
       const siv = s.kind === 'SIV', ctr = s.kind === 'CTR';
       const col = siv ? '#2e9e3e' : ctr ? '#0d5bd6' : '#2f7fe0';
-      L.polygon(s.poly, { color: col, weight: siv ? 1.6 : ctr ? 2.4 : 1.8, dashArray: siv ? '3 5' : ctr ? null : '8 5', fillColor: col, fillOpacity: ctr ? .16 : siv ? .03 : .06 })
+      L.polygon(s.poly, { color: col, weight: siv ? 1.6 : ctr ? 2.4 : 1.8, dashArray: siv ? '3 5' : ctr ? null : '8 5', fillColor: col, fillOpacity: ctr ? .16 : siv ? .03 : .06, smoothFactor: 1.5 })
         .bindTooltip(`<b>${esc(s.name)}</b> (classe ${esc(s.cls)})<br>${esc(s.lower)} – ${esc(s.upper)}<br>${esc(s.call)} <b>${esc(s.freq)}</b><br><span style="opacity:.7">Clic : espaces superposés ici et règles</span>`, { className: 'tip', sticky: true })
         .on('click', stackOnClick)
         .addTo(siv ? layers.siv : layers.asp);
@@ -959,7 +961,7 @@
       const col = z.type === 'P' ? '#e0105a' : z.type === 'D' ? '#ff8a00' : '#9c27b0';
       const tip = `<b>${esc(z.id)} ${esc(z.name)}</b><br>${esc(z.lower)} – ${esc(z.upper)}${slots ? `<br><b style="color:#ff6b6b">RTBA active aujourd'hui : ${esc(slots.join(', '))} UTC</b>` : ''}<br><span style="opacity:.75">${esc((z.rmk || '').slice(0, 180))}</span><br><span style="opacity:.7">Clic : espaces superposés ici et règles</span>`;
       if (z.rtba && slots) L.polygon(z.poly, { color: '#c4001a', weight: 3, fillColor: '#ff3b30', fillOpacity: .3 }).bindTooltip(tip, { className: 'tip', sticky: true }).on('click', stackOnClick).addTo(layers.rtba);
-      L.polygon(z.poly, { color: darken(col, .25), weight: 2, fillColor: col, fillOpacity: z.type === 'P' ? .3 : .14 }).bindTooltip(tip, { className: 'tip', sticky: true }).on('click', stackOnClick).addTo(layers.zones);
+      L.polygon(z.poly, { smoothFactor: 1.5, color: darken(col, .25), weight: 2, fillColor: col, fillOpacity: z.type === 'P' ? .3 : .14 }).bindTooltip(tip, { className: 'tip', sticky: true }).on('click', stackOnClick).addTo(layers.zones);
     }
     for (const [ad, pts] of Object.entries(AIR.vfr)) {
       for (const p of pts) {
@@ -1179,7 +1181,8 @@
 
   // ---------- Application hors ligne (tablette) : service worker + dernier briefing ----------
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw', e));
+    // copie hors ligne (~2,5 Mo) téléchargée après l'affichage de la carte, pour ne pas ralentir le premier chargement
+    addEventListener('load', () => setTimeout(() => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw', e)), 4000));
   }
   async function showLastBriefing() {
     if (!window.caches) return;

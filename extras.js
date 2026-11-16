@@ -211,6 +211,10 @@
       if (best) pts.push([la, best.lo]);
     }
     if (pts.length > 3) L.polyline(pts, { color: '#ffd60a', weight: 2.5, dashArray: '8 6', interactive: false, pane: 'outlinePane' }).bindTooltip('Début de la nuit aéronautique', { sticky: true }).addTo(termLine);
+    nightLabel();
+  }
+  function nightLabel() {
+    const t = nightT; if (!t) return;
     const utcS = `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())} UTC`;
     // info à la position du centre de la carte
     const c = map.getCenter(), sc = sunTimes(t, c.lat, c.lng);
@@ -224,7 +228,7 @@
   $('#night-t').value = Math.floor((today.getHours() * 60 + today.getMinutes()) / 5) * 5;
   $('#night-on').addEventListener('change', (e) => setNight(e.target.checked));
   ['#night-date', '#night-t'].forEach((s) => $(s).addEventListener('input', () => { if ($('#night-on').checked) renderNight(); else { $('#night-on').checked = true; setNight(true); } }));
-  map.on('moveend', () => { if ($('#night-on').checked) renderNight(); });
+  map.on('moveend', () => { if ($('#night-on').checked) nightLabel(); });   // l'image couvre toute la zone : seule l'info du centre change
   $('#night-now').addEventListener('click', () => {
     const n = new Date(); $('#night-date').value = `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`; $('#night-t').value = Math.floor((n.getHours() * 60 + n.getMinutes()) / 5) * 5;
     $('#night-on').checked = true; setNight(true);

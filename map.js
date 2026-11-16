@@ -382,15 +382,17 @@
             n++;
           }
           for (const t of live.taf) if (!tafs[t.icaoId] || tafs[t.icaoId].issueTime < t.issueTime) tafs[t.icaoId] = { ...(tafs[t.icaoId] || {}), ...t };
-          if (n) metarSrc = 'direct';
+          metarSrc = 'direct';   // source directe consultée (même si elle n'avait rien de plus récent que la collecte)
         } catch (e) { console.warn('METAR direct (met.no) indisponibles, données de la collecte', e); }
       }
       Object.keys(metars).forEach((k) => STATIONS.add(k)); store.set('stations', [...STATIONS]);
       drawAerodromes();
       const newest = Math.max(...Object.values(metars).map((m) => m.obsTime || 0));
       const age = Math.round((Date.now() / 1000 - newest) / 60);
-      setStatus(`${Object.keys(metars).length} METAR · ${Object.keys(tafs).length} TAF · ${metarSrc === 'direct' ? 'en direct' : 'collecte'} · dernier METAR il y a ${age} min`);
-      status.style.color = age > 90 ? '#ffb21e' : '';
+      const hhmm = (d) => d.toISOString().slice(11, 16);
+      const nxt = new Date(Math.floor(newest / 1800) * 1800e3 + 1800e3 + 5 * 6e4);   // METAR toutes les 30 min, publiés ~5 min après
+      setStatus(`${Object.keys(metars).length} METAR · ${Object.keys(tafs).length} TAF · ${metarSrc === 'direct' ? 'en direct' : 'collecte'} · dernier METAR ${hhmm(new Date(newest * 1000))} UTC (il y a ${age} min), prochain vers ${hhmm(nxt)}`);
+      status.style.color = age > 45 ? '#ffb21e' : '';
       if (openedIcao) showAerodrome(openedIcao, false);
     } catch (e) {
       console.warn(e);
@@ -1219,7 +1221,8 @@
   // fichiers lourds (VAC 700 ko) chargés une fois la carte affichée
   const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
   idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); });
-  setInterval(() => { T('METAR / TAF', loadMetarTaf); T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
+  setInterval(() => T('METAR / TAF', loadMetarTaf), 5 * 60 * 1000);
+  setInterval(() => { T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
   $('#btn-log').addEventListener('click', () => window.AWW_LOG.download());
   $('#btn-zip').addEventListener('click', () => {
     const repo = CFG.repo || 'cyprien64/aero-meteo-webcams-ouest';

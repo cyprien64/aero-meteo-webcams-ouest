@@ -252,4 +252,63 @@
     window.dispatchEvent(new Event('aww-clear'));
     A.detail.hidden = true;
   });
+
+  // ================================================================ Affichages préréglés
+  const PRESETS = {
+    meteo: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 1, notam: 0, supaip: 0, asp: 0, siv: 0, zones: 0, rtba: 0, vfr: 0 },
+    nav: { metar: 1, apt: 1, camAero: 0, cam: 0, obs: 0, wind: 0, radar: 0, notam: 1, supaip: 1, asp: 1, siv: 0, zones: 1, rtba: 1, vfr: 1 },
+    all: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 0, notam: 1, supaip: 1, asp: 1, siv: 1, zones: 1, rtba: 1, vfr: 1 },
+  };
+  const cbs = () => [...document.querySelectorAll('input[data-layer]')];
+  function markPreset() {
+    const cur = Object.fromEntries(cbs().map((c) => [c.dataset.layer, c.checked ? 1 : 0]));
+    document.querySelectorAll('[data-preset]').forEach((b) => {
+      const p = PRESETS[b.dataset.preset];
+      b.classList.toggle('on', Object.keys(p).every((k) => !(k in cur) || cur[k] === p[k]));
+    });
+  }
+  document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
+    const p = PRESETS[b.dataset.preset];
+    cbs().forEach((c) => { const v = !!p[c.dataset.layer]; if (c.dataset.layer in p && c.checked !== v) { c.checked = v; c.dispatchEvent(new Event('change')); } });
+    markPreset();
+  }));
+  cbs().forEach((c) => c.addEventListener('change', markPreset));
+  markPreset();
+
+  // ================================================================ Visite guidée (au premier lancement, puis bouton « ? »)
+  const STEPS = [
+    ['#presets', 'Que veux-tu voir ?', 'Trois affichages tout prêts : <b>Météo</b> (METAR, webcams, radar), <b>Navigation</b> (NOTAM, espaces aériens, zones) ou <b>Tout</b>. Tu peux ensuite cocher / décocher chaque couche dans les rubriques plus bas.'],
+    ['#btn-prep', 'Préparer un vol', 'Départ, arrivée, avion : la route est calculée avec le vent, le relief, les zones, les NOTAM et la nuit. Tu obtiens un briefing PDF et le log de nav Excel du club. Le bouton 📍 permet de choisir les terrains sur la carte.'],
+    ['.search-wrap', 'Rechercher', 'Tape un code OACI (LFCP), un nom de terrain ou de ville, ou une webcam : la carte zoome et le terrain clignote en jaune.'],
+    ['#btn-measure', 'Mesurer un trajet', 'Clique des points sur la carte : distance, cap, et temps de vol selon le vent prévu par 4 modèles météo. Si les modèles ne sont pas d\'accord, c\'est signalé.'],
+    ['#map', 'Sur la carte', '<b>Clic</b> sur un point : sa fiche (METAR, webcams, NOTAM, carburant…). <b>Clic droit</b> (ou appui long) : les espaces aériens au-dessus et leurs règles. Les <b>pastilles orange numérotées</b> regroupent des points : clique ou zoome pour les voir.'],
+    ['#btn-log', 'En cas de problème', 'Si quelque chose ne charge pas, une barre l\'indique en haut. Le bouton <b>Journal</b> télécharge un fichier à envoyer pour qu\'on trouve l\'erreur. Le bouton <b>?</b> en haut relance cette visite.'],
+  ];
+  let tourI = -1;
+  function tourShow() {
+    let hl = $('#tour-hl'), bub = $('#tour-bub');
+    if (tourI < 0 || tourI >= STEPS.length) { if (hl) hl.remove(); if (bub) bub.remove(); A.store.set('tourDone', 1); tourI = -1; return; }
+    const [sel, title, txt] = STEPS[tourI];
+    const el = $(sel); if (!el) { tourI++; tourShow(); return; }
+    const panel = $('#panel'); if (sel !== '#map' && panel.classList.contains('collapsed')) $('#collapse').click();
+    el.scrollIntoView({ block: 'nearest' });
+    if (!hl) { hl = document.createElement('div'); hl.id = 'tour-hl'; document.body.appendChild(hl); }
+    if (!bub) { bub = document.createElement('div'); bub.id = 'tour-bub'; document.body.appendChild(bub); }
+    let r = el.getBoundingClientRect();
+    if (sel === '#map') { const p = $('#panel').getBoundingClientRect(); r = { left: p.right + 20, top: 70, width: Math.max(200, innerWidth - p.right - 60), height: Math.max(160, innerHeight - 140) }; r.right = r.left + r.width; r.bottom = r.top + r.height; }
+    Object.assign(hl.style, { left: r.left - 5 + 'px', top: r.top - 5 + 'px', width: r.width + 10 + 'px', height: r.height + 10 + 'px' });
+    bub.innerHTML = `<b class="t">${title}</b>${txt}<div class="act"><span style="color:#789">${tourI + 1} / ${STEPS.length}</span><span><button class="sk">${tourI === STEPS.length - 1 ? 'Fermer' : 'Passer'}</button> ${tourI < STEPS.length - 1 ? '<button class="nx">Suivant →</button>' : ''}</span></div>`;
+    const bw = bub.offsetWidth, bh = bub.offsetHeight;
+    let left = r.right + 14, top = r.top;
+    if (left + bw > innerWidth - 8) { left = Math.max(8, Math.min(innerWidth - bw - 8, r.left)); top = r.bottom + 12; }
+    if (sel === '#map') { left = r.left + 20; top = r.top + 20; }
+    if (top + bh > innerHeight - 8) top = Math.max(8, r.top - bh - 12);
+    Object.assign(bub.style, { left: left + 'px', top: top + 'px' });
+    bub.querySelector('.sk').onclick = () => { tourI = -1; tourShow(); };
+    const nx = bub.querySelector('.nx'); if (nx) nx.onclick = () => { tourI++; tourShow(); };
+  }
+  const startTour = () => { tourI = 0; tourShow(); };
+  $('#btn-tour').addEventListener('click', startTour);
+  addEventListener('resize', () => { if (tourI >= 0) tourShow(); });
+  if (!A.store.get('tourDone', 0) && !location.hash.startsWith('#vol=')) setTimeout(startTour, 1200);
 })();

@@ -12,6 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon192.png">
   <script src="log.js"></script>
   <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <link rel="stylesheet" href="lib/cluster/MarkerCluster.css">
   <link rel="stylesheet" href="map.css">
 </head>
 <body>
@@ -26,6 +27,7 @@
         <h1>Aéro Météo Webcams</h1>
         <p class="sub">Pyrénées · Atlantique · Bretagne</p>
       </div>
+      <button id="btn-tour" class="icon-btn" title="Visite guidée : à quoi servent les boutons">?</button>
       <button id="collapse" class="icon-btn" title="Réduire / agrandir le panneau">–</button>
     </header>
 
@@ -36,6 +38,11 @@
       <div class="tool-row">
         <button id="btn-measure" class="btn" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles">📏 Mesurer un trajet</button>
         <button id="btn-clear" class="btn" title="Effacer la route, les mesures et les coupes tracées sur la carte">🧹 Effacer les tracés</button>
+      </div>
+      <div class="presets" id="presets" title="Affichages préréglés">
+        <button data-preset="meteo" title="METAR, webcams, observations, vent, radar">🌦️ Météo</button>
+        <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
+        <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
       </div>
       <div class="search-wrap">
         <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
@@ -59,7 +66,7 @@
 
       <details class="sec" open>
         <summary>⚠️ NOTAM &amp; SUP AIP</summary>
-        <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h)</label>
+        <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h, ou pendant ton vol)</label>
         <div class="sub-opts">
           <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
           <label>Plancher ≤ <select id="notam-fl" class="inline">
@@ -154,6 +161,8 @@
 
   <script src="config.js"></script>
   <script src="lib/leaflet/leaflet.js"></script>
+  <script src="lib/cluster/leaflet.markercluster.js"></script>
+  <script src="lib/cluster/leaflet.featuregroup.subgroup.js"></script>
   <script src="data/basemap.js"></script>
   <script src="data/sources.js"></script>
   <script src="data/france.js"></script>

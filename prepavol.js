@@ -622,6 +622,7 @@
     on('pf-update', () => run(false));
     on('pf-ics', () => exportIcs(b));
     on('pf-gps', () => flightMode(b.trip || [b]));
+    on('pf-share', () => shareFlight(sfx));
     if (b.gramet && !b.gramet.err && $('#pf-gramet' + sfx)) drawGramet($('#pf-gramet' + sfx), b.gramet, b);
     on('pf-gramet-big', () => {
       const cv = document.createElement('canvas'); cv.width = 1800; cv.height = 860; drawGramet(cv, b.gramet, b);
@@ -1385,7 +1386,7 @@
     const nt = b.night;
     return `
       ${changesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button></div>
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-share${sfx}">🔗 Partager</button></div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
       <table class="legs"><tr><th>Branche</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
@@ -2162,6 +2163,47 @@
     }));
   }
   if ($('#btn-hist')) $('#btn-hist').addEventListener('click', showHistory);
+
+  // ---------------------------------------------------------------- partage d'une préparation par lien (sans le nom du pilote)
+  const SHARE_KEYS = FORM_KEYS.filter((k) => k !== 'pil');
+  const b64e = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const b64d = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+  function shareUrl(f) {
+    const o = {};
+    SHARE_KEYS.forEach((k) => { if (f[k] !== undefined && f[k] !== '' && f[k] !== null) o[k] = f[k]; });
+    if (f.time) o.time = new Date(f.time).toISOString();
+    const cfg = window.AWW_CONFIG || {};
+    const base = A.IS_EXT || !/^https?:/.test(location.protocol) ? (cfg.liveUrl || '').replace(/\/?$/, '/') + 'map.html' : location.origin + location.pathname;
+    return `${base}#vol=${b64e(JSON.stringify(o))}`;
+  }
+  async function shareFlight(sfx) {
+    if (!lastForm) return;
+    const url = shareUrl(lastForm), f = lastForm;
+    const title = `Vol ${f.dep} → ${[f.arr, ...(f.stages || '').split(/\s+/).filter(Boolean)].join(' → ')} (${f.reg})`;
+    let done = '';
+    if (navigator.share && /Mobi|iPad|Android/i.test(navigator.userAgent)) { try { await navigator.share({ title, url }); done = 'Lien partagé.'; } catch { /* annulé */ } }
+    if (!done) { try { await navigator.clipboard.writeText(url); done = 'Lien copié : colle-le dans un message (WhatsApp, e-mail…).'; } catch { done = 'Copie le lien ci-dessous :'; } }
+    const box = document.createElement('div'); box.className = 'okk';
+    box.innerHTML = `🔗 ${esc(done)}<input readonly value="${esc(url)}" style="width:100%;margin-top:4px" onclick="this.select()"><span class="meta">Le lien ouvre la même préparation (route, avion, heure, masses) et relance le calcul avec les données du moment. Le nom du pilote n'y figure pas.</span>`;
+    const btn = $('#pf-share' + sfx); btn.closest('.row').after(box);
+  }
+  // Ouverture d'un lien partagé : #vol=...
+  function openShared() {
+    const m = /^#vol=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return;
+    let o; try { o = JSON.parse(b64d(m[1])); } catch (e) { console.warn('lien de vol illisible', e); return; }
+    history.replaceState(null, '', location.pathname + location.search);
+    const clean = Object.fromEntries(SHARE_KEYS.filter((k) => k in o && k !== 'time').map((k) => [k, o[k]]));
+    store.set('form', { ...store.get('form', {}), ...clean });
+    openForm();
+    const t = o.time ? new Date(o.time) : null;
+    if (t && !isNaN(t)) $('#pf-time').value = localInput(t > new Date(Date.now() - 3600e3) ? t : (() => { const n = new Date(Date.now() + 3600e3); n.setMinutes(0, 0, 0); return n; })());
+    $('#pf-prog').textContent = 'Préparation reçue par lien : calcul en cours…';
+    setTimeout(() => {
+      ['exit', 'entry'].forEach((k) => { const el = $('#pf-' + k); if (el && o[k] && [...el.options].some((x) => x.value === o[k])) el.value = o[k]; });
+      run(false);
+    }, 900);
+  }
+  setTimeout(openShared, 300);
 
   // Carte de navigation sur fond OACI-VFR 1/500 000 (tuiles IGN dessinées dans un canvas)
   async function renderNavMap(b, progress) {

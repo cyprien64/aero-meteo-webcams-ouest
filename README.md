@@ -104,6 +104,14 @@ Le PDF contient :
 - **Saisie de la route** : bouton 📍 pour choisir départ, arrivée, dégagement ou points tournants sur la carte, saisie par nom de ville, poignées de route plus grandes.
 - **Chargement** plus rapide (outils PDF / Excel chargés à la demande, VAC après l'affichage), **barre de chargement** (temps, échec, « Réessayer ») et **📋 Journal** téléchargeable ; **⬇️ Télécharger le site** (zip).
 
+## v2.1
+- **Affichages préréglés** (🌦️ Météo, 🧭 Navigation, 🗺️ Tout) et **visite guidée** au premier lancement (bouton « ? » pour la relancer).
+- **Regroupement des points** en vue large (pastilles numérotées, détail à partir du zoom 9).
+- **🔗 Partager une préparation** : lien qui rouvre la même route, le même avion et la même heure (sans le nom du pilote) et relance le calcul.
+- **NOTAM sur 72 h** quand SOFIA l'accepte (sinon 48 h puis 24 h) : préparation la veille ; la carte montre par défaut les 24 h à venir, ou ton créneau de vol.
+- **Collecte à l'heure** : déclenchement externe toutes les 15 min possible, voir [docs/declenchement-externe.md](docs/declenchement-externe.md).
+- **Webcams figées** : image inchangée (ou datée par le serveur) depuis plus de 24 h → signalée ; aperçu ancien masqué.
+
 ## Surveillance automatique
 - `data/live/status.json` : état de chaque source à chaque collecte ; `scripts/health.py` fait échouer le workflow
   (→ e-mail de GitHub) si les NOTAM ou les METAR ne se mettent plus à jour.

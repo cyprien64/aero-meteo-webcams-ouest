@@ -160,17 +160,27 @@ def collect_notam():
     print('NOTAM SOFIA')
     try:
         get(SOFIA + '/sofia/pages/prepavol.html', timeout=60)  # cookie de session
-        fir = sofia_post({':operation': 'postAreaPibRequest', 'duration': '2400', 'traffic': 'VI',
-                          'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB']})
+        # Horizon : 72 h si SOFIA l'accepte (préparation la veille / l'avant-veille), sinon 48 h puis 24 h
+        fir, dur = None, '2400'
+        for dur in ('7200', '4800', '2400'):
+            try:
+                fir = sofia_post({':operation': 'postAreaPibRequest', 'duration': dur, 'traffic': 'VI',
+                                  'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB']})
+                break
+            except Exception as e:  # noqa: BLE001
+                print(f'  durée {dur} refusée : {e}')
+                if dur == '2400':
+                    raise
+        horizon = int(dur[:2])
         fir_list = {n['id']: slim_notam(n) for n in walk_notams(fir.get('listnotams', {}))}
-        print(f'  FIR LFRR+LFBB : {len(fir_list)} NOTAM')
+        print(f'  FIR LFRR+LFBB : {len(fir_list)} NOTAM sur {horizon} h')
 
         ad = {}
         icaos = [a[0] for a in aerodromes() if a[0].startswith('LF')]
 
         def batch(lst):
             try:
-                d = sofia_post({':operation': 'postAeroPibRequest', 'duration': '2400', 'traffic': 'VI', 'aero[]': lst})
+                d = sofia_post({':operation': 'postAeroPibRequest', 'duration': dur, 'traffic': 'VI', 'aero[]': lst})
                 for blk in (d.get('listnotams') or {}).get('AD', []) or []:
                     code = blk.get('code')
                     items = [slim_notam(n) for n in walk_notams(blk)]
@@ -192,7 +202,7 @@ def collect_notam():
         print(f'  Aérodromes avec NOTAM : {len(ad)} ({sum(len(v) for v in ad.values())} NOTAM)')
         if not fir_list and not ad:
             raise RuntimeError('aucun NOTAM reçu')
-        save('notam.json', {'generated': NOW.isoformat(), 'source': 'SOFIA-Briefing (SIA/DGAC)',
+        save('notam.json', {'generated': NOW.isoformat(), 'horizon': horizon, 'source': 'SOFIA-Briefing (SIA/DGAC)',
                             'fir': sorted(fir_list.values(), key=lambda x: x['from'] or ''), 'ad': ad})
     except Exception as e:  # noqa: BLE001
         print('  NOTAM : échec', e)
@@ -735,44 +745,98 @@ def collect_aip():
         fallback('vac.json')
 
 
-# ---------------------------------------------------------------- webcams : contrôle hebdomadaire
+# ---------------------------------------------------------------- webcams : pannes (hebdomadaire) et images figées (toutes les 6 h)
+IMG_RE = re.compile(r'\.(jpe?g|png|webp)(\?|$)', re.I)
+
+
 def collect_cams():
-    print('Webcams (contrôle hebdomadaire)')
+    print('Webcams (pannes + images figées)')
     prev = None
     if FALLBACK_URL:
         try:
             prev = json.loads(get(f'{FALLBACK_URL}/data/live/cams_status.json', timeout=30))
         except Exception:  # noqa: BLE001
             prev = None
-    if prev and os.environ.get('FORCE_CAMS') != '1':
+    prev = prev or {}
+    force = os.environ.get('FORCE_CAMS') == '1'
+
+    def age_h(key):
         try:
-            age = (NOW - datetime.fromisoformat(prev['checked'])).days
+            return (NOW - datetime.fromisoformat(prev[key])).total_seconds() / 3600
         except Exception:  # noqa: BLE001
-            age = 99
-        if age < 7:
-            save('cams_status.json', prev, True)
-            print(f'  dernier contrôle il y a {age} j : inchangé')
-            return
+            return 1e9
+    out = dict(prev)
     src = open(os.path.join(ROOT, 'data', 'sources.js'), encoding='utf-8').read()
     items = json.loads(re.search(r'window\.SOURCES = (\[.*?\]);', src, re.S).group(1))
-    urls = sorted({x['u'] for x in items if x.get('t') == 'cam'})
+    cams = [x for x in items if x.get('t') == 'cam']
     from concurrent.futures import ThreadPoolExecutor
+    changed = False
 
-    def check(u):
-        try:
-            req = urllib.request.Request(u, headers={'User-Agent': UA, 'Range': 'bytes=0-2048'})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                r.read(512)
-                return u, None
-        except urllib.error.HTTPError as e:
-            return u, (f'HTTP {e.code}' if e.code in (404, 410, 500, 502, 503) else None)   # 401/403/429 : blocage anti-robot, pas une panne
-        except Exception as e:  # noqa: BLE001
-            return u, type(e).__name__ + ': ' + str(e)[:60]
-    with ThreadPoolExecutor(16) as ex:
-        res = list(ex.map(check, urls))
-    dead = {u: why for u, why in res if why}
-    print(f'  {len(urls)} webcams contrôlées, {len(dead)} hors service')
-    save('cams_status.json', {'checked': NOW.isoformat(), 'total': len(urls), 'dead': dead})
+    # 1) pannes : contrôle hebdomadaire de toutes les adresses
+    if force or age_h('checked') >= 24 * 7:
+        urls = sorted({x['u'] for x in cams})
+
+        def check(u):
+            try:
+                req = urllib.request.Request(u, headers={'User-Agent': UA, 'Range': 'bytes=0-2048'})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    r.read(512)
+                    return u, None
+            except urllib.error.HTTPError as e:
+                return u, (f'HTTP {e.code}' if e.code in (404, 410, 500, 502, 503) else None)   # 401/403/429 : blocage anti-robot, pas une panne
+            except Exception as e:  # noqa: BLE001
+                return u, type(e).__name__ + ': ' + str(e)[:60]
+        with ThreadPoolExecutor(16) as ex:
+            res = list(ex.map(check, urls))
+        out.update({'checked': NOW.isoformat(), 'total': len(urls), 'dead': {u: why for u, why in res if why}})
+        print(f'  {len(urls)} webcams contrôlées, {len(out["dead"])} hors service')
+        changed = True
+
+    # 2) images figées : même image (empreinte) depuis plus de 24 h, ou image serveur datée de plus de 24 h
+    if force or age_h('img_checked') >= 6:
+        import hashlib
+        from email.utils import parsedate_to_datetime
+        imgs_prev = prev.get('imgs') or {}
+        urls = sorted({x.get('img') or x['u'] for x in cams if x.get('img') or IMG_RE.search(x['u'])})
+
+        def grab(u):
+            try:
+                req = urllib.request.Request(u, headers={'User-Agent': UA})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    body = r.read(6 * 1024 * 1024)
+                    lm = r.headers.get('Last-Modified')
+                lm_iso = None
+                if lm:
+                    try:
+                        lm_iso = parsedate_to_datetime(lm).astimezone(timezone.utc).isoformat()
+                    except Exception:  # noqa: BLE001
+                        pass
+                return u, hashlib.sha1(body).hexdigest()[:16], lm_iso
+            except Exception:  # noqa: BLE001
+                return u, None, None
+        with ThreadPoolExecutor(12) as ex:
+            res = list(ex.map(grab, urls))
+        imgs, frozen = {}, {}
+        for u, h, lm in res:
+            if not h:
+                continue
+            old = imgs_prev.get(u) or {}
+            since = old.get('since') if old.get('h') == h else NOW.isoformat()
+            imgs[u] = {'h': h, 'since': since or NOW.isoformat(), 'lm': lm}
+            still = (NOW - datetime.fromisoformat(imgs[u]['since'])).total_seconds() / 3600
+            lm_age = (NOW - datetime.fromisoformat(lm)).total_seconds() / 3600 if lm else 0
+            moved = bool(old.get('h')) and old['h'] != h   # l'image a changé depuis le contrôle précédent : vivante
+            if not moved and (still >= 24 or lm_age >= 24):
+                frozen[u] = min(imgs[u]['since'], lm) if lm else imgs[u]['since']
+        out.update({'img_checked': NOW.isoformat(), 'imgs': imgs, 'frozen': frozen})
+        print(f'  {len(imgs)}/{len(urls)} images lues, {len(frozen)} figées depuis plus de 24 h')
+        changed = True
+
+    if changed:
+        save('cams_status.json', out)
+    else:
+        save('cams_status.json', prev, True)
+        print('  contrôles récents : inchangé')
 
 
 def collect_fees():

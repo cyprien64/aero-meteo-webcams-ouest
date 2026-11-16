@@ -145,7 +145,7 @@
   }
   function visiblePickables() {
     const out = [];
-    const walk = (g) => g.eachLayer((l) => { if (l._pick && l.getLatLng) out.push(l); else if (l.eachLayer) walk(l); });
+    const walk = (g) => g.eachLayer((l) => { if (l._pick && l.getLatLng) { if (l._map) out.push(l); } else if (l.eachLayer) walk(l); });
     Object.entries(layers).forEach(([, g]) => { if (map.hasLayer(g)) walk(g); });
     return out;
   }
@@ -188,9 +188,22 @@
   map.on('zoomend moveend', drawHalos);
 
   // ---------- Couches de points (webcams, observations, balises) ----------
+  // Regroupement des points en vue large : pastilles numérotées qui s'ouvrent quand on zoome (dès le zoom 9 tout est détaillé)
+  const KIND = { '📷': 'webcam', '✈️': 'terrain', '🚩': 'observation', '💨': 'balise vent' };
+  const ptsCluster = L.markerClusterGroup({
+    disableClusteringAtZoom: 9, maxClusterRadius: 46, showCoverageOnHover: false, spiderfyOnMaxZoom: false, chunkedLoading: true,
+    iconCreateFunction: (c) => {
+      const kids = c.getAllChildMarkers(), cnt = {};
+      kids.forEach((m) => { const k = KIND[((m._pick && m._pick.label) || '').split(' ')[0]] || 'point'; cnt[k] = (cnt[k] || 0) + 1; });
+      const n = kids.length, sz = n < 10 ? 30 : n < 40 ? 36 : 42;
+      const title = Object.entries(cnt).map(([k, v]) => `${v} ${k}${v > 1 ? 's' : ''}`).join(', ');
+      return L.divIcon({ className: 'clu', iconSize: [sz, sz], html: `<b title="${title} — clic pour zoomer">${n}</b>` });
+    },
+  }).addTo(map);
+  const sub = () => L.featureGroup.subGroup(ptsCluster);
   const layers = {
-    metar: L.layerGroup(), apt: L.layerGroup(), camAero: L.layerGroup(), cam: L.layerGroup(),
-    obs: L.layerGroup(), wind: L.layerGroup(), radar: L.layerGroup(),
+    metar: L.layerGroup(), apt: sub(), camAero: sub(), cam: sub(),
+    obs: sub(), wind: sub(), radar: L.layerGroup(),
     notam: L.layerGroup(), supaip: L.layerGroup(),
     asp: L.layerGroup(), siv: L.layerGroup(), zones: L.layerGroup(), rtba: L.layerGroup(), vfr: L.layerGroup(),
   };
@@ -388,11 +401,11 @@
   }
   const STATIONS = new Set(store.get('stations', []));
 
-  const windLive = L.layerGroup().addTo(layers.wind);
+  let windLive = [];
   async function loadPiouPiou() {
     try {
       const d = (await getJSON('https://api.pioupiou.fr/v1/live/all')).data || [];
-      windLive.clearLayers();
+      windLive.forEach((m) => layers.wind.removeLayer(m)); windLive = [];
       const now = Date.now();
       for (const p of d) {
         const loc = p.location || {}, me = p.measurements || {};
@@ -403,10 +416,10 @@
         const icon = divIcon(svgArrow((hd ?? 0) + 180, windColor(avg)), [26, 26], [13, 13]);
         const name = (p.meta && p.meta.name) || 'PiouPiou ' + p.id;
         const age = Math.round((now - Date.parse(me.date)) / 60000);
-        L.marker([loc.latitude, loc.longitude], { icon })
-          .bindTooltip(`<b>${esc(name)}</b> (OpenWindMap)<br>Vent ${hd ?? '?'}° · moy ${avg ?? '?'} km/h · rafales ${max ?? '?'} km/h<br><span style="opacity:.7">il y a ${age} min</span>`, { className: 'tip', direction: 'top' })
-          .on('click', () => openWin(`https://www.openwindmap.org/PP${p.id}`, 800, 0))
-          .addTo(windLive);
+        const wm = bindPick(L.marker([loc.latitude, loc.longitude], { icon })
+          .bindTooltip(`<b>${esc(name)}</b> (OpenWindMap)<br>Vent ${hd ?? '?'}° · moy ${avg ?? '?'} km/h · rafales ${max ?? '?'} km/h<br><span style="opacity:.7">il y a ${age} min</span>`, { className: 'tip', direction: 'top' }),
+        `💨 ${name}`, () => openWin(`https://www.openwindmap.org/PP${p.id}`, 800, 0));
+        layers.wind.addLayer(wm); windLive.push(wm);
       }
     } catch (e) { console.warn('pioupiou', e); throw e; }
   }
@@ -524,8 +537,8 @@
       <h4>Webcams à moins de 25 km (${cams.length})</h4>
       ${cams.length ? `<div class="cams">${cams.map((x, i) => `
         <div class="cam" data-cam="${i}" title="${esc(x.s.n)}">
-          ${x.s.img ? `<img src="${esc(x.s.img)}" loading="lazy" alt="">` : '<div class="noimg">📷</div>'}
-          <span>${esc(x.s.n)} · ${x.d.toFixed(0)} km</span>
+          ${x.s.img && !x.s.oldPreview ? `<img src="${esc(x.s.img)}" loading="lazy" alt="">` : '<div class="noimg">📷</div>'}
+          <span>${x.s.dead ? '⛔ ' : x.s.frozen ? '⚠️ figée · ' : ''}${esc(x.s.n)} · ${x.d.toFixed(0)} km</span>
         </div>`).join('')}</div>` : '<p class="meta">Aucune webcam référencée à proximité.</p>'}
       ${others.length ? `<h4>Observations & vent à proximité</h4><div class="row">${others.map((x, i) => `<button class="btn" data-other="${i}">${x.s.t === 'obs' ? '🚩' : '💨'} ${esc(x.s.n.replace(/\s*\(.*$/, ''))} · ${x.d.toFixed(0)} km</button>`).join('')}</div>` : ''}
     `;
@@ -681,12 +694,29 @@
   async function loadCamStatus() {
     try {
       const st = await getLive('cams_status.json');
-      const dead = st.dead || {}, when = (st.checked || '').slice(0, 10);
+      const dead = st.dead || {}, when = (st.checked || '').slice(0, 10), frozen = st.frozen || {};
+      const fd = (iso) => new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      const svgFrozen = (fill) => svgCam(fill).replace('<svg ', '<svg style="filter:sepia(1) saturate(4) hue-rotate(-20deg)" ');
       for (const s of SOURCES) {
-        if (s.t !== 'cam' || !s._mk || !dead[s.u]) continue;
-        s._mk.setIcon(divIcon(svgCam('#8a8f94'), [22, 22], [11, 11]));
-        s._mk.setOpacity(0.6);
-        s._mk.setTooltipContent(tipHtml(s.n + ` — hors service lors du contrôle du ${when} (${dead[s.u]})`, null));
+        if (s.t !== 'cam' || !s._mk) continue;
+        if (dead[s.u]) {
+          s._mk.setIcon(divIcon(svgCam('#8a8f94'), [22, 22], [11, 11]));
+          s._mk.setOpacity(0.6);
+          s._mk.setTooltipContent(tipHtml(s.n + ` — hors service lors du contrôle du ${when} (${dead[s.u]})`, null));
+          s.dead = true;
+          continue;
+        }
+        const img = s.img || (/\.(jpe?g|png|webp)(\?|$)/i.test(s.u) ? s.u : null);
+        if (!img || !frozen[img]) continue;
+        if (img === s.u) {   // la webcam n'est qu'une image, et elle ne change plus
+          s._mk.setIcon(divIcon(svgFrozen('#e8f6ff'), [22, 22], [11, 11]));
+          s._mk.setOpacity(0.75);
+          s._mk.setTooltipContent(tipHtml(s.n, img) + `<div class="cam-old">⚠️ Image figée : inchangée depuis le ${fd(frozen[img])} — webcam probablement arrêtée.</div>`);
+          s.frozen = frozen[img];
+        } else {             // seul l'aperçu est ancien : on le masque, la webcam elle-même peut fonctionner
+          s._mk.setTooltipContent(tipHtml(s.n, null) + `<div class="cam-old">Aperçu ancien (${fd(frozen[img])}) masqué — clic pour l'image en direct.</div>`);
+          s.oldPreview = true;
+        }
       }
     } catch (e) { /* pas encore de contrôle */ }
   }
@@ -744,7 +774,7 @@
 
   function notamAdHtml(icao) {
     const list = NOTAM.ad[icao] || [];
-    if (!list.length) return NOTAM.generated ? '<h4>NOTAM aérodrome</h4><p class="meta">Aucun NOTAM pour les prochaines 24 h.</p>' : '';
+    if (!list.length) return NOTAM.generated ? `<h4>NOTAM aérodrome</h4><p class="meta">Aucun NOTAM pour les prochaines ${NOTAM.horizon || 24} h.</p>` : '';
     return `<h4>NOTAM aérodrome (${list.length})</h4>${list.map((n) => notamHtml(n)).join('')}
       <p class="meta small-print">Source SOFIA-Briefing (SIA) · collecte ${fmtT(NOTAM.generated)} · vérifier sur SOFIA avant le vol.</p>`;
   }
@@ -769,11 +799,12 @@
     const hideObst = $('#notam-obst') && !$('#notam-obst').checked;
     const maxFl = +($('#notam-fl') ? $('#notam-fl').value : 999);
     const w = flightWin(), alt = altSel();
+    const wv = w || { a: Date.now(), b: Date.now() + 24 * 3600e3 };   // sans « mon vol » : les prochaines 24 h
     let shown = 0;
     for (const n of NOTAM.fir) {
       if (n.la == null || n.lo == null) continue;
       if (n.lower != null && n.lower > maxFl) continue;
-      if (w && !inWin(n, w)) continue;
+      if (!inWin(n, wv)) continue;
       if (alt && ((n.lower != null && n.lower * 100 > alt) || (n.upper != null && n.upper * 100 < alt))) continue;
       shown++;
       const isObst = (n.q || '')[0] === 'O';
@@ -791,7 +822,7 @@
       }
     }
     const info = $('#notam-win-info');
-    if (info) info.textContent = w ? `${shown} NOTAM localisés actifs entre ${new Date(w.a).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })} et ${new Date(w.b).toLocaleTimeString('fr-FR', { timeStyle: 'short' })}${NOTAM.generated && w.b > Date.parse(NOTAM.generated) + 24 * 3600e3 ? ' — attention : la collecte ne couvre que 24 h, vérifier sur SOFIA' : ''}.` : '';
+    if (info) info.textContent = w ? `${shown} NOTAM localisés actifs entre ${new Date(w.a).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })} et ${new Date(w.b).toLocaleTimeString('fr-FR', { timeStyle: 'short' })}${NOTAM.generated && w.b > Date.parse(NOTAM.generated) + (NOTAM.horizon || 24) * 3600e3 ? ` — attention : la collecte ne couvre que ${NOTAM.horizon || 24} h, vérifier sur SOFIA` : ''}.` : '';
     drawHalos();
   }
   function drawSup() {
@@ -826,11 +857,12 @@
   function showNotamList() {
     const v = map.getBounds();
     const w = flightWin();
-    const inView = NOTAM.fir.filter((n) => n.la != null && v.contains([n.la, n.lo]) && (!w || inWin(n, w)));
+    const wv = w || { a: Date.now(), b: Date.now() + 24 * 3600e3 };
+    const inView = NOTAM.fir.filter((n) => n.la != null && v.contains([n.la, n.lo]) && inWin(n, wv));
     const noPos = NOTAM.fir.filter((n) => n.la == null);
     const byCat = (a, b) => (a.q || '').localeCompare(b.q || '');
     showList('NOTAM en route — FIR Brest & Bordeaux', `
-      <p class="meta">${NOTAM.fir.length} NOTAM (24 h, SFC–FL195) · ${inView.length} dans la vue actuelle${w ? ' et actifs pendant ton vol' : ''} · collecte ${fmtT(NOTAM.generated)}.</p>
+      <p class="meta">${NOTAM.fir.length} NOTAM (${NOTAM.horizon || 24} h, SFC–FL195) · ${inView.length} dans la vue actuelle${w ? ' et actifs pendant ton vol' : ' et actifs dans les 24 h'} · collecte ${fmtT(NOTAM.generated)}.</p>
       ${inView.sort(byCat).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">📍 voir</button></div>`).join('')}
       ${NOTAM.fir.some((n) => n.r > 30) ? `<p class="meta small-print">Les NOTAM de rayon &gt; 30 NM ne sont pas dessinés sur la carte mais figurent dans cette liste.</p>` : ''}
       ${noPos.length ? `<h4>Sans position (${noPos.length})</h4>${noPos.map((n) => notamHtml(n, true)).join('')}` : ''}

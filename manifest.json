@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Aéro Météo Webcams — Pyrénées → Bretagne",
   "short_name": "Aéro Webcams Ouest",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Carte des webcams, observations Météociel, METAR/TAF, NOTAM, SUP AIP, balises vent et radar de la zone Pyrénées – Atlantique – Bretagne avec préparation de vol et briefing PDF (VAC, NOTAM, SUP AIP, AZBA).",
   "icons": {
     "16": "icons/icon16.png",

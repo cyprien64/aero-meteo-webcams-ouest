@@ -1,4 +1,4 @@
-# Aéro Météo Webcams — Pyrénées → Bretagne
+# Aéro Météo Ouest — Pyrénées → Bretagne
 
 Carte de préparation des vols inspirée de http://international.aero.free.fr/webcams/lfdt.html, étendue à tout l'Ouest :
 Pyrénées, Pays basque, Landes, Gironde, Charentes, Vendée, Pays de la Loire, Bretagne.

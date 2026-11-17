@@ -38,7 +38,7 @@
 
   LOG.text = () => {
     const tasks = [...LOG.tasks.values()].map((t) => `  ${t.name} : ${t.state}${t.ms != null ? ` (${(t.ms / 1000).toFixed(1)} s)` : ''}${t.err ? ' — ' + t.err : ''}`).join('\n');
-    return `Aéro Météo Webcams — journal\nDate : ${new Date().toISOString()}\nPage : ${location.href.split('?')[0]}\nNavigateur : ${navigator.userAgent}\nÉcran : ${innerWidth}×${innerHeight}\nEn ligne : ${navigator.onLine}\n\nChargements :\n${tasks}\n\nMessages :\n${LOG.lines.join('\n')}\n`;
+    return `Aéro Météo Ouest — journal\nDate : ${new Date().toISOString()}\nPage : ${location.href.split('?')[0]}\nNavigateur : ${navigator.userAgent}\nÉcran : ${innerWidth}×${innerHeight}\nEn ligne : ${navigator.onLine}\n\nChargements :\n${tasks}\n\nMessages :\n${LOG.lines.join('\n')}\n`;
   };
   LOG.download = () => {
     const a = document.createElement('a');

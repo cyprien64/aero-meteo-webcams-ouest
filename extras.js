@@ -247,6 +247,7 @@
     el.innerHTML = `<b>${h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi'} 👋</b>
       <span>${n.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
       ${s ? `<span>☀️ ${hm(s.rise)} – ${hm(s.set)} à ${esc(icao)} · nuit aéro ${hm(new Date(+s.set + 30 * 6e4))}</span>` : ''}
+      <span class="hello-warn">⚠️ Outil d'aide : la préparation réglementaire reste SOFIA, le SIA et aviation.meteo.fr.</span>
       ${m ? `<span><i class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</i> ${m.wdir != null ? `vent ${m.wdir === 'VRB' ? 'variable' : String(m.wdir).padStart(3, '0') + '°'} ${m.wspd} kt${m.wgst ? ' rafales ' + m.wgst : ''}` : ''}</span>` : ''}`;
   }
   hello(); setInterval(hello, 60e3); setTimeout(hello, 3000);
@@ -282,6 +283,7 @@
 
   // ================================================================ Visite guidée (au premier lancement, puis bouton « ? »)
   const STEPS = [
+    ['#hello', 'Bienvenue 👋', 'Carte de préparation des vols Pyrénées → Bretagne : webcams, METAR / TAF en direct, NOTAM, vigilance, espaces aériens, briefing PDF et log de nav. <b>C\'est un outil d\'aide</b> : il ne remplace pas la préparation réglementaire sur SOFIA-Briefing, le site du SIA et aviation.meteo.fr.'],
     ['#presets', 'Que veux-tu voir ?', 'Trois affichages tout prêts : <b>Météo</b> (METAR, webcams, radar), <b>Navigation</b> (NOTAM, espaces aériens, zones) ou <b>Tout</b>. Tu peux ensuite cocher / décocher chaque couche dans les rubriques plus bas.'],
     ['#btn-prep', 'Préparer un vol', 'Départ, arrivée, avion : la route est calculée avec le vent, le relief, les zones, les NOTAM et la nuit. Tu obtiens un briefing PDF et le log de nav Excel du club. Le bouton 📍 permet de choisir les terrains sur la carte.'],
     ['.search-wrap', 'Rechercher', 'Tape un code OACI (LFCP), un nom de terrain ou de ville, ou une webcam : la carte zoome et le terrain clignote en jaune.'],

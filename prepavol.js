@@ -109,6 +109,7 @@
     const w = deg(Math.acos(cosw)), toD = (j) => new Date((j - 2440587.5) * 864e5);
     return { rise: toD(Jt - w / 360), set: toD(Jt + w / 360) };
   }
+  A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
 
   // ================================================================== données
   let ZONES = null, VAC = null, ASP = null;
@@ -360,7 +361,7 @@
         <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
-        <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${f.turn ?? 45}"></label>
+        <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
         <label>Dégagement <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
         <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
@@ -369,15 +370,15 @@
         <label>Immatriculation (si différente)<input id="pf-immat" value="${esc(f.immat || '')}" placeholder="${esc(reg)}"></label>
         <label>Masse à vide (kg)<input id="pf-empty" type="number" min="100" max="2000" value="${(FLEET.find((x) => x.reg === reg) || {}).empty || ''}"></label>
         <p class="meta full" id="pf-acnote" style="grid-column:1/-1;margin:0"></p>
-        <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${f.ft || 2500}"></label>
-        <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${f.res ?? 30}"></label>
-        <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${f.m1 ?? 80}"></label>
-        <label>Copilote / passager avant (kg)<input id="pf-m2" type="number" min="0" max="150" value="${f.m2 ?? 0}"></label>
-        <label>Passagers arrière (kg)<input id="pf-m3" type="number" min="0" max="250" value="${f.m3 ?? 0}"></label>
-        <label>Bagages (kg)<input id="pf-m4" type="number" min="0" max="60" value="${f.m4 ?? 10}"></label>
-        <label>Carburant au départ (L)<input id="pf-fuel" type="number" min="0" max="200" value="${f.fuel ?? 100}"></label>
-        <label id="pf-aux-l">Réservoir supp. (L)<input id="pf-aux" type="number" min="0" max="50" value="${f.aux ?? 0}"></label>
-        <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${f.cor || 10}"></label>
+        <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${esc(f.ft || 2500)}"></label>
+        <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${esc(f.res ?? 30)}"></label>
+        <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${esc(f.m1 ?? 80)}"></label>
+        <label>Copilote / passager avant (kg)<input id="pf-m2" type="number" min="0" max="150" value="${esc(f.m2 ?? 0)}"></label>
+        <label>Passagers arrière (kg)<input id="pf-m3" type="number" min="0" max="250" value="${esc(f.m3 ?? 0)}"></label>
+        <label>Bagages (kg)<input id="pf-m4" type="number" min="0" max="60" value="${esc(f.m4 ?? 10)}"></label>
+        <label>Carburant au départ (L)<input id="pf-fuel" type="number" min="0" max="200" value="${esc(f.fuel ?? 100)}"></label>
+        <label id="pf-aux-l">Réservoir supp. (L)<input id="pf-aux" type="number" min="0" max="50" value="${esc(f.aux ?? 0)}"></label>
+        <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${esc(f.cor || 10)}"></label>
         <label>Éviter<select id="pf-avoid">
           <option value="p+rtba" ${f.avoid !== 'p' && f.avoid !== 'none' ? 'selected' : ''}>Zones P + RTBA actives</option>
           <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
@@ -546,7 +547,6 @@
       .catch((e) => { libsP = null; throw e; });
     return libsP;
   }
-  window.AWW_needLibs = needLibs;
 
   async function run(makePdf) {
     const prog = $('#pf-prog'), out = $('#pf-out');
@@ -2197,7 +2197,10 @@
     const m = /^#vol=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return;
     let o; try { o = JSON.parse(b64d(m[1])); } catch (e) { console.warn('lien de vol illisible', e); return; }
     history.replaceState(null, '', location.pathname + location.search);
-    const clean = Object.fromEntries(SHARE_KEYS.filter((k) => k in o && k !== 'time').map((k) => [k, o[k]]));
+    // le lien vient de l'extérieur : nombres en nombres, textes limités aux caractères d'une route (pas de HTML)
+    const NUM = ['regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'empty', 'turn'];
+    const safe = (k, v) => NUM.includes(k) ? (Number(v) || 0) : k === 'refuel' ? !!v : String(v).replace(/[^A-Za-z0-9 ./+-]/g, '').slice(0, 120);
+    const clean = Object.fromEntries(SHARE_KEYS.filter((k) => k in o && k !== 'time').map((k) => [k, safe(k, o[k])]));
     store.set('form', { ...store.get('form', {}), ...clean });
     openForm();
     const t = o.time ? new Date(o.time) : null;

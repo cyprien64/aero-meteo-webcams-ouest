@@ -13,7 +13,8 @@ for name, hours in LIMITS.items():
     lo = f.get('last_ok')
     age = (now - datetime.fromisoformat(lo)).total_seconds() / 3600 if lo else 9999
     print(f'{name:14s} {f.get("state", "?"):40s} dernier succès il y a {age:.1f} h (max {hours} h)')
-    if age > hours:
+    # une seule alerte par panne : la collecte tourne toutes les 15 min, on n'échoue qu'au franchissement du seuil
+    if hours < age <= hours + 0.5:
         bad.append(f'{name} non mis à jour depuis {age:.0f} h ({f.get("state")})')
 if bad:
     print('::error::' + ' | '.join(bad))

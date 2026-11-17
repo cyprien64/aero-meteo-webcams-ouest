@@ -156,20 +156,8 @@
 
   // ================================================================ 🌙 Jour / nuit aéronautique
   // Nuit aéronautique (France) : du coucher du soleil + 30 min au lever du soleil - 30 min.
-  function sunTimes(day, la, lo) {
-    const d0 = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
-    const n = Math.floor((d0 - Date.UTC(2000, 0, 1, 12)) / 864e5) + 1;
-    const Js = n - lo / 360, M = (357.5291 + 0.98560028 * Js) % 360;
-    const C = 1.9148 * Math.sin(rad(M)) + 0.02 * Math.sin(rad(2 * M)) + 0.0003 * Math.sin(rad(3 * M));
-    const lam = (M + C + 180 + 102.9372) % 360;
-    const Jt = 2451545 + Js + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2 * lam));
-    const dec = Math.asin(Math.sin(rad(lam)) * Math.sin(rad(23.44)));
-    const cosw = (Math.sin(rad(-0.833)) - Math.sin(rad(la)) * Math.sin(dec)) / (Math.cos(rad(la)) * Math.cos(dec));
-    if (Math.abs(cosw) > 1) return null;
-    const w = deg(Math.acos(cosw)), toMs = (j) => (j - 2440587.5) * 864e5;
-    return { rise: toMs(Jt - w / 360), set: toMs(Jt + w / 360) };
-  }
-  window.AWW_sunTimes = sunTimes;
+  // même calcul que le briefing (prepavol.js), en millisecondes pour les comparaisons
+  const sunTimes = (day, la, lo) => { const s = A.sunTimes(day, la, lo); return s && { rise: +s.rise, set: +s.set }; };
   const NB = { s: 41.3, n: 51.3, w: -6.0, e: 9.8 }, STEP = 0.1;
   const nightOverlay = L.imageOverlay('data:image/gif;base64,R0lGODlhAQABAAAAACw=', [[NB.s, NB.w], [NB.n, NB.e]], { opacity: 1, interactive: false, pane: 'maskPane' });
   const termLine = L.layerGroup();

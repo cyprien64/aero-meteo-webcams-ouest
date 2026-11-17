@@ -15,7 +15,6 @@
     LOG.lines.push(`${new Date().toISOString().slice(11, 23)} +${((performance.now() - t0) / 1000).toFixed(1)}s [${lvl}] ${[...args].map(fmtArg).join(' ')}`);
     if (LOG.lines.length > 1000) LOG.lines.shift();
   };
-  LOG.add = (lvl, ...a) => push(lvl, a);
   for (const lvl of ['info', 'warn', 'error']) {
     const orig = console[lvl].bind(console);
     console[lvl] = (...a) => { push(lvl, a); orig(...a); };

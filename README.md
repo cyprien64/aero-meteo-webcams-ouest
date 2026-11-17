@@ -55,7 +55,7 @@ Le PDF contient :
 - les cartes VAC officielles jointes à la fin (extension Chrome ; sur le site web, liens vers les VAC car le SIA bloque le téléchargement direct).
 
 ## Navigation : points VFR, météo en route, coupe verticale, export
-- **Points de report VFR** (export XML du SIA, Licence Ouverte — `data/vfr_points.json`, regénérable avec `scripts/build_vfr.py`) :
+- **Points de report VFR** (lus dans les VAC de chaque cycle AIRAC ; `data/vfr_points.json`, ancien export XML du SIA, sert de secours pour les terrains sans tableau) :
   point de sortie / d'entrée automatique ou au choix, utilisables comme points tournants (ex. `BP-N`), calque sur la carte.
 - **Météo le long de la route** à l'heure de passage (Open-Meteo) : nuages bas, base estimée, visibilité, pluie, orages, rafales → avis VFR vert / orange / rouge.
 - **Coupe verticale** : relief, altitude de croisière, CTR/TMA/zones traversées, conflits signalés.

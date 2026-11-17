@@ -332,12 +332,15 @@
       if (/^[-+]?(VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PO|SQ|FC|SS|DS)+$/.test(x) || /^[-+]?(VC)?(TS|SH)$/.test(x)) wx.push(x);
     }
     if (vis != null) m.visib = vis >= 9999 ? '10+' : +(vis / 1609.34).toFixed(2);
+    const unknown = vis == null || m.clouds.some((c) => ['BKN', 'OVC', 'OVX'].includes(c.cover) && c.base == null);   // capteur en panne (////)
     if (wx.length) m.wxString = wx.join(' ');
     const ceil = m.clouds.filter((c) => ['BKN', 'OVC', 'OVX'].includes(c.cover) && c.base != null).reduce((a, c) => Math.min(a, c.base), 99999);
     const vkm = vis == null ? 99 : vis / 1000;
-    m.fltCat = ceil < 500 || vkm < 1.6 ? 'LIFR' : ceil < 1000 || vkm < 4.8 ? 'IFR' : ceil <= 3000 || vkm <= 8 ? 'MVFR' : 'VFR';
+    m.fltCat = unknown && ceil >= 3000 && vkm > 8 ? 'UNK' : ceil < 500 || vkm < 1.6 ? 'LIFR' : ceil < 1000 || vkm < 4.8 ? 'IFR' : ceil <= 3000 || vkm <= 8 ? 'MVFR' : 'VFR';
     return m;
   }
+  console.assert(['LFBP 171200Z 24010KT CAVOK 12/10 Q1012', 'LFBP 171200Z 24010KT 9999 OVC003 12/10 Q1012', 'LFBP 171200Z AUTO 24010KT //// BKN/// 12/10 Q1012', 'LFBP 171200Z 24010KT 3000 BKN/// 12/10 Q1012']
+    .map((r) => parseMetar(r).fltCat).join() === 'VFR,LIFR,UNK,IFR', 'parseMetar : catégories de vol');
   async function liveMetNo(ids) {
     const q = ids.join(',');
     const [mt, tf] = await Promise.all([

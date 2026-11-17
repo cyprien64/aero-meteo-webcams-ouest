@@ -943,8 +943,24 @@ def collect_fees():
         if token:
             h['Authorization'] = 'Bearer ' + token
         issues = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels=taxe,valide&state=all&per_page=100&sort=created&direction=asc', timeout=30, headers=h))
+        # l'auteur peut modifier son texte après la validation : on ne publie que les issues non modifiées depuis la pose de « valide »
+        owner, name = repo.split('/')
+        q = ('query($o:String!,$n:String!){repository(owner:$o,name:$n){issues(labels:["valide"],first:100,states:[OPEN,CLOSED]){nodes{'
+             'number lastEditedAt timelineItems(itemTypes:[LABELED_EVENT],last:20){nodes{... on LabeledEvent{createdAt label{name}}}}}}}}')
+        req = urllib.request.Request('https://api.github.com/graphql', data=json.dumps({'query': q, 'variables': {'o': owner, 'n': name}}).encode(),
+                                     headers={**h, 'Content-Type': 'application/json', 'User-Agent': UA})
+        with opener.open(req, timeout=30) as r:
+            nodes = json.load(r)['data']['repository']['issues']['nodes']
+        trusted = set()
+        for nd in nodes:
+            val = max((e['createdAt'] for e in nd['timelineItems']['nodes'] if e and e['label']['name'] == 'valide'), default=None)
+            if val and (not nd['lastEditedAt'] or nd['lastEditedAt'] <= val):
+                trusted.add(nd['number'])
         out = {}
         for it in issues:
+            if it['number'] not in trusted:
+                print(f"  taxe #{it['number']} modifiée après validation : ignorée (re-valider en retirant puis remettant « valide »)")
+                continue
             fields, cur = {}, None
             for line in (it.get('body') or '').splitlines():
                 m = re.match(r'^###\s+(.*)$', line)

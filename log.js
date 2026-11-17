@@ -43,7 +43,7 @@
   LOG.download = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([LOG.text()], { type: 'text/plain;charset=utf-8' }));
-    a.download = `journal-aero-webcams-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.txt`;
+    a.download = `journal-aero-meteo-ouest-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.txt`;
     document.body.appendChild(a); a.click(); a.remove();
   };
 

@@ -2,6 +2,7 @@
 // Utilisée par l'extension Chrome pour avoir des NOTAM / SUP AIP à jour.
 window.AWW_CONFIG = {
   liveUrl: 'https://cyprien64.github.io/aero-meteo-webcams-ouest/',
-  // Dépôt GitHub : les membres y proposent les taxes d'atterrissage (issues validées par l'étiquette « valide »)
-  repo: 'cyprien64/aero-meteo-webcams-ouest',
+  // Adresse e-mail qui reçoit « Signaler un problème » et les propositions (taxes, vie pratique).
+  // Vide : le bouton télécharge seulement le journal, à envoyer à la personne qui a partagé le site.
+  contact: '',
 };

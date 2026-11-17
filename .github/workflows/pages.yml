@@ -37,9 +37,16 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # Seuls les fichiers du site sont publiés (pas les scripts, la doc ni le README), plus une archive pour l'extension Chrome
+      - name: Préparation des fichiers publiés
+        run: |
+          mkdir _site
+          cp -r index.html map.html *.js *.css *.json app.webmanifest icons lib data _site/
+          (cd _site && zip -qr ../site.zip .) && mv site.zip _site/
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@v4

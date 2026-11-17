@@ -289,7 +289,7 @@
     ['.search-wrap', 'Rechercher', 'Tape un code OACI (LFCP), un nom de terrain ou de ville, ou une webcam : la carte zoome et le terrain clignote en jaune.'],
     ['#btn-measure', 'Mesurer un trajet', 'Clique des points sur la carte : distance, cap, et temps de vol selon le vent prévu par 4 modèles météo. Si les modèles ne sont pas d\'accord, c\'est signalé.'],
     ['#map', 'Sur la carte', '<b>Clic</b> sur un point : sa fiche (METAR, webcams, NOTAM, carburant…). <b>Clic droit</b> (ou appui long) : les espaces aériens au-dessus et leurs règles. Les <b>pastilles orange numérotées</b> regroupent des points : clique ou zoome pour les voir.'],
-    ['#btn-log', 'En cas de problème', 'Si quelque chose ne charge pas, une barre l\'indique en haut. Le bouton <b>Journal</b> télécharge un fichier à envoyer pour qu\'on trouve l\'erreur. Le bouton <b>?</b> en haut relance cette visite.'],
+    ['#btn-log', 'En cas de problème', 'Si quelque chose ne charge pas, une barre l\'indique en haut. Le bouton <b>Signaler un problème</b> prépare le journal des erreurs à envoyer. Le bouton <b>?</b> en haut relance cette visite.'],
   ];
   let tourI = -1;
   function tourShow() {

@@ -553,6 +553,64 @@
     return `<dl class="decoded">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
   }
 
+  // ---------- TAF en clair : une ligne par période (base, BECMG, TEMPO, PROB, FM) ----------
+  const WX_FR = { MI: 'mince', BC: 'en bancs', PR: 'partiel', DR: 'chasse basse', BL: 'chasse haute', SH: 'averses', TS: 'orage', FZ: 'se congelant',
+    DZ: 'bruine', RA: 'pluie', SN: 'neige', SG: 'neige en grains', PL: 'granules de glace', GR: 'grêle', GS: 'grésil', UP: 'précipitations',
+    BR: 'brume', FG: 'brouillard', FU: 'fumée', VA: 'cendres', DU: 'poussière', SA: 'sable', HZ: 'brume sèche', PO: 'tourbillons', SQ: 'grains', FC: 'trombe', SS: 'tempête de sable', DS: 'tempête de poussière' };
+  const SKY_FR = { FEW: 'quelques nuages', SCT: 'nuages épars', BKN: 'nuages fragmentés', OVC: 'ciel couvert' };
+  const tafH = (dd, hh, mm) => `${+dd} à ${+hh} h${mm && mm !== '00' ? ' ' + mm : ''}`;
+  const tafSpan = (s) => { const r = /^(\d\d)(\d\d)\/(\d\d)(\d\d)$/.exec(s); return r && (r[1] === r[3] ? `le ${+r[1]} de ${+r[2]} h à ${+r[4]} h` : `du ${tafH(r[1], r[2])} au ${tafH(r[3], r[4])}`); };
+  function tafToken(t) {
+    let r;
+    if ((r = /^(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT$/.exec(t))) return +r[2] === 0 ? 'vent calme' : `vent ${r[1] === 'VRB' ? 'variable' : r[1] + '°'} ${+r[2]} kt${r[3] ? ` rafales ${+r[3]} kt` : ''}`;
+    if ((r = /^(\d{3})V(\d{3})$/.exec(t))) return `direction variant de ${r[1]}° à ${r[2]}°`;
+    if (/^\d{4}$/.test(t)) return t === '9999' ? 'visibilité ≥ 10 km' : `visibilité ${+t < 1000 ? +t + ' m' : (+t / 1000).toLocaleString('fr') + ' km'}`;
+    if (t === 'CAVOK') return 'CAVOK (visibilité ≥ 10 km, pas de nuage sous 5000 ft, pas de CB)';
+    if (t === 'NSW') return 'fin du temps significatif';
+    if (t === 'NSC' || t === 'SKC') return 'pas de nuage significatif';
+    if ((r = /^(FEW|SCT|BKN|OVC|VV)(\d{3}|\/\/\/)(CB|TCU)?$/.exec(t))) {
+      const h = r[2] === '///' ? '?' : +r[2] * 100;
+      return r[1] === 'VV' ? `ciel invisible, visibilité verticale ${h} ft` : `${SKY_FR[r[1]]} à ${h} ft${r[3] ? (r[3] === 'CB' ? ' (cumulonimbus)' : ' (cumulus bourgeonnants)') : ''}`;
+    }
+    if ((r = /^T([XN])(M?\d\d)\/(\d\d)(\d\d)Z$/.exec(t))) return `température ${r[1] === 'X' ? 'max' : 'min'} ${r[2].replace('M', '-')} °C le ${tafH(r[3], r[4])}`;
+    if ((r = /^(\+|-|VC)?((?:MI|BC|PR|DR|BL|SH|TS|FZ)*)((?:DZ|RA|SN|SG|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PO|SQ|FC|SS|DS)*)$/.exec(t)) && (r[2] || r[3])) {
+      const words = (r[2] + r[3]).match(/../g).map((c) => WX_FR[c]);
+      return `${r[1] === '+' ? 'fort(e) ' : r[1] === '-' ? 'faible ' : ''}${words.join(' ')}${r[1] === 'VC' ? ' au voisinage' : ''}`;
+    }
+    return `(${t})`;
+  }
+  function tafPlain(raw) {
+    const toks = raw.replace(/=\s*$/, '').trim().split(/\s+/);
+    const out = [];
+    let cur = null, i = 0;
+    while (i < toks.length && !/^\d{4}\/\d{4}$/.test(toks[i])) i++;   // saute TAF, AMD, code OACI, heure d'émission
+    if (i < toks.length) { cur = { k: `Valable ${tafSpan(toks[i])} (heures UTC)`, v: [] }; out.push(cur); i++; }
+    const isProb = () => cur && /^Probabilité/.test(cur.k) && !cur.v.length;
+    for (; i < toks.length; i++) {
+      const t = toks[i]; let r;
+      if (t === 'RMK') break;
+      if ((r = /^PROB(\d\d)$/.exec(t))) { cur = { k: `Probabilité ${r[1]} %`, v: [] }; out.push(cur); continue; }
+      if (t === 'BECMG' || t === 'TEMPO') {
+        const lab = t === 'BECMG' ? 'Évolution progressive' : 'Temporairement';
+        if (isProb() && !/,/.test(cur.k)) cur.k += ', ' + lab.toLowerCase(); else { cur = { k: lab, v: [] }; out.push(cur); }
+        if (tafSpan(toks[i + 1] || '')) cur.k += ' ' + tafSpan(toks[++i]);
+        continue;
+      }
+      if ((r = /^FM(\d\d)(\d\d)(\d\d)$/.exec(t))) { cur = { k: `À partir du ${tafH(r[1], r[2], r[3])}`, v: [] }; out.push(cur); continue; }
+      if (isProb() && tafSpan(t)) { cur.k += ' ' + tafSpan(t); continue; }
+      if (cur) cur.v.push(tafToken(t));
+    }
+    return out;
+  }
+  {
+    const p = tafPlain('TAF LFBP 171100Z 1712/1812 24010KT 9999 SCT030 BECMG 1714/1716 27015G25KT TEMPO 1718/1722 4000 SHRA BKN012CB PROB30 TEMPO 1800/1806 0800 FG=');
+    console.assert(p.length === 4 && p[0].k === 'Valable du 17 à 12 h au 18 à 12 h (heures UTC)' && p[0].v.join('|') === 'vent 240° 10 kt|visibilité ≥ 10 km|nuages épars à 3000 ft', 'tafPlain base', p[0]);
+    console.assert(p[1].k === 'Évolution progressive le 17 de 14 h à 16 h' && p[1].v[0] === 'vent 270° 15 kt rafales 25 kt', 'tafPlain becmg', p[1]);
+    console.assert(p[2].v.join('|') === 'visibilité 4 km|averses pluie|nuages fragmentés à 1200 ft (cumulonimbus)', 'tafPlain tempo', p[2]);
+    console.assert(p[3] && p[3].k === 'Probabilité 30 %, temporairement le 18 de 0 h à 6 h' && p[3].v.join('|') === 'visibilité 800 m|brouillard', 'tafPlain prob', p[3]);
+  }
+  const tafHtml = (raw) => `<ul class="taf-plain">${tafPlain(raw).map((g) => `<li><b>${esc(g.k)}</b>${g.v.length ? ' : ' + esc(g.v.join(', ')) : ''}</li>`).join('')}</ul>`;
+
   function showAerodrome(icao, fly = true) {
     const a = aptByIcao[icao]; if (!a) return;
     openedIcao = icao;
@@ -579,7 +637,8 @@
       <p class="meta">${lat} ${lon}${a.elev !== '' && a.elev != null ? ` · ${a.elev} ft` : ''}
         ${m ? ` · <span class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span>` : ''}</p>
       ${m ? `<h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
-      ${t ? `<h4>TAF</h4><pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre>` : ''}
+      ${t ? `<h4>TAF <span class="seg" id="taf-mode"><button data-m="clair">En clair</button><button data-m="code">Codé</button></span></h4>
+        <div class="taf-box" data-m="${store.get('tafMode', 'clair')}">${tafHtml(t.rawTAF)}<pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre></div>` : ''}
       ${!m ? nearestMetarHtml(a) : ''}
       ${escaleHtml(icao)}
       ${pratiqueHtml(icao, a)}
@@ -605,6 +664,8 @@
     bindPratique(detailBody, icao, a);
     $('#fav-star').addEventListener('click', () => { const f = favs(); store.set('favs', f.includes(icao) ? f.filter((x) => x !== icao) : [...f, icao]); drawFavs(); showAerodrome(icao, false); });
     bindDocLinks(detailBody);
+    const tafBox = detailBody.querySelector('.taf-box');
+    if (tafBox) detailBody.querySelectorAll('#taf-mode button').forEach((b) => b.addEventListener('click', () => { tafBox.dataset.m = b.dataset.m; store.set('tafMode', b.dataset.m); }));
     detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">✂️ Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
     $('#ad-stack').addEventListener('click', () => showStack(a.la, a.lo, `Espaces au-dessus de ${icao}`));
     detail.hidden = false;
@@ -841,7 +902,7 @@
         <input id="fee-in" placeholder="ex. 10 € TTC, gratuit…" value="${fee && fee.source === 'saisie personnelle' ? esc(fee.tarif) : ''}" style="flex:1;min-width:140px;margin:0">
         <button class="btn" id="fee-save">Enregistrer la taxe</button>
       </div>
-      ${(window.AWW_CONFIG || {}).repo ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">📤 Proposer ce tarif au club</button><span class="meta" style="flex:1">publié après validation · compte GitHub requis</span></div>` : ''}
+      ${CFG.contact ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">📤 Proposer ce tarif au club</button><span class="meta" style="flex:1">envoyé par e-mail, publié après vérification</span></div>` : ''}
       ${pprHtml(icao, e)}
       <div class="row" style="margin-top:4px">
         <button class="btn" data-ext="https://airfield.directory/airfield/${icao}">Tarifs (airfield.directory)</button>
@@ -868,7 +929,7 @@
       ${osmHtml(a, e.osm || {})}
       <h4>Mes contacts pour ce terrain</h4>
       <textarea id="prat-note" rows="3" placeholder="Taxi : 06 … · Code portail … · Restaurant …">${esc(note)}</textarea>
-      <div class="row"><button class="btn" id="prat-save">💾 Enregistrer sur cet appareil</button>${CFG.repo ? '<button class="btn" id="prat-share">📤 Proposer au club</button>' : ''}</div>
+      <div class="row"><button class="btn" id="prat-save">💾 Enregistrer sur cet appareil</button>${CFG.contact ? '<button class="btn" id="prat-share">📤 Proposer au club</button>' : ''}</div>
     </details>`;
   }
   // taxis, gares, loueurs collectés une fois par cycle dans OpenStreetMap (les serveurs publics sont trop lents pour une requête en direct)
@@ -879,6 +940,8 @@
         · <a class="lnk" data-ext="https://www.google.com/maps/dir/?api=1&origin=${a.la},${a.lo}&destination=${x.la},${x.lo}">itinéraire</a></li>`).join('')}</ul>`).join('');
     return `<h4>Autour du terrain</h4>${html || '<p class="meta">Rien de référencé à proximité dans OpenStreetMap.</p>'}<p class="meta small-print">© contributeurs OpenStreetMap — données libres, parfois incomplètes.</p>`;
   }
+  // e-mail pré-rempli vers l'adresse de config.js (aucun lien vers le dépôt GitHub dans le site partagé)
+  const mailTo = (subject, body) => { location.href = `mailto:${CFG.contact}?subject=${encodeURIComponent('[Aéro Météo Ouest] ' + subject)}&body=${encodeURIComponent(body)}`; };
   function bindPratique(el, icao, a) {
     const save = el.querySelector('#prat-save');
     if (save) save.addEventListener('click', () => {
@@ -886,8 +949,7 @@
     });
     const share = el.querySelector('#prat-share');
     if (share) share.addEventListener('click', () => {
-      const q = new URLSearchParams({ template: 'vie-pratique.yml', title: `Infos pratiques ${icao}`, icao, infos: el.querySelector('#prat-note').value.trim() });
-      openWin(`https://github.com/${CFG.repo}/issues/new?${q}`, 1100, 0);
+      mailTo(`Infos pratiques ${icao}`, `Terrain : ${icao}\nInfos :\n${el.querySelector('#prat-note').value.trim()}`);
     });
   }
 
@@ -945,8 +1007,7 @@
     const share = el.querySelector('#fee-share');
     if (share) share.addEventListener('click', () => {
       const v = el.querySelector('#fee-in').value.trim();
-      const q = new URLSearchParams({ template: 'taxe-atterrissage.yml', title: `Taxe ${icao}`, icao, tarif: v, date: new Date().toISOString().slice(0, 7) });
-      openWin(`https://github.com/${AWW_CONFIG.repo}/issues/new?${q}`, 1100, 0);
+      mailTo(`Taxe ${icao}`, `Terrain : ${icao}\nTarif : ${v}\nRelevé : ${new Date().toISOString().slice(0, 7)}`);
     });
   }
 
@@ -1360,7 +1421,17 @@
   // ---------- Application hors ligne (tablette) : service worker + dernier briefing ----------
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     // copie hors ligne (~2,5 Mo) téléchargée après l'affichage de la carte, pour ne pas ralentir le premier chargement
-    addEventListener('load', () => setTimeout(() => navigator.serviceWorker.register('sw.js').catch((e) => console.warn('sw', e)), 4000));
+    addEventListener('load', () => setTimeout(() => navigator.serviceWorker.register('sw.js')
+      .then((reg) => setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000))   // tablette restée ouverte : vérifie toutes les 30 min
+      .catch((e) => console.warn('sw', e)), 4000));
+    // nouveau sw.js (VERSION changée) qui prend la main : la page tourne encore avec l'ancien code -> proposer de recharger
+    const hadCtrl = !!navigator.serviceWorker.controller;   // sinon c'est la toute première installation, rien à proposer
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadCtrl || $('#update-bar')) return;
+      document.body.insertAdjacentHTML('beforeend', '<div id="update-bar" class="glass">✨ Nouvelle version du site disponible <button id="upd-go">Recharger</button><button class="x" id="upd-x" title="Plus tard">✕</button></div>');
+      $('#upd-go').addEventListener('click', () => location.reload());
+      $('#upd-x').addEventListener('click', () => $('#update-bar').remove());
+    });
   }
   async function showLastBriefing() {
     if (!window.caches) return;
@@ -1407,11 +1478,19 @@
   idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); T('Vigilance', loadVig); });
   setInterval(() => T('METAR / TAF', loadMetarTaf), 5 * 60 * 1000);
   setInterval(() => { T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
-  $('#btn-log').addEventListener('click', () => window.AWW_LOG.download());
+  $('#btn-log').addEventListener('click', () => {
+    showList('Signaler un problème', `<p>Le <b>journal</b> est un petit fichier texte qui liste ce qui a chargé ou échoué sur cet appareil. Il aide à trouver la panne.</p>
+      <div class="row"><button class="btn${CFG.contact ? '' : ' primary'}" id="rep-log">📋 Télécharger le journal</button>${CFG.contact ? '<button class="btn primary" id="rep-mail">✉️ Écrire un e-mail</button>' : ''}</div>
+      <p class="meta">${CFG.contact ? 'L\'e-mail contient déjà les dernières erreurs. Décris ce que tu faisais et, si possible, joins le journal.' : 'Envoie ce fichier, avec deux mots sur ce que tu faisais, à la personne qui t\'a partagé le site.'}</p>`);
+    $('#rep-log').addEventListener('click', () => window.AWW_LOG.download());
+    if (CFG.contact) $('#rep-mail').addEventListener('click', () => {
+      const L = window.AWW_LOG, errs = L.lines.filter((l) => /\[(ERREUR|error|warn|http|réseau|lent)/.test(l)).slice(-12).join('\n');
+      mailTo('Problème', `Ce que je faisais / ce qui ne marche pas :\n\n\n---\nNavigateur : ${navigator.userAgent}\nÉcran : ${innerWidth}×${innerHeight}\n${errs || 'aucune erreur notée'}`.slice(0, 1800));
+    });
+  });
   $('#btn-zip').addEventListener('click', () => {
-    const repo = CFG.repo || 'cyprien64/aero-meteo-webcams-ouest';
     showList('Télécharger le site', `<p>Archive complète du site (carte, préparation de vol, données du moment) :</p>
-      <p><a class="btn primary" href="https://github.com/${repo}/archive/refs/heads/main.zip" download>⬇️ Télécharger le zip</a></p>
+      <p><a class="btn primary" href="${IS_EXT ? CFG.liveUrl : ''}site.zip" download>⬇️ Télécharger le zip</a></p>
       <h4>Utiliser la copie téléchargée</h4>
       <ol class="meta"><li>Décompresser le zip.</li><li>Chrome / Edge / Brave : <code>chrome://extensions</code> → activer le <b>Mode développeur</b> → <b>Charger l'extension non empaquetée</b> → choisir le dossier.</li>
       <li>L'extension lit les NOTAM / SUP AIP à jour sur le site et les METAR en direct.</li></ol>

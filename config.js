@@ -4,5 +4,5 @@ window.AWW_CONFIG = {
   liveUrl: 'https://cyprien64.github.io/aero-meteo-webcams-ouest/',
   // Adresse e-mail qui reçoit « Signaler un problème » et les propositions (taxes, vie pratique).
   // Vide : le bouton télécharge seulement le journal, à envoyer à la personne qui a partagé le site.
-  contact: '',
+  contact: 'cyprien64@orange.fr',
 };

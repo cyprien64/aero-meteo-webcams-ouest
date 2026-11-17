@@ -42,6 +42,9 @@
     const c = map.getCenter();
     store.set('view', { c: [+c.lat.toFixed(3), +c.lng.toFixed(3)], z: map.getZoom() });
   });
+  map.zoomControl.setPosition('bottomright');
+  // verre dépoli coupé pendant les déplacements de la carte (le flou recalculé à chaque image saccade sur tablette)
+  map.on('movestart zoomstart', () => document.body.classList.add('moving')).on('moveend zoomend', () => document.body.classList.remove('moving'));
   map.attributionControl.setPrefix('<a href="http://international.aero.free.fr/" target="_blank">Inspiré d\'Inter Aéro</a>');
 
   map.createPane('basePane').style.zIndex = 150;

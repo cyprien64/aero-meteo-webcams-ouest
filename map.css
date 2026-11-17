@@ -326,9 +326,6 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 /* Webcam figée */
 .cam-old { color: #ffb340; font-size: 11px; }
 
-/* Fluidité : le flou d'arrière-plan des panneaux est recalculé à chaque image pendant un déplacement de la carte (très coûteux sur tablette) */
-.box, #clock, #inflight { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-.box { background: rgba(12, 26, 44, .95); } #clock { background: rgba(12, 26, 44, .95); }
 ul.ppr { margin: 2px 0 6px; padding-left: 18px; font-size: 11.5px; color: #cfe3f5; } ul.ppr li { margin: 2px 0; }
 a.btn { display: inline-block; text-decoration: none; color: var(--text); padding: 5px 9px; }
 /* Favoris */
@@ -393,3 +390,55 @@ input[type=checkbox]:focus-visible { outline: 2px solid #ffb703; outline-offset:
 #clock { border-color: rgba(255,255,255,.12); }
 @media (max-width: 700px) { #panel { width: calc(100% - 24px); } .leaflet-top.leaflet-left { left: 0; } }
 #panel .brand-txt { min-width: 0; flex: 1; } #panel .sub { overflow: hidden; text-overflow: ellipsis; }
+
+/* =====================================================================
+   v4 — ForeFlight × Liquid Glass : carte plein écran, barre d'outils flottante, verre translucide
+   ===================================================================== */
+:root { --glass: rgba(18, 28, 44, .52); --glass-solid: rgba(16, 26, 41, .94); --glass-line: rgba(255,255,255,.16); --ff-blue: #2f8fff; --radius: 22px; }
+.glass, .leaflet-tooltip.tip, #loadbar, #inflight, #pick-banner {
+  background: var(--glass) !important; border: 1px solid var(--glass-line) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
+  box-shadow: 0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(255,255,255,.04); }
+.glass::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(160deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 38%); }
+/* pendant un déplacement : verre opaque, sans flou */
+.moving .glass, .moving .leaflet-tooltip.tip { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background: var(--glass-solid) !important; }
+
+/* Barre d'outils du haut (façon ForeFlight) */
+#topbar { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 1100; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 20px; overflow-x: auto; scrollbar-width: none; }
+#topbar::-webkit-scrollbar { display: none; }
+#topbar > * { position: relative; z-index: 1; flex: none; }
+#topbar .tb { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 64px; padding: 5px 8px; border: none; border-radius: 14px; background: transparent; color: #e8f1fb; font: 600 18px/1 system-ui; cursor: pointer; }
+#topbar .tb span { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; color: #b9cde0; }
+#topbar .tb:hover { background: rgba(255,255,255,.1); } #topbar .tb.on { background: var(--ff-blue) !important; } #topbar .tb.on span { color: #fff; }
+#topbar .tb-main { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px; margin-right: 6px; border: none; border-radius: 999px; cursor: pointer;
+  background: linear-gradient(180deg, #4aa3ff, #1f7ae0); color: #fff; font: 700 15px system-ui; box-shadow: 0 4px 14px rgba(47,143,255,.45), inset 0 1px 0 rgba(255,255,255,.4); }
+#topbar .tb-main:hover { filter: brightness(1.08); }
+#topbar .presets { margin: 0 0 0 auto; background: rgba(0,0,0,.25); }
+#topbar #clock { position: static; margin-left: 6px; background: rgba(0,0,0,.3) !important; border: 1px solid rgba(255,255,255,.12); box-shadow: none; border-radius: 999px; font-size: 13px; padding: 6px 12px; }
+
+/* Panneaux en verre sous la barre */
+#panel { top: 82px; left: 12px; max-height: calc(100% - 94px); width: 330px; }
+#detail { top: 82px; right: 12px; max-height: calc(100% - 94px); }
+#panel.glass, #detail.glass { border-radius: var(--radius); }
+#panel .brand { position: relative; z-index: 1; }
+.hello { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); }
+details.sec { background: rgba(255,255,255,.06); }
+.leaflet-top.leaflet-left { left: 354px; top: 70px; }
+#loadbar { top: 82px; }
+.leaflet-control-zoom { border-radius: 16px !important; } .leaflet-control-zoom a { background: var(--glass-solid) !important; color: #fff !important; width: 40px !important; height: 40px !important; line-height: 40px !important; }
+input[type=checkbox]:checked { background: var(--ff-blue); }
+.presets button.on { color: #0b1a2b; }
+@media (max-width: 700px) {
+  #topbar { left: 8px; right: 8px; top: 8px; padding: 6px; }
+  #topbar .tb-main span { display: none; } #topbar .tb-main { padding: 0 14px; font-size: 18px; }
+  #topbar .tb { min-width: 54px; }
+  #panel { top: auto; bottom: 8px; left: 8px; width: calc(100% - 16px); max-height: 46%; }
+  #detail { top: 74px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 82px); }
+  #loadbar { top: 74px; }
+}
+:root { --glass: rgba(16, 26, 42, .64); }
+#panel h1 { font-size: 16px; } #panel .brand { padding: 14px 14px 4px; }
+input[type=search]::placeholder { color: #9fb4c9; }
+.glass .meta, #panel .sub { color: #c3d4e6; }
+@media (max-width: 700px) { .leaflet-control-zoom { display: none; } }

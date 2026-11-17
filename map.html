@@ -18,13 +18,24 @@
 <body>
   <div id="map"></div>
 
-  <div id="clock" title="Heure UTC">--:--:-- UTC</div>
+  <nav id="topbar" class="glass">
+    <button id="btn-prep" class="tb-main" title="Préparer un vol : briefing PDF et log Excel">✈️ <span>Préparer un vol</span></button>
+    <button id="btn-measure" class="tb" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles">📏<span>Mesurer</span></button>
+    <button id="btn-hist" class="tb" title="Historique des préparations">📚<span>Historique</span></button>
+    <button id="btn-clear" class="tb" title="Effacer la route, les mesures et les coupes tracées sur la carte">🧹<span>Effacer</span></button>
+    <div class="presets" id="presets" title="Affichages préréglés">
+      <button data-preset="meteo" title="METAR, webcams, observations, vent, vigilance">🌦️ Météo</button>
+      <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
+      <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
+    </div>
+    <div id="clock" title="Heure UTC">--:--:-- UTC</div>
+  </nav>
 
-  <aside id="panel" class="box">
+  <aside id="panel" class="box glass">
     <header class="brand">
       <div class="logo"><img src="icons/icon48.png" alt="" width="30" height="30"></div>
       <div class="brand-txt">
-        <h1>Aéro Météo Webcams</h1>
+        <h1>Aéro Météo Ouest</h1>
         <p class="sub">Pyrénées → Bretagne · préparation des vols</p>
       </div>
       <button id="btn-tour" class="icon-btn" title="Visite guidée : à quoi servent les boutons">?</button>
@@ -33,18 +44,7 @@
 
     <div id="panel-body">
       <div id="hello" class="hello"></div>
-      <button id="btn-prep" class="prep-btn">✈️ Préparer un vol <small>briefing PDF · log Excel</small></button>
       <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
-      <button id="btn-hist" class="btn ghost wide">📚 Historique des préparations</button>
-      <div class="tool-row">
-        <button id="btn-measure" class="btn" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles">📏 Mesurer un trajet</button>
-        <button id="btn-clear" class="btn" title="Effacer la route, les mesures et les coupes tracées sur la carte">🧹 Effacer les tracés</button>
-      </div>
-      <div class="presets" id="presets" title="Affichages préréglés">
-        <button data-preset="meteo" title="METAR, webcams, observations, vent, radar">🌦️ Météo</button>
-        <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
-        <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
-      </div>
       <div class="favs" id="favs" title="Terrains favoris : ★ dans la fiche d'un terrain pour en ajouter"></div>
       <div class="search-wrap">
         <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
@@ -158,7 +158,7 @@
     </div>
   </aside>
 
-  <aside id="detail" class="box" hidden>
+  <aside id="detail" class="box glass" hidden>
     <button id="detail-close" class="icon-btn" title="Fermer">✕</button>
     <div id="detail-body"></div>
   </aside>

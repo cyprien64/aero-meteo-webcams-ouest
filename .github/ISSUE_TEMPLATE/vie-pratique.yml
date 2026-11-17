@@ -1,0 +1,20 @@
+name: Infos pratiques d'un terrain
+description: Taxi, transports, location de voiture, restaurant, hébergement, accès… (publié après validation par l'administrateur)
+title: "Infos pratiques LFxx"
+labels: ["pratique"]
+body:
+  - type: input
+    id: icao
+    attributes:
+      label: Code OACI
+      placeholder: LFBP
+    validations:
+      required: true
+  - type: textarea
+    id: infos
+    attributes:
+      label: Informations
+      description: Numéros de taxi, ligne de bus, loueur, restaurant, code du portail, horaires… N'indiquez pas de données personnelles d'un tiers sans son accord (préférez les numéros professionnels).
+      placeholder: "Taxi Uzein : 05 xx xx xx xx — Bus ligne 20 vers Pau centre (arrêt à 800 m)"
+    validations:
+      required: true

@@ -442,3 +442,10 @@ input[type=checkbox]:checked { background: var(--ff-blue); }
 input[type=search]::placeholder { color: #9fb4c9; }
 .glass .meta, #panel .sub { color: #c3d4e6; }
 @media (max-width: 700px) { .leaflet-control-zoom { display: none; } }
+/* Vie pratique */
+details.pratique { margin-top: 14px; background: rgba(255,255,255,.06); border-radius: 14px; padding: 4px 12px 10px; }
+details.pratique > summary { cursor: pointer; font-weight: 700; padding: 8px 0; color: #ffc23d; }
+details.pratique textarea { width: 100%; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0,0,0,.28); color: #fff; padding: 8px; font: inherit; }
+.osm-cat { margin: 8px 0 2px; font-weight: 700; font-size: 12px; } ul.osm { margin: 0; padding-left: 16px; font-size: 12px; } ul.osm li { margin: 2px 0; }
+ul.osm a { color: #7cc0ff; }
+a.lnk { color: #7cc0ff; cursor: pointer; text-decoration: underline; }

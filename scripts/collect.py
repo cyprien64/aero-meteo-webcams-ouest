@@ -10,6 +10,7 @@ Bibliothèque standard uniquement. Utilisé par la GitHub Action (.github/workfl
 Si une source échoue et que FALLBACK_URL est défini, la dernière version publiée est reprise.
 """
 import html
+import math
 import http.cookiejar
 import json
 import os
@@ -875,6 +876,83 @@ MAIL_RE = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
 URL_RE = re.compile(r'(?:https?://|www\.)[^\s,;()]+')
 
 
+def vie_pratique(v):
+    """Rubriques « Situation », « Transports » (16), « Hôtels, restaurants » (17) et « Divers » de la VAC.
+    Dans le texte extrait, la valeur précède son titre : « NIL.Transports :16 - Sur AD.Hôtels, restaurants :17 - »."""
+    t = str(v.get('infos') or '')
+    out = {}
+    m = re.search(r'([^\n]*?)\.?\s*Situation\s*/\s*Location\s*:\s*1\s*-', t)
+    if m:
+        out['situation'] = m.group(1).strip(' .')
+        c = re.search(r'km\s+(?:[NSEW]{1,3}\s+)?(.+?)\s*\(', out['situation'])
+        if c:
+            out['ville'] = c.group(1).strip()
+    for key, label, num in (('transports', r'Transports', 16), ('hotels', r'H[oô]tels?\s*,\s*restaurants', 17), ('divers', r'Divers\s*/\s*Miscellaneous', 18)):
+        m = re.search(rf':\s*{num - 1}\s*-(.*?){label}\s*:\s*{num}\s*-', t, re.S)
+        if m:
+            val = re.sub(r'\s+', ' ', m.group(1).replace('←', '')).strip(' .-')
+            if val and val.upper() != 'NIL':
+                out[key] = val[:300]
+    return out
+
+
+assert vie_pratique({'infos': '10 km NW Pau (64 - Pyrénées Atlantiques).Situation / Location :1 -\nACB :15 -\nTAXI O/R AFISTransports :16 -\nRestaurant sur / on AD.Hôtels, restaurants :17 -'}) == {
+    'situation': '10 km NW Pau (64 - Pyrénées Atlantiques)', 'ville': 'Pau', 'transports': 'TAXI O/R AFIS', 'hotels': 'Restaurant sur / on AD'}
+
+
+OSM_KINDS = [('taxi', 'amenity', 'taxi', 10, 3), ('gare', 'railway', 'station|halt', 20, 3), ('loc', 'amenity', 'car_rental', 15, 4), ('velo', 'amenity', 'bicycle_rental', 5, 2)]
+
+
+def collect_osm(cycle):
+    """Taxis, gares, loueurs de voitures et de vélos autour de chaque terrain (OpenStreetMap), une fois par cycle AIRAC."""
+    print('OpenStreetMap autour des terrains')
+    if FALLBACK_URL:
+        try:
+            prev = json.loads(get(f'{FALLBACK_URL}/data/live/osm_near.json', timeout=30))
+            if prev.get('cycle') == cycle:
+                save('osm_near.json', prev, True)
+                print('  inchangé (même cycle)')
+                return
+        except Exception:  # noqa: BLE001
+            pass
+    q = ('[out:json][timeout:180];(nwr["amenity"~"^(taxi|car_rental|bicycle_rental)$"]({b});nwr["railway"~"^(station|halt)$"]({b}););out center tags;'
+         .format(b='42.0,-5.4,49.2,2.7'))
+    els = None
+    for ep in ('https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter') * 2:   # serveurs publics souvent chargés
+        try:
+            els = json.loads(get(ep, {'data': q}, timeout=240))['elements']
+            break
+        except Exception as e:  # noqa: BLE001
+            print('  ', ep, e)
+            time.sleep(20)
+    if not els:
+        fallback('osm_near.json')
+        return
+    out = {}
+    for icao, name, la, lo, *_ in aerodromes():
+        near = {}
+        for kind, key, vals, km, n in OSM_KINDS:
+            cand = []
+            for e in els:
+                t = e.get('tags') or {}
+                if not re.fullmatch(vals, t.get(key) or '') or t.get('usage') == 'tourism' or 'petit train' in (t.get('name') or '').lower():
+                    continue
+                ela, elo = e.get('lat', (e.get('center') or {}).get('lat')), e.get('lon', (e.get('center') or {}).get('lon'))
+                if ela is None:
+                    continue
+                d = math.hypot((elo - lo) * math.cos(math.radians(la)) * 111.32, (ela - la) * 110.57)
+                if d <= km:
+                    cand.append({'n': (t.get('name') or t.get('operator') or '')[:60], 'd': round(d, 1), 'la': round(ela, 5), 'lo': round(elo, 5),
+                                 'tel': (t.get('phone') or t.get('contact:phone') or '')[:40], 'web': (t.get('website') or t.get('contact:website') or '')[:120]})
+            cand.sort(key=lambda x: x['d'])
+            if cand:
+                near[kind] = cand[:n]
+        if near:
+            out[icao] = near
+    print(f'  {len(els)} points OSM, {len(out)} terrains avec au moins un service proche')
+    save('osm_near.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': '© contributeurs OpenStreetMap (ODbL)', 'data': out})
+
+
 def ppr_contacts(v):
     """Phrases de la VAC sur le PPR / préavis / stationnement, avec les e-mails et sites cités (texte tel quel, à vérifier)."""
     txt = re.sub(r'-\n(?=[a-zà-ü])', '', '\n'.join(str(v.get(k) or '') for k in ('infos', 'consignes', 'carburant')))
@@ -932,45 +1010,53 @@ def collect_vigilance():
         fallback('vigilance.json')
 
 
-def collect_fees():
-    """Taxes d'atterrissage proposées par les membres (issues GitHub « taxe » validées par l'étiquette « valide »)."""
+def club_issues(label):
+    """Issues GitHub d'un type (« taxe », « pratique ») validées par l'étiquette « valide » et non modifiées depuis : [(issue, champs)]."""
     repo, token = os.environ.get('GITHUB_REPOSITORY'), os.environ.get('GITHUB_TOKEN')
     if not repo:
-        print('fees : GITHUB_REPOSITORY absent, ignoré')
-        return
+        raise RuntimeError('GITHUB_REPOSITORY absent')
+    h = {'Accept': 'application/vnd.github+json'}
+    if token:
+        h['Authorization'] = 'Bearer ' + token
+    issues = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels={label},valide&state=all&per_page=100&sort=created&direction=asc', timeout=30, headers=h))
+    # l'auteur peut modifier son texte après la validation : on ne publie que les issues non modifiées depuis la pose de « valide »
+    owner, name = repo.split('/')
+    q = ('query($o:String!,$n:String!){repository(owner:$o,name:$n){issues(labels:["valide"],first:100,states:[OPEN,CLOSED]){nodes{'
+         'number lastEditedAt timelineItems(itemTypes:[LABELED_EVENT],last:20){nodes{... on LabeledEvent{createdAt label{name}}}}}}}}')
+    req = urllib.request.Request('https://api.github.com/graphql', data=json.dumps({'query': q, 'variables': {'o': owner, 'n': name}}).encode(),
+                                 headers={**h, 'Content-Type': 'application/json', 'User-Agent': UA})
+    with opener.open(req, timeout=30) as r:
+        nodes = json.load(r)['data']['repository']['issues']['nodes']
+    trusted = set()
+    for nd in nodes:
+        val = max((e['createdAt'] for e in nd['timelineItems']['nodes'] if e and e['label']['name'] == 'valide'), default=None)
+        if val and (not nd['lastEditedAt'] or nd['lastEditedAt'] <= val):
+            trusted.add(nd['number'])
+    out = []
+    for it in issues:
+        if it['number'] not in trusted:
+            print(f"  #{it['number']} modifiée après validation : ignorée (re-valider en retirant puis remettant « valide »)")
+            continue
+        fields, cur = {}, None
+        for line in (it.get('body') or '').splitlines():
+            m = re.match(r'^###\s+(.*)$', line)
+            if m:
+                cur = m.group(1).strip().lower()
+                fields[cur] = ''
+            elif cur is not None and line.strip() and line.strip() != '_No response_':
+                fields[cur] = (fields[cur] + ' ' + line.strip()).strip()
+        icao = (fields.get('code oaci') or '').upper().strip()
+        if re.fullmatch(r'[A-Z]{4}', icao):
+            out.append((it, icao, fields))
+    return out
+
+
+def collect_fees():
+    """Taxes d'atterrissage proposées par les membres (issues « taxe » validées)."""
     try:
-        h = {'Accept': 'application/vnd.github+json'}
-        if token:
-            h['Authorization'] = 'Bearer ' + token
-        issues = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels=taxe,valide&state=all&per_page=100&sort=created&direction=asc', timeout=30, headers=h))
-        # l'auteur peut modifier son texte après la validation : on ne publie que les issues non modifiées depuis la pose de « valide »
-        owner, name = repo.split('/')
-        q = ('query($o:String!,$n:String!){repository(owner:$o,name:$n){issues(labels:["valide"],first:100,states:[OPEN,CLOSED]){nodes{'
-             'number lastEditedAt timelineItems(itemTypes:[LABELED_EVENT],last:20){nodes{... on LabeledEvent{createdAt label{name}}}}}}}}')
-        req = urllib.request.Request('https://api.github.com/graphql', data=json.dumps({'query': q, 'variables': {'o': owner, 'n': name}}).encode(),
-                                     headers={**h, 'Content-Type': 'application/json', 'User-Agent': UA})
-        with opener.open(req, timeout=30) as r:
-            nodes = json.load(r)['data']['repository']['issues']['nodes']
-        trusted = set()
-        for nd in nodes:
-            val = max((e['createdAt'] for e in nd['timelineItems']['nodes'] if e and e['label']['name'] == 'valide'), default=None)
-            if val and (not nd['lastEditedAt'] or nd['lastEditedAt'] <= val):
-                trusted.add(nd['number'])
         out = {}
-        for it in issues:
-            if it['number'] not in trusted:
-                print(f"  taxe #{it['number']} modifiée après validation : ignorée (re-valider en retirant puis remettant « valide »)")
-                continue
-            fields, cur = {}, None
-            for line in (it.get('body') or '').splitlines():
-                m = re.match(r'^###\s+(.*)$', line)
-                if m:
-                    cur = m.group(1).strip().lower()
-                    fields[cur] = ''
-                elif cur is not None and line.strip() and line.strip() != '_No response_':
-                    fields[cur] = (fields[cur] + ' ' + line.strip()).strip()
-            icao = (fields.get('code oaci') or '').upper().strip()
-            if not re.fullmatch(r'[A-Z]{4}', icao) or not fields.get('tarif'):
+        for it, icao, fields in club_issues('taxe'):
+            if not fields.get('tarif'):
                 continue
             out[icao] = {'tarif': fields['tarif'][:60], 'note': (fields.get('remarque') or '')[:160],
                          'maj': (fields.get('date du constat') or it['created_at'][:7])[:10],
@@ -979,6 +1065,20 @@ def collect_fees():
     except Exception as e:  # noqa: BLE001
         print('fees :', e)
         fallback('fees_club.json')
+
+
+def collect_pratique():
+    """Infos pratiques proposées par les membres : taxis, transports, restaurants… (issues « pratique » validées)."""
+    try:
+        out = {}
+        for it, icao, fields in club_issues('pratique'):
+            txt = (fields.get('informations') or '').strip()
+            if txt:
+                out.setdefault(icao, []).append({'txt': txt[:600], 'maj': it['created_at'][:10], 'ref': it['number']})
+        save('pratique_club.json', {'generated': NOW.isoformat(), 'aerodromes': out})
+    except Exception as e:  # noqa: BLE001
+        print('pratique :', e)
+        fallback('pratique_club.json')
 
 
 def write_status():
@@ -999,7 +1099,7 @@ def write_status():
 
 
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees', 'vigilance']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees', 'pratique', 'vigilance']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -1012,10 +1112,15 @@ if __name__ == '__main__':
         collect_cams()
     if 'fees' in what:
         collect_fees()
+    if 'pratique' in what:
+        collect_pratique()
     if 'vigilance' in what:
         collect_vigilance()
     if os.path.exists(os.path.join(OUT, 'vac.json')):   # extrait léger pour la carte (carburant, paiement) : 700 ko -> quelques dizaines
         vac = json.load(open(os.path.join(OUT, 'vac.json'), encoding='utf-8'))
+        if 'osm' in what or not sys.argv[1:]:
+            collect_osm(vac.get('cycle'))
+        osm = json.load(open(os.path.join(OUT, 'osm_near.json'), encoding='utf-8')).get('data', {}) if os.path.exists(os.path.join(OUT, 'osm_near.json')) else {}
         # points de report VFR du cycle en cours, lus dans les VAC ; terrain sans tableau dans sa VAC : ancien export SIA
         old = json.load(open(os.path.join(ROOT, 'data', 'vfr_points.json'), encoding='utf-8'))
         pts = {k: v['vfrpts'] for k, v in (vac.get('data') or {}).items() if v.get('vfrpts')}
@@ -1024,5 +1129,5 @@ if __name__ == '__main__':
             save('vfr_points.json', {'source': f"SIA - VAC du cycle {vac.get('cycle')} (+ export XML SIA du {old.get('effDate')} pour {len(kept)} terrains)",
                                      'effDate': vac.get('cycle'), 'data': {**kept, **pts}})
         save('escale.json', {'generated': vac.get('generated'), 'cycle': vac.get('cycle'),
-                             'data': {k: {'escale': {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or []}} for k, v in (vac.get('data') or {}).items()}})
+                             'data': {k: {'escale': {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or [], 'pratique': vie_pratique(v), 'osm': osm.get(k, {})}} for k, v in (vac.get('data') or {}).items()}})
     write_status()

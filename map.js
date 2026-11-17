@@ -582,6 +582,7 @@
       ${t ? `<h4>TAF</h4><pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre>` : ''}
       ${!m ? nearestMetarHtml(a) : ''}
       ${escaleHtml(icao)}
+      ${pratiqueHtml(icao, a)}
       ${notamAdHtml(icao)}
       ${supNearHtml(a)}
       <h4>Liens météo</h4>
@@ -601,6 +602,7 @@
     detailBody.querySelectorAll('[data-other]').forEach((b) => b.addEventListener('click', () => { const s = others[+b.dataset.other].s; openWin(s.u, s.w, s.h); }));
     detailBody.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showAerodrome(b.dataset.goto)));
     bindEscale(detailBody, icao);
+    bindPratique(detailBody, icao, a);
     $('#fav-star').addEventListener('click', () => { const f = favs(); store.set('favs', f.includes(icao) ? f.filter((x) => x !== icao) : [...f, icao]); drawFavs(); showAerodrome(icao, false); });
     bindDocLinks(detailBody);
     detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">✂️ Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
@@ -816,6 +818,7 @@
     try { VACD = (await getLive('escale.json').catch(() => getLive('vac.json'))).data || {}; } catch (e) { console.warn('vac', e); drawAerodromes(); throw e; }
     try { const r = await fetch('data/fees.json', { cache: 'no-store' }); FEES = (await r.json()).aerodromes || {}; } catch (e) { console.warn('fees', e); }
     try { const club = (await getLive('fees_club.json')).aerodromes || {}; FEES = { ...FEES, ...club }; } catch (e) { /* pas encore de tarif partagé */ }
+    try { PRAT = (await getLive('pratique_club.json')).aerodromes || {}; } catch (e) { /* pas encore d'info partagée */ }
     drawAerodromes();
   }
   function escaleHtml(icao) {
@@ -846,6 +849,48 @@
         ${e && e.site ? `<button class="btn" data-ext="${esc(/^https?:/.test(e.site) ? e.site : 'https://' + e.site)}">Site de l'aérodrome</button>` : ''}
       </div>`;
   }
+  // ---------- Vie pratique : VAC (transports, hôtels), infos du club, notes perso, liens et OpenStreetMap autour du terrain ----------
+  let PRAT = {};
+  function pratiqueHtml(icao, a) {
+    const e = escaleOf(icao) || {}, p = e.pratique || {}, ville = p.ville || a.name.split(/[ -]/)[0];
+    let note = ''; try { note = localStorage.getItem('aww.prat.' + icao) || ''; } catch { /* ignore */ }
+    const enc = encodeURIComponent, pj = (q) => `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${enc(q)}&ou=${enc(ville)}`;
+    const links = [
+      ['🚕 Taxis', pj('taxi')], ['🚗 Location de voiture', pj('location de voitures')],
+      ['🚆 Bus / train vers ' + ville, `https://www.google.com/maps/dir/?api=1&origin=${a.la},${a.lo}&destination=${enc(ville)}&travelmode=transit`],
+      ['🏨 Hébergement', `https://www.google.com/maps/search/h%C3%B4tel/@${a.la},${a.lo},13z`], ['🍽️ Restaurants', `https://www.google.com/maps/search/restaurant/@${a.la},${a.lo},14z`],
+    ];
+    const vac = [['📍 Situation', p.situation], ['🚌 Transports', p.transports], ['🍽️ Hôtels, restaurants', p.hotels], ['ℹ️ Divers', p.divers]].filter((x) => x[1]);
+    return `<details class="pratique"><summary>🧳 Vie pratique : taxis, transports, restos</summary>
+      ${vac.length ? `<dl class="decoded">${vac.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl><p class="meta small-print">D'après la VAC.</p>` : ''}
+      ${(PRAT[icao] || []).map((x) => `<div class="okk">👥 ${esc(x.txt)} <span class="meta">(club, ${esc(x.maj)})</span></div>`).join('')}
+      <div class="row">${links.map(([l, u]) => `<button class="btn" data-ext="${esc(u)}">${esc(l)}</button>`).join('')}</div>
+      ${osmHtml(a, e.osm || {})}
+      <h4>Mes contacts pour ce terrain</h4>
+      <textarea id="prat-note" rows="3" placeholder="Taxi : 06 … · Code portail … · Restaurant …">${esc(note)}</textarea>
+      <div class="row"><button class="btn" id="prat-save">💾 Enregistrer sur cet appareil</button>${CFG.repo ? '<button class="btn" id="prat-share">📤 Proposer au club</button>' : ''}</div>
+    </details>`;
+  }
+  // taxis, gares, loueurs collectés une fois par cycle dans OpenStreetMap (les serveurs publics sont trop lents pour une requête en direct)
+  function osmHtml(a, o) {
+    const T = [['taxi', '🚕 Stations de taxi'], ['gare', '🚆 Gares'], ['loc', '🚗 Location de voiture'], ['velo', '🚲 Vélos en libre-service']];
+    const html = T.filter(([k]) => (o[k] || []).length).map(([k, title]) => `<p class="osm-cat">${title}</p><ul class="osm">${o[k].map((x) =>
+      `<li><b>${esc(x.n || (k === 'taxi' ? 'Station de taxi' : 'Sans nom'))}</b> · ${x.d < 1 ? Math.round(x.d * 1000) + ' m' : x.d + ' km'}${x.tel ? ` · <a href="tel:${esc(x.tel.replace(/[^+\d]/g, ''))}">📞 ${esc(x.tel)}</a>` : ''}${x.web ? ` · <a class="lnk" data-ext="${esc(/^https?:/.test(x.web) ? x.web : 'https://' + x.web)}">site</a>` : ''}
+        · <a class="lnk" data-ext="https://www.google.com/maps/dir/?api=1&origin=${a.la},${a.lo}&destination=${x.la},${x.lo}">itinéraire</a></li>`).join('')}</ul>`).join('');
+    return `<h4>Autour du terrain</h4>${html || '<p class="meta">Rien de référencé à proximité dans OpenStreetMap.</p>'}<p class="meta small-print">© contributeurs OpenStreetMap — données libres, parfois incomplètes.</p>`;
+  }
+  function bindPratique(el, icao, a) {
+    const save = el.querySelector('#prat-save');
+    if (save) save.addEventListener('click', () => {
+      try { const v = el.querySelector('#prat-note').value.trim(); if (v) localStorage.setItem('aww.prat.' + icao, v); else localStorage.removeItem('aww.prat.' + icao); save.textContent = '✅ Enregistré'; } catch { /* ignore */ }
+    });
+    const share = el.querySelector('#prat-share');
+    if (share) share.addEventListener('click', () => {
+      const q = new URLSearchParams({ template: 'vie-pratique.yml', title: `Infos pratiques ${icao}`, icao, infos: el.querySelector('#prat-note').value.trim() });
+      openWin(`https://github.com/${CFG.repo}/issues/new?${q}`, 1100, 0);
+    });
+  }
+
   // ---------- PPR / stationnement : contacts relevés dans la VAC + demande pré-remplie ----------
   function pprHtml(icao, e) {
     if (!e) return '';

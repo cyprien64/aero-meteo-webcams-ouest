@@ -920,7 +920,7 @@ def collect_osm(cycle):
     els = None
     for ep in ('https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter') * 2:   # serveurs publics souvent chargés
         try:
-            els = json.loads(get(ep, {'data': q}, timeout=240))['elements']
+            els = json.loads(get(ep, {'data': q}, timeout=240, headers={'User-Agent': 'aero-meteo-webcams-ouest (carte de club, GitHub Pages)'}))['elements']
             break
         except Exception as e:  # noqa: BLE001
             print('  ', ep, e)

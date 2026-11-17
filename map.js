@@ -189,7 +189,7 @@
 
   // ---------- Couches de points (webcams, observations, balises) ----------
   // Regroupement des points en vue large : pastilles numérotées qui s'ouvrent quand on zoome (dès le zoom 9 tout est détaillé)
-  const KIND = { '📷': 'webcam', '✈️': 'terrain', '🚩': 'observation', '💨': 'balise vent' };
+  const KIND = { '📷': 'webcam', '✈️': 'terrain', '🚩': 'observation', '💨': 'balise vent', '📄': 'SUP AIP' };
   const ptsCluster = L.markerClusterGroup({
     disableClusteringAtZoom: 9, maxClusterRadius: 46, showCoverageOnHover: false, spiderfyOnMaxZoom: false, chunkedLoading: true,
     iconCreateFunction: (c) => {
@@ -204,7 +204,7 @@
   const layers = {
     metar: L.layerGroup(), apt: sub(), camAero: sub(), cam: sub(),
     obs: sub(), wind: sub(), radar: L.layerGroup(), vig: L.layerGroup(), foudre: L.layerGroup(),
-    notam: L.layerGroup(), supaip: L.layerGroup(),
+    notam: L.layerGroup(), supaip: sub(),
     asp: L.layerGroup(), siv: L.layerGroup(), zones: L.layerGroup(), rtba: L.layerGroup(), vfr: L.layerGroup(),
   };
   let AIR = null, airLoading = null;   // calques espaces aériens (chargés à la demande)

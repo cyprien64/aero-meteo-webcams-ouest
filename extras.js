@@ -238,6 +238,19 @@
     b.title = `Arrivée prévue ${hm(eta)}`;
   };
 
+  // ================================================================ Accueil : salutation, date, soleil au premier terrain favori
+  function hello() {
+    const el = $('#hello'); if (!el) return;
+    const n = new Date(), h = n.getHours();
+    const icao = (A.store.get('favs', ['LFBP'])[0]) || 'LFBP', a = A.aptByIcao[icao];
+    const s = a && A.sunTimes(n, a.la, a.lo), m = A.metars[icao];
+    el.innerHTML = `<b>${h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi'} 👋</b>
+      <span>${n.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+      ${s ? `<span>☀️ ${hm(s.rise)} – ${hm(s.set)} à ${esc(icao)} · nuit aéro ${hm(new Date(+s.set + 30 * 6e4))}</span>` : ''}
+      ${m ? `<span><i class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</i> ${m.wdir != null ? `vent ${m.wdir === 'VRB' ? 'variable' : String(m.wdir).padStart(3, '0') + '°'} ${m.wspd} kt${m.wgst ? ' rafales ' + m.wgst : ''}` : ''}</span>` : ''}`;
+  }
+  hello(); setInterval(hello, 60e3); setTimeout(hello, 3000);
+
   // ================================================================ 🧹 Effacer les tracés
   $('#btn-clear').addEventListener('click', () => {
     ms.pts = []; ms.res = null; draw(); if (ms.on) setMeasure(false);
@@ -247,7 +260,7 @@
 
   // ================================================================ Affichages préréglés
   const PRESETS = {
-    meteo: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 1, vig: 1, foudre: 1, notam: 0, supaip: 0, asp: 0, siv: 0, zones: 0, rtba: 0, vfr: 0 },
+    meteo: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 0, vig: 1, foudre: 0, notam: 0, supaip: 0, asp: 0, siv: 0, zones: 0, rtba: 1, vfr: 0 },   // = affichage d'arrivée
     nav: { metar: 1, apt: 1, camAero: 0, cam: 0, obs: 0, wind: 0, radar: 0, vig: 0, foudre: 0, notam: 1, supaip: 1, asp: 1, siv: 0, zones: 1, rtba: 1, vfr: 1 },
     all: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 0, vig: 1, foudre: 1, notam: 1, supaip: 1, asp: 1, siv: 1, zones: 1, rtba: 1, vfr: 1 },
   };

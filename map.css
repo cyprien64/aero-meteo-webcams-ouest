@@ -344,3 +344,52 @@ table.rwy-w tr.best td { color: #a6e36b; font-weight: 700; }
 .nbadge.nnew { background: #ffd60a !important; color: #1a1200 !important; box-shadow: 0 0 0 2px #ff8a00; }
 .sw-vig { background: linear-gradient(90deg, #ffd60a 50%, #ff8a00 50%) !important; border-radius: 3px; }
 .sw-foudre { background: #c77dff !important; border-radius: 3px; }
+
+/* =====================================================================
+   v3 — interface plus accueillante : plus d'air, contrastes doux, commandes plus lisibles
+   ===================================================================== */
+:root { --panel: #0f2237; --card: rgba(255,255,255,.05); --card-h: rgba(255,255,255,.09); --line2: rgba(255,255,255,.09); --radius: 18px; }
+#panel { width: 340px; border-radius: var(--radius); background: linear-gradient(180deg, #13304d 0, #0f2237 160px); border-color: rgba(255,255,255,.08); }
+#panel .brand { background: none; border-bottom: none; padding: 16px 16px 6px; }
+#panel h1 { font-size: 17px; letter-spacing: 0; }
+#panel .sub { font-size: 12px; white-space: nowrap; }
+#panel-body { padding: 6px 16px 16px; }
+.leaflet-top.leaflet-left { left: 364px; }
+
+/* Carte d'accueil */
+.hello { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 12px; padding: 12px 14px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(73,168,255,.22), rgba(73,168,255,.06)); border: 1px solid rgba(73,168,255,.25); font-size: 12.5px; color: #dbe9f7; }
+.hello b { font-size: 16px; color: #fff; } .hello span:first-of-type::first-letter { text-transform: uppercase; }
+.hello .cat { font-style: normal; font-weight: 800; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; color: #10263d; margin-right: 3px; }
+
+/* Bouton principal et outils */
+.prep-btn { border-radius: 14px; padding: 13px 16px; font-size: 15px; margin: 0 0 10px; flex-direction: row; align-items: center; justify-content: space-between; }
+.prep-btn small { font-size: 11px; font-weight: 600; }
+.btn.wide { border-radius: 12px; padding: 9px; }
+.tool-row .btn { border-radius: 12px; padding: 9px 6px; background: var(--card); }
+.presets { background: rgba(0,0,0,.22); padding: 4px; border-radius: 13px; gap: 4px; }
+.presets button { border: none; background: transparent; border-radius: 10px; padding: 8px 4px; color: #b9cde0; }
+.presets button:hover { background: rgba(255,255,255,.06); color: #fff; }
+.presets button.on { background: #fff; color: #0f2237; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.favs button { border-radius: 99px; padding: 5px 10px; }
+input[type=search] { border-radius: 12px; padding: 10px 12px; font-size: 13.5px; background: rgba(0,0,0,.25); border-color: transparent; }
+
+/* Rubriques : titres plus lisibles, interrupteurs à la place des cases */
+details.sec { border-radius: 14px; background: var(--card); border-color: transparent; padding: 2px 12px 10px; margin-top: 8px; }
+details.sec > summary { font-size: 13.5px; letter-spacing: 0; padding: 11px 0 8px; }
+details.sec label { padding: 5px 2px; font-size: 13px; }
+input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 99px; background: rgba(255,255,255,.18);
+  position: relative; cursor: pointer; flex: none; margin: 0 2px 0 0; transition: background .15s; }
+input[type=checkbox]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+input[type=checkbox]:checked { background: #3d9cff; }
+input[type=checkbox]:checked::after { transform: translateX(12px); }
+input[type=checkbox]:focus-visible { outline: 2px solid #ffb703; outline-offset: 2px; }
+
+/* Carte : regroupements plus discrets */
+.clu b { background: rgba(16, 38, 61, .88); color: #fff; border: 2px solid rgba(255,255,255,.75); box-shadow: 0 2px 8px rgba(0,0,0,.35); font-size: 12px; }
+.leaflet-tooltip.tip { border-radius: 12px; padding: 9px 11px; }
+#detail { border-radius: var(--radius); background: #0f2237; padding: 18px 20px; }
+#detail h4 { color: #ffc23d; }
+#clock { border-color: rgba(255,255,255,.12); }
+@media (max-width: 700px) { #panel { width: calc(100% - 24px); } .leaflet-top.leaflet-left { left: 0; } }
+#panel .brand-txt { min-width: 0; flex: 1; } #panel .sub { overflow: hidden; text-overflow: ellipsis; }

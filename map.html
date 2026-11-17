@@ -25,13 +25,14 @@
       <div class="logo"><img src="icons/icon48.png" alt="" width="30" height="30"></div>
       <div class="brand-txt">
         <h1>Aéro Météo Webcams</h1>
-        <p class="sub">Pyrénées · Atlantique · Bretagne</p>
+        <p class="sub">Pyrénées → Bretagne · préparation des vols</p>
       </div>
       <button id="btn-tour" class="icon-btn" title="Visite guidée : à quoi servent les boutons">?</button>
       <button id="collapse" class="icon-btn" title="Réduire / agrandir le panneau">–</button>
     </header>
 
     <div id="panel-body">
+      <div id="hello" class="hello"></div>
       <button id="btn-prep" class="prep-btn">✈️ Préparer un vol <small>briefing PDF · log Excel</small></button>
       <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
       <button id="btn-hist" class="btn ghost wide">📚 Historique des préparations</button>
@@ -59,7 +60,7 @@
         <label><input type="checkbox" data-layer="obs" checked> <span class="sw sw-obs"></span> Observations Météociel</label>
         <label><input type="checkbox" data-layer="wind" checked> <span class="sw sw-wind"></span> Balises vent (PiouPiou, FFVL)</label>
         <label><input type="checkbox" data-layer="radar"> <span class="sw sw-radar"></span> Radar pluie animé</label>
-        <label><input type="checkbox" data-layer="vig"> <span class="sw sw-vig"></span> Vigilance Météo-France (départements)</label>
+        <label><input type="checkbox" data-layer="vig" checked> <span class="sw sw-vig"></span> Vigilance Météo-France (départements)</label>
         <label><input type="checkbox" data-layer="foudre"> <span class="sw sw-foudre"></span> Éclairs détectés (satellite, 5 min)</label>
         <div id="radar-ctrl" hidden>
           <button id="radar-play" class="small">⏸</button>
@@ -69,7 +70,7 @@
 
       <details class="sec" open>
         <summary>⚠️ NOTAM &amp; SUP AIP</summary>
-        <label><input type="checkbox" data-layer="notam" checked> <span class="sw sw-notam"></span> NOTAM en route (24 h, ou pendant ton vol)</label>
+        <label><input type="checkbox" data-layer="notam"> <span class="sw sw-notam"></span> NOTAM en route (24 h, ou pendant ton vol)</label>
         <div class="sub-opts">
           <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
           <label>Plancher ≤ <select id="notam-fl" class="inline">
@@ -83,7 +84,7 @@
           <button id="notam-win-clear" class="small" type="button">Toute la journée</button>
           <p id="notam-win-info" class="hint"></p>
         </div>
-        <label><input type="checkbox" data-layer="supaip" checked> <span class="sw sw-sup"></span> SUP AIP localisés</label>
+        <label><input type="checkbox" data-layer="supaip"> <span class="sw sw-sup"></span> SUP AIP localisés</label>
         <div class="tools">
           <button id="btn-notam-list">⚠️ Liste NOTAM</button>
           <button id="btn-sup-list">📄 Liste SUP AIP</button>

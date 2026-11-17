@@ -605,11 +605,12 @@
   {
     const p = tafPlain('TAF LFBP 171100Z 1712/1812 24010KT 9999 SCT030 BECMG 1714/1716 27015G25KT TEMPO 1718/1722 4000 SHRA BKN012CB PROB30 TEMPO 1800/1806 0800 FG=');
     console.assert(p.length === 4 && p[0].k === 'Valable du 17 à 12 h au 18 à 12 h (heures UTC)' && p[0].v.join('|') === 'vent 240° 10 kt|visibilité ≥ 10 km|nuages épars à 3000 ft', 'tafPlain base', p[0]);
+    console.assert(!tafPlain('TAF LFXX 171100Z NIL=').length, 'tafPlain NIL -> TAF brut affiché');
     console.assert(p[1].k === 'Évolution progressive le 17 de 14 h à 16 h' && p[1].v[0] === 'vent 270° 15 kt rafales 25 kt', 'tafPlain becmg', p[1]);
     console.assert(p[2].v.join('|') === 'visibilité 4 km|averses pluie|nuages fragmentés à 1200 ft (cumulonimbus)', 'tafPlain tempo', p[2]);
     console.assert(p[3] && p[3].k === 'Probabilité 30 %, temporairement le 18 de 0 h à 6 h' && p[3].v.join('|') === 'visibilité 800 m|brouillard', 'tafPlain prob', p[3]);
   }
-  const tafHtml = (raw) => `<ul class="taf-plain">${tafPlain(raw).map((g) => `<li><b>${esc(g.k)}</b>${g.v.length ? ' : ' + esc(g.v.join(', ')) : ''}</li>`).join('')}</ul>`;
+  const tafHtml = (raw) => { const p = tafPlain(raw); return p.length ? `<ul class="taf-plain">${p.map((g) => `<li><b>${esc(g.k)}</b>${g.v.length ? ' : ' + esc(g.v.join(', ')) : ''}</li>`).join('')}</ul>` : `<p class="taf-plain">${esc(raw)}</p>`; };
 
   function showAerodrome(icao, fly = true) {
     const a = aptByIcao[icao]; if (!a) return;

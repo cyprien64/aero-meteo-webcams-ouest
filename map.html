@@ -44,6 +44,7 @@
         <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
         <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
       </div>
+      <div class="favs" id="favs" title="Terrains favoris : ★ dans la fiche d'un terrain pour en ajouter"></div>
       <div class="search-wrap">
         <input id="search" type="search" placeholder="Rechercher : LFRN, Quiberon, Pic du Midi…" autocomplete="off">
       </div>
@@ -58,6 +59,8 @@
         <label><input type="checkbox" data-layer="obs" checked> <span class="sw sw-obs"></span> Observations Météociel</label>
         <label><input type="checkbox" data-layer="wind" checked> <span class="sw sw-wind"></span> Balises vent (PiouPiou, FFVL)</label>
         <label><input type="checkbox" data-layer="radar"> <span class="sw sw-radar"></span> Radar pluie animé</label>
+        <label><input type="checkbox" data-layer="vig"> <span class="sw sw-vig"></span> Vigilance Météo-France (départements)</label>
+        <label><input type="checkbox" data-layer="foudre"> <span class="sw sw-foudre"></span> Éclairs détectés (satellite, 5 min)</label>
         <div id="radar-ctrl" hidden>
           <button id="radar-play" class="small">⏸</button>
           <span id="radar-time">--:--</span>

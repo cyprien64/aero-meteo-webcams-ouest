@@ -259,9 +259,9 @@
 
   // ================================================================ Affichages préréglés
   const PRESETS = {
-    meteo: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 1, notam: 0, supaip: 0, asp: 0, siv: 0, zones: 0, rtba: 0, vfr: 0 },
-    nav: { metar: 1, apt: 1, camAero: 0, cam: 0, obs: 0, wind: 0, radar: 0, notam: 1, supaip: 1, asp: 1, siv: 0, zones: 1, rtba: 1, vfr: 1 },
-    all: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 0, notam: 1, supaip: 1, asp: 1, siv: 1, zones: 1, rtba: 1, vfr: 1 },
+    meteo: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 1, vig: 1, foudre: 1, notam: 0, supaip: 0, asp: 0, siv: 0, zones: 0, rtba: 0, vfr: 0 },
+    nav: { metar: 1, apt: 1, camAero: 0, cam: 0, obs: 0, wind: 0, radar: 0, vig: 0, foudre: 0, notam: 1, supaip: 1, asp: 1, siv: 0, zones: 1, rtba: 1, vfr: 1 },
+    all: { metar: 1, apt: 1, camAero: 1, cam: 1, obs: 1, wind: 1, radar: 0, vig: 1, foudre: 1, notam: 1, supaip: 1, asp: 1, siv: 1, zones: 1, rtba: 1, vfr: 1 },
   };
   const cbs = () => [...document.querySelectorAll('input[data-layer]')];
   function markPreset() {

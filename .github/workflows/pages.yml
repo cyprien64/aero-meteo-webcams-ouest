@@ -43,6 +43,15 @@ jobs:
 
       - id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true   # raté passager de GitHub : nouvel essai ci-dessous
+
+      - name: Nouvel essai de mise en ligne (après 30 s)
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+
+      - id: deployment2
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
 
       # Échoue si NOTAM / METAR ne se mettent plus à jour -> GitHub envoie un e-mail d'échec
       - name: Contrôle de fraîcheur des données

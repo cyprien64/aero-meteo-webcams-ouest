@@ -203,7 +203,7 @@
   const sub = () => L.featureGroup.subGroup(ptsCluster);
   const layers = {
     metar: L.layerGroup(), apt: sub(), camAero: sub(), cam: sub(),
-    obs: sub(), wind: sub(), radar: L.layerGroup(),
+    obs: sub(), wind: sub(), radar: L.layerGroup(), vig: L.layerGroup(), foudre: L.layerGroup(),
     notam: L.layerGroup(), supaip: L.layerGroup(),
     asp: L.layerGroup(), siv: L.layerGroup(), zones: L.layerGroup(), rtba: L.layerGroup(), vfr: L.layerGroup(),
   };
@@ -243,8 +243,8 @@
 
   function aptIcon(a) {
     const m = metars[a.icao];
-    const nN = (NOTAM.ad[a.icao] || []).length;
-    const badge = nN ? `<b class="nbadge" title="${nN} NOTAM">${nN}</b>` : '';
+    const nN = (NOTAM.ad[a.icao] || []).length, nNew = (NOTAM.ad[a.icao] || []).filter((n) => n.isNew).length;
+    const badge = nN ? `<b class="nbadge${nNew ? ' nnew' : ''}" title="${nN} NOTAM${nNew ? ` dont ${nNew} nouveau(x)` : ''}">${nN}</b>` : '';
     const lbl = `<span class="apt-label" style="position:absolute;left:${m ? 16 : 9}px;top:-7px">${a.icao}${badge}<small>${esc(a.name)}</small></span>`;
     if (m) {
       const cat = m.fltCat || 'UNK';
@@ -275,7 +275,7 @@
         .bindTooltip(aptTip(a), { className: 'tip', direction: 'top', offset: [0, -12] }), `✈️ ${a.icao} ${a.name}`, () => showAerodrome(a.icao)).addTo(layers.metar);
       searchIndex.push({ label: `${a.icao} ${a.name}`, sub: 'Aérodrome', lat: a.la, lon: a.lo, action: () => showAerodrome(a.icao) });
     }
-    drawHalos();
+    drawHalos(); drawFavs();
   }
   for (const a of APTS) searchIndex.push({ label: `${a.icao} ${a.name}`, sub: 'Aérodrome', lat: a.la, lon: a.lo, action: () => showAerodrome(a.icao) });
 
@@ -294,7 +294,7 @@
   // rafraîchis automatiquement par la GitHub Action (les API officielles bloquent le CORS).
   const IS_EXT = !!(window.chrome && chrome.runtime && chrome.runtime.id);
   const CFG = window.AWW_CONFIG || {};
-  const STATIC_LIVE = ['zones.json', 'airspaces.json', 'vac.json', 'escale.json', 'cams_status.json'];
+  const STATIC_LIVE = ['zones.json', 'airspaces.json', 'vac.json', 'escale.json', 'cams_status.json', 'vfr_points.json'];
   async function getLive(name) {
     const bases = IS_EXT && CFG.liveUrl ? [CFG.liveUrl.replace(/\/$/, '') + '/', ''] : [''];
     let last;
@@ -459,6 +459,43 @@
     radarLoop(map.hasLayer(layers.radar));
   });
 
+  // ---------- Vigilance Météo-France (flux MeteoAlarm, collecté avec le reste) et éclairs (satellite MTG, EUMETSAT) ----------
+  let VIG = null;
+  const VIG_COL = ['', '#ffd60a', '#ff8a00', '#e3001b'], VIG_TXT = ['', 'jaune', 'orange', 'rouge'];
+  const normDep = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[-'’]/g, ' ');
+  const DEPS = (window.BASEMAP && window.BASEMAP.features || []).filter((f) => f.properties.k === 'dep');
+  const vigOf = (name, a = Date.now(), b = a) => ((VIG && VIG.byNorm[normDep(name)]) || []).filter((w) => Date.parse(w.from) <= b && Date.parse(w.to) >= a);
+  async function loadVig() {
+    const d = await getLive('vigilance.json');
+    VIG = { ...d, byNorm: Object.fromEntries(Object.entries(d.deps || {}).map(([k, v]) => [normDep(k), v])) };
+    if (map.hasLayer(layers.vig)) drawVig();
+  }
+  function drawVig() {
+    layers.vig.clearLayers();
+    if (!VIG) return;
+    for (const f of DEPS) {
+      const w = vigOf(f.properties.n, Date.now(), Date.now() + 24 * 3600e3);
+      if (!w.length) continue;
+      const lvl = Math.max(...w.map((x) => x.lvl));
+      const hm = (s) => new Date(s).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      L.geoJSON(f, { smoothFactor: 2, style: { color: VIG_COL[lvl], weight: 2, fillColor: VIG_COL[lvl], fillOpacity: lvl > 1 ? .32 : .16 } })
+        .bindTooltip(`<b>${esc(f.properties.n)}</b> — vigilance ${VIG_TXT[lvl]}<br>${w.sort((x, y) => y.lvl - x.lvl).map((x) => `<span style="color:${VIG_COL[x.lvl]}">●</span> ${esc(x.ph)} (${VIG_TXT[x.lvl]}) : ${hm(x.from)} → ${hm(x.to)}`).join('<br>')}<br><span style="opacity:.7">Météo-France via MeteoAlarm — prochaines 24 h</span>`, { className: 'tip', sticky: true })
+        .addTo(layers.vig);
+    }
+  }
+  // Vigilance sur un point (pour la préparation de vol)
+  const inRing = (lo, la, ring) => { let c = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, yi] = ring[i], [xj, yj] = ring[j]; if ((yi > la) !== (yj > la) && lo < (xj - xi) * (la - yi) / (yj - yi) + xi) c = !c; } return c; };
+  function depAt(la, lo) {
+    return DEPS.find((f) => { const g = f.geometry, polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates; return polys.some((p) => inRing(lo, la, p[0])); });
+  }
+  let foudreLayer = null, foudreTimer = null;
+  function setFoudre(on) {
+    clearInterval(foudreTimer);
+    if (!on) { layers.foudre.clearLayers(); foudreLayer = null; return; }
+    if (!foudreLayer) foudreLayer = L.tileLayer.wms('https://view.eumetsat.int/geoserver/wms', { layers: 'mtg_fd:li_afa', format: 'image/png', transparent: true, version: '1.3.0', opacity: .9, attribution: 'Éclairs : EUMETSAT MTG Lightning Imager' }).addTo(layers.foudre);
+    foudreTimer = setInterval(() => foudreLayer.setParams({ _t: Date.now() }), 5 * 60 * 1000);   // dernière image toutes les 5 min
+  }
+
   // ---------- Gestion des calques ----------
   const layerState = store.get('layers', {});
   document.querySelectorAll('input[data-layer]').forEach((cb) => {
@@ -469,6 +506,8 @@
       drawHalos();
       if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers();
       layerState[k] = cb.checked; store.set('layers', layerState);
+      if (k === 'foudre') setFoudre(cb.checked);
+      if (k === 'vig' && cb.checked) drawVig();
       if (k === 'radar') {
         $('#radar-ctrl').hidden = !cb.checked;
         if (cb.checked && !radarFrames.length) loadRadar().then(() => radarLoop(true));
@@ -530,10 +569,10 @@
     ];
     if (fcstByIcao[icao]) links.unshift(['Prévisions Inter Aéro', fcstByIcao[icao].u, 1174, 984]);
     const html = `
-      <h3><span class="icao">${icao}</span> ${esc(a.name)}</h3>
+      <h3><span class="icao">${icao}</span> ${esc(a.name)} <button class="fav-star${favs().includes(icao) ? ' on' : ''}" id="fav-star" title="Ajouter / retirer des favoris">${favs().includes(icao) ? '★' : '☆'}</button></h3>
       <p class="meta">${lat} ${lon}${a.elev !== '' && a.elev != null ? ` · ${a.elev} ft` : ''}
         ${m ? ` · <span class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span>` : ''}</p>
-      ${m ? `<h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
+      ${m ? `<h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
       ${t ? `<h4>TAF</h4><pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre>` : ''}
       ${!m ? nearestMetarHtml(a) : ''}
       ${escaleHtml(icao)}
@@ -556,11 +595,35 @@
     detailBody.querySelectorAll('[data-other]').forEach((b) => b.addEventListener('click', () => { const s = others[+b.dataset.other].s; openWin(s.u, s.w, s.h); }));
     detailBody.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showAerodrome(b.dataset.goto)));
     bindEscale(detailBody, icao);
+    $('#fav-star').addEventListener('click', () => { const f = favs(); store.set('favs', f.includes(icao) ? f.filter((x) => x !== icao) : [...f, icao]); drawFavs(); showAerodrome(icao, false); });
     bindDocLinks(detailBody);
     detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">✂️ Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
     $('#ad-stack').addEventListener('click', () => showStack(a.la, a.lo, `Espaces au-dessus de ${icao}`));
     detail.hidden = false;
     if (fly) map.flyTo([a.la, a.lo], Math.max(map.getZoom(), 9), { duration: .6 });
+  }
+
+  // Vent dans l'axe de chaque piste (QFU de la VAC) : face / arrière et travers, rafales comprises
+  function rwyWindHtml(icao, m) {
+    const e = escaleOf(icao), q = ((e && e.qfu) || []).map(Number).filter((x) => x > 0);
+    if (!q.length || m.wdir == null) return '';
+    if (m.wdir === 'VRB' || !m.wspd) return `<p class="meta">Vent ${m.wdir === 'VRB' ? 'variable' : 'calme'} ${m.wspd || 0} kt : toutes les pistes.</p>`;
+    const rows = q.map((h) => {
+      const r = (m.wdir - h) * Math.PI / 180, hw = Math.round(m.wspd * Math.cos(r)), xw = Math.round(m.wspd * Math.sin(r));
+      const gx = m.wgst ? Math.abs(Math.round(m.wgst * Math.sin(r))) : null;
+      return { h, hw, xw, gx };
+    }).sort((x, y) => y.hw - x.hw);
+    return `<table class="rwy-w">${rows.map((x, i) => `<tr${i === 0 ? ' class="best"' : ''}><td>QFU ${String(x.h).padStart(3, '0')}</td><td>${x.hw >= 0 ? 'face' : '<b style="color:#ff6b6b">arrière</b>'} ${Math.abs(x.hw)} kt</td><td>travers ${Math.abs(x.xw)} kt ${x.xw ? (x.xw > 0 ? 'de droite' : 'de gauche') : ''}${x.gx ? ` (rafales ${x.gx})` : ''}</td></tr>`).join('')}</table>`;
+  }
+  // Terrains favoris : boutons en haut du panneau (catégorie de vol + vent)
+  const favs = () => store.get('favs', ['LFBP']);
+  function drawFavs() {
+    const el = $('#favs'); if (!el) return;
+    el.innerHTML = favs().map((i) => {
+      const m = metars[i];
+      return `<button data-fav="${i}" title="${esc((aptByIcao[i] || {}).name || '')}${m ? ' — ' + esc(m.rawOb) : ''}"><i class="dot c-${m ? m.fltCat || 'UNK' : 'NONE'}"></i>${i}${m && m.wdir != null ? `<small>${m.wdir === 'VRB' ? 'VRB' : String(m.wdir).padStart(3, '0')}/${m.wspd}${m.wgst ? 'G' + m.wgst : ''}</small>` : ''}</button>`;
+    }).join('') + '<span class="meta fav-hint">★ dans une fiche pour ajouter</span>';
+    el.querySelectorAll('[data-fav]').forEach((b) => b.addEventListener('click', () => { highlight((aptByIcao[b.dataset.fav] || {}).la, (aptByIcao[b.dataset.fav] || {}).lo, b.dataset.fav); showAerodrome(b.dataset.fav); }));
   }
 
   function nearestMetarHtml(a) {
@@ -682,11 +745,27 @@
     if (/^[NIGCL]/.test(c)) return '#64d2ff';        // radionav, communications, balisage
     return '#e5e5ea';
   }
+  // NOTAM apparus depuis la visite précédente : vus pour la première fois sur cet appareil pendant la visite en cours
+  const SESSION_START = (() => {
+    try { let s = sessionStorage.getItem('awwSession'); if (!s) { s = String(Date.now()); sessionStorage.setItem('awwSession', s); } return +s; } catch { return Date.now(); }
+  })();
+  let newCount = 0;
+  function markNewNotams() {
+    const seen = store.get('notamSeen', {}), now = Date.now(), first = !Object.keys(seen).length, cur = {};
+    const all = [...NOTAM.fir, ...Object.values(NOTAM.ad).flat()];
+    newCount = 0;
+    for (const n of all) {
+      cur[n.ref] = seen[n.ref] || (first ? 1 : now);
+      n.isNew = cur[n.ref] >= SESSION_START;   // 1re visite : tout est marqué « déjà vu » (1)
+    }
+    newCount = Object.values(cur).filter((ts) => ts >= SESSION_START).length;   // un NOTAM peut figurer en route et sur un terrain
+    store.set('notamSeen', cur);   // les NOTAM disparus sont oubliés
+  }
   function notamHtml(n, withA = false) {
     const txt = n.efr || n.e || '';
     const act = isActive(n);
     return `<div class="notam${act ? '' : ' future'}" style="border-left-color:${notamColor(n.q)}">
-      <div class="nh"><b>${esc(n.ref)}</b>${withA && n.a ? ` · ${esc(n.a)}` : ''} · Q ${esc(n.q || '')}
+      <div class="nh">${n.isNew ? '<i class="new">NOUVEAU</i> ' : ''}<b>${esc(n.ref)}</b>${withA && n.a ? ` · ${esc(n.a)}` : ''} · Q ${esc(n.q || '')}
         <span>${act ? '<i class="on">ACTIF</i>' : '<i>à venir</i>'}</span></div>
       <div class="nv">${fmtT(n.from)} → ${fmtT(n.to)} · ${fl(n.lower)} – ${fl(n.upper)}${n.d ? ` · ${esc(n.d)}` : ''}</div>
       <pre>${esc(txt)}</pre></div>`;
@@ -754,13 +833,54 @@
         <button class="btn" id="fee-save">Enregistrer la taxe</button>
       </div>
       ${(window.AWW_CONFIG || {}).repo ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">📤 Proposer ce tarif au club</button><span class="meta" style="flex:1">publié après validation · compte GitHub requis</span></div>` : ''}
+      ${pprHtml(icao, e)}
       <div class="row" style="margin-top:4px">
         <button class="btn" data-ext="https://airfield.directory/airfield/${icao}">Tarifs (airfield.directory)</button>
         <button class="btn" data-ext="https://www.aerops.com/fr/airports-1/fee-info/${icao}/">Tarifs (aeroPS)</button>
         ${e && e.site ? `<button class="btn" data-ext="${esc(/^https?:/.test(e.site) ? e.site : 'https://' + e.site)}">Site de l'aérodrome</button>` : ''}
       </div>`;
   }
+  // ---------- PPR / stationnement : contacts relevés dans la VAC + demande pré-remplie ----------
+  function pprHtml(icao, e) {
+    if (!e) return '';
+    const mails = e.mails || [], web = (e.web || []).map((u) => (/^https?:/.test(u) ? u : 'https://' + u));
+    const tels = [...new Set([...(e.tel_ad || []), ...(e.tel || [])])];
+    return `<h4>PPR / stationnement</h4>
+      ${(e.ppr || []).length ? `<ul class="ppr">${e.ppr.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '<p class="meta">Pas de consigne PPR relevée dans la VAC.</p>'}
+      ${e.exploitant ? `<p class="meta">Exploitant : ${esc(e.exploitant)}</p>` : ''}
+      <div class="row">
+        ${mails.map((m) => `<button class="btn" data-ppr-mail="${esc(m)}">✉️ ${esc(m)}</button>`).join('')}
+        ${tels.map((t) => `<a class="btn" href="tel:${esc(t.replace(/\s/g, ''))}">📞 ${esc(t)}</a>`).join('')}
+        ${web.map((u) => `<button class="btn" data-ext="${esc(u)}">🌐 ${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40))}</button>`).join('')}
+        <button class="btn" data-ppr-copy="1">📋 Copier une demande type</button>
+      </div>
+      <p class="meta small-print">Contacts recopiés automatiquement de la VAC (ils peuvent concerner la douane, le carburant ou l'exploitant) : choisir le bon interlocuteur et vérifier sur la VAC.</p>`;
+  }
+  function pprText(icao) {
+    const a = aptByIcao[icao] || { name: '' };
+    let f = {}; try { f = JSON.parse(localStorage.getItem('aww.prep2.form') || '{}'); } catch { /* ignore */ }
+    const st = (window.AWW_LASTTRIP || []).find((b) => b.f && b.f.arr === icao);
+    const fmt = (d) => d.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    const arr = st ? fmt(st.eta) : 'le … vers …h…';
+    const dep = st && st.trip && st.trip[st.stage] ? fmt(st.trip[st.stage].depT) : '…';
+    const reg = f.immat || f.reg || '…';
+    return {
+      subject: `Demande PPR / stationnement ${icao} — ${reg}`,
+      body: `Bonjour,\n\nJe souhaiterais me poser à ${a.name} (${icao}) ${st ? 'le ' + arr : arr} (heure locale), départ prévu ${dep}.\n`
+        + `Avion : ${reg}${f.reg && f.immat && f.immat !== f.reg ? ' (' + f.reg + ')' : ''}, aviation générale, vol privé VFR, avion léger.\n\n`
+        + `Pourriez-vous me confirmer l'accord (PPR si nécessaire) et une place de stationnement, ainsi que les conditions (taxe d'atterrissage, carburant, accès) ?\n\n`
+        + `Pilote : …\nTéléphone : …\n\nMerci par avance, cordialement.`,
+    };
+  }
   function bindEscale(el, icao) {
+    el.querySelectorAll('[data-ppr-mail]').forEach((b) => b.addEventListener('click', () => {
+      const t = pprText(icao);
+      location.href = `mailto:${b.dataset.pprMail}?subject=${encodeURIComponent(t.subject)}&body=${encodeURIComponent(t.body)}`;
+    }));
+    el.querySelectorAll('[data-ppr-copy]').forEach((b) => b.addEventListener('click', async () => {
+      const t = pprText(icao), txt = `${t.subject}\n\n${t.body}`;
+      try { await navigator.clipboard.writeText(txt); b.textContent = '✅ Demande copiée'; } catch { prompt('Copie ce texte :', txt); }
+    }));
     el.querySelectorAll('[data-ext]').forEach((b) => b.addEventListener('click', () => openWin(b.dataset.ext, 1200, 0)));
     const save = el.querySelector('#fee-save');
     if (save) save.addEventListener('click', () => {
@@ -816,7 +936,7 @@
       shown++;
       const isObst = (n.q || '')[0] === 'O';
       if (isObst && hideObst) continue;
-      const tip = `<b>NOTAM ${esc(n.ref)}</b> · ${fl(n.lower)}–${fl(n.upper)}<br>${fmtT(n.from)} → ${fmtT(n.to)}<br>${esc((n.efr || n.e || '').slice(0, 220))}${(n.efr || n.e || '').length > 220 ? '…' : ''}`;
+      const tip = `${n.isNew ? '🆕 ' : ''}<b>NOTAM ${esc(n.ref)}</b> · ${fl(n.lower)}–${fl(n.upper)}<br>${fmtT(n.from)} → ${fmtT(n.to)}<br>${esc((n.efr || n.e || '').slice(0, 220))}${(n.efr || n.e || '').length > 220 ? '…' : ''}`;
       const open = () => showList(`NOTAM ${n.ref}`, notamHtml(n, true));
       const act = w ? true : isActive(n);
       if (isObst || !n.r || n.r <= 1) {
@@ -870,7 +990,7 @@
     const byCat = (a, b) => (a.q || '').localeCompare(b.q || '');
     showList('NOTAM en route — FIR Brest & Bordeaux', `
       <p class="meta">${NOTAM.fir.length} NOTAM (${NOTAM.horizon || 24} h, SFC–FL195) · ${inView.length} dans la vue actuelle${w ? ' et actifs pendant ton vol' : ' et actifs dans les 24 h'} · collecte ${fmtT(NOTAM.generated)}.</p>
-      ${inView.sort(byCat).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">📍 voir</button></div>`).join('')}
+      ${inView.sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0) || byCat(a, b)).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">📍 voir</button></div>`).join('')}
       ${NOTAM.fir.some((n) => n.r > 30) ? `<p class="meta small-print">Les NOTAM de rayon &gt; 30 NM ne sont pas dessinés sur la carte mais figurent dans cette liste.</p>` : ''}
       ${noPos.length ? `<h4>Sans position (${noPos.length})</h4>${noPos.map((n) => notamHtml(n, true)).join('')}` : ''}
       <p class="meta small-print">Données SOFIA-Briefing (SIA/DGAC). Outil d'aide : faire un dossier de vol officiel sur SOFIA.</p>`);
@@ -880,9 +1000,10 @@
     const st = [];
     try {
       NOTAM = await getLive('notam.json');
+      markNewNotams();
       drawNotam(); drawAerodromes();
       const nAd = Object.values(NOTAM.ad).reduce((s, l) => s + l.length, 0);
-      st.push(`${NOTAM.fir.length + nAd} NOTAM`);
+      st.push(`${NOTAM.fir.length + nAd} NOTAM${newCount ? ` dont ${newCount} nouveaux depuis ta dernière visite` : ''}`);
     } catch (e) { console.warn('notam', e); st.push('NOTAM indisponibles'); }
     try {
       SUP = (await getLive('supaip.json')).data || [];
@@ -915,7 +1036,7 @@
       const [asp, zones, vfr] = await Promise.all([
         getLive('airspaces.json').catch(() => ({ data: [] })),
         getLive('zones.json').catch(() => ({ data: [] })),
-        fetch('data/vfr_points.json').then((r) => r.json()).catch(() => ({ data: {} })),
+        getLive('vfr_points.json').catch(() => fetch('data/vfr_points.json').then((r) => r.json())).catch(() => ({ data: {} })),
       ]);
       AIR = { asp: asp.data || [], zones: zones.data || [], vfr: vfr.data || {}, vfrDate: vfr.effDate };
       drawAirLayers();
@@ -966,7 +1087,7 @@
     for (const [ad, pts] of Object.entries(AIR.vfr)) {
       for (const p of pts) {
         bindPick(L.marker([p.la, p.lo], { icon: L.divIcon({ className: 'mk', iconSize: [12, 12], iconAnchor: [6, 6], html: `<div style="position:relative"><svg width="12" height="12"><path d="M6 0l6 12H0z" fill="#fff" stroke="#002a40" stroke-width="1.4"/></svg><span class="vfr-label" style="position:absolute;left:13px;top:-2px">${esc(p.id)}</span></div>` }) })
-          .bindTooltip(`<b>${ad.slice(2)}-${esc(p.id)}</b> (${ad})<br>${esc(p.desc)}<br><span style="opacity:.7">Points SIA ${esc(AIR.vfrDate || '')} — vérifier sur la VAC</span>`, { className: 'tip', direction: 'top' }),
+          .bindTooltip(`<b>${ad.slice(2)}-${esc(p.id)}</b> (${ad})<br>${esc(p.desc)}<br><span style="opacity:.7">${p.old ? `Point de l'export SIA du ${esc(p.old)} (absent du tableau de la VAC actuelle)` : `VAC du cycle ${esc(AIR.vfrDate || '')}`} — vérifier sur la VAC</span>`, { className: 'tip', direction: 'top' }),
         `🔺 Point VFR ${ad.slice(2)}-${p.id} (${ad})`, () => showAerodrome(ad))
           .addTo(layers.vfr);
       }
@@ -1173,6 +1294,12 @@
     detailBody, detail, store, highlight,
     setPickOff(v) { pickOff = v; },
     get AIR() { return AIR; }, loadAirLayers,
+    vigOnRoute(pts, a, b) {   // départements traversés en vigilance orange / rouge pendant le vol
+      if (!VIG) return [];
+      const out = new Map();
+      pts.forEach(([la, lo]) => { const f = depAt(la, lo); if (f && !out.has(f.properties.n)) out.set(f.properties.n, vigOf(f.properties.n, a, b).filter((w) => w.lvl >= 2)); });
+      return [...out].filter(([, w]) => w.length).map(([dep, w]) => ({ dep, w }));
+    },
     setNotamWindow(a, b) {
       const f = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
       $('#notam-from').value = f(a); $('#notam-to').value = f(b); drawNotam();
@@ -1226,7 +1353,7 @@
   T('Balises vent', loadPiouPiou);
   // fichiers lourds (VAC 700 ko) chargés une fois la carte affichée
   const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
-  idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); });
+  idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); T('Vigilance', loadVig); });
   setInterval(() => T('METAR / TAF', loadMetarTaf), 5 * 60 * 1000);
   setInterval(() => { T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
   $('#btn-log').addEventListener('click', () => window.AWW_LOG.download());

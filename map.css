@@ -329,3 +329,18 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 /* Fluidité : le flou d'arrière-plan des panneaux est recalculé à chaque image pendant un déplacement de la carte (très coûteux sur tablette) */
 .box, #clock, #inflight { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 .box { background: rgba(12, 26, 44, .95); } #clock { background: rgba(12, 26, 44, .95); }
+ul.ppr { margin: 2px 0 6px; padding-left: 18px; font-size: 11.5px; color: #cfe3f5; } ul.ppr li { margin: 2px 0; }
+a.btn { display: inline-block; text-decoration: none; color: var(--text); padding: 5px 9px; }
+/* Favoris */
+.favs { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; align-items: center; }
+.favs button { display: flex; align-items: center; gap: 5px; border-radius: 9px; background: var(--card); border: 1px solid var(--line2); color: var(--text); padding: 4px 8px; font: 700 12px system-ui; cursor: pointer; }
+.favs button small { font-weight: 500; color: var(--muted); }
+.favs .dot { width: 9px; height: 9px; border-radius: 50%; background: #789; } .favs .dot.c-VFR { background: #2ecc40; } .favs .dot.c-MVFR { background: #3d9cff; } .favs .dot.c-IFR { background: #ff4136; } .favs .dot.c-LIFR { background: #d62ad6; }
+.fav-hint { font-size: 10.5px; }
+.fav-star { background: none; border: none; color: #ffd60a; font-size: 20px; cursor: pointer; vertical-align: -2px; padding: 0 4px; }
+table.rwy-w { width: 100%; font-size: 12px; border-collapse: collapse; margin: 4px 0; } table.rwy-w td { padding: 2px 4px; border-bottom: 1px solid rgba(255,255,255,.08); }
+table.rwy-w tr.best td { color: #a6e36b; font-weight: 700; }
+.notam i.new { background: #ffd60a; color: #1a1200; font-style: normal; font-weight: 800; font-size: 10px; padding: 1px 5px; border-radius: 5px; }
+.nbadge.nnew { background: #ffd60a !important; color: #1a1200 !important; box-shadow: 0 0 0 2px #ff8a00; }
+.sw-vig { background: linear-gradient(90deg, #ffd60a 50%, #ff8a00 50%) !important; border-radius: 3px; }
+.sw-foudre { background: #c77dff !important; border-radius: 3px; }

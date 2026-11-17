@@ -1,5 +1,5 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v7';
+const VERSION = 'aww-v8';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
@@ -7,7 +7,7 @@ const SHELL = [
   'data/vfr_points.json', 'data/fees.json', 'data/template/log_nav_acb.xlsx', 'data/template/log_meta.json',
   'icons/icon48.png', 'icons/icon192.png',
 ];
-const LIVE = ['metar.json', 'taf.json', 'notam.json', 'supaip.json', 'zones.json', 'vac.json', 'escale.json', 'airspaces.json', 'fees_club.json'].map((f) => `data/live/${f}`);
+const LIVE = ['metar.json', 'taf.json', 'notam.json', 'supaip.json', 'zones.json', 'vac.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'vigilance.json'].map((f) => `data/live/${f}`);
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.concat(LIVE)).catch(() => c.addAll(SHELL))).then(() => self.skipWaiting()));

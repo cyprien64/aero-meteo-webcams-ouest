@@ -121,7 +121,7 @@
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
   let VFR = null;
   async function loadVfr() {
-    if (!VFR) VFR = await fetch('data/vfr_points.json').then((r) => r.json()).catch(() => ({ data: {} }));
+    if (!VFR) VFR = await A.getLive('vfr_points.json').catch(() => fetch('data/vfr_points.json').then((r) => r.json())).catch(() => ({ data: {} }));
     return VFR;
   }
   function vfrOf(icao) { return (VFR && VFR.data && VFR.data[icao]) || []; }
@@ -577,6 +577,10 @@
         b.gramet = await gramet(b).catch((e) => ({ err: e.message }));
         b.stage = k + 1; b.nStages = legsDef.length;
         b.night = nightInfo(b);
+        try {   // échantillonne la route tous les ~5 NM pour trouver les départements traversés
+          const sp = []; b.legs.forEach((lg) => { const n = Math.max(1, Math.ceil(lg.dist / 5)); for (let i = 0; i <= n; i++) sp.push(destPt(lg.a, lg.tc, lg.dist * i / n)); });
+          b.vigil = A.vigOnRoute(sp, b.depT.getTime(), b.eta.getTime());
+        } catch (e) { console.warn('vigilance', e); }
         b.mountain = mountainOf(b);
         b.changes = snapshotDiff(b);
         trip.push(b);
@@ -594,7 +598,7 @@
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
-      lastBrief = trip[0]; lastTrip = trip;
+      lastBrief = trip[0]; lastTrip = trip; window.AWW_LASTTRIP = trip;
       prog.textContent = '';
       const histId = makePdf ? Date.now() : null;
       if (makePdf) histStart(histId, trip);
@@ -1357,6 +1361,7 @@
     if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => d.id).join(', ')}).`);
     if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
     if (b.sunDep && b.depT < new Date(b.sunDep.rise.getTime() - 30 * 6e4)) al.push('Départ avant le jour aéronautique.');
+    (b.vigil || []).forEach((v) => al.push(`Vigilance Météo-France ${v.w.some((x) => x.lvl === 3) ? 'ROUGE' : 'ORANGE'} sur ${v.dep} pendant le vol : ${[...new Set(v.w.map((x) => x.ph))].join(', ')}.`));
     if (b.night && b.night.firstDark) al.push(`Nuit aéronautique à partir de ${b.night.firstDark.id} (passage ${utc(b.night.firstDark.eta)}, nuit ${utc(b.night.firstDark.night)}).`);
     if (b.loaded < b.reqFuel) al.push(`Carburant insuffisant : ${b.loaded} L à bord pour ${b.reqFuel} L requis (étape + dégagement + réserve).`);
     if (b.mb.mass > b.f.T.mtow) al.push(`Masse au décollage ${Math.round(b.mb.mass)} kg > MTOW ${b.f.T.mtow} kg.`);

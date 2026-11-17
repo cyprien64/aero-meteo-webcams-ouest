@@ -434,6 +434,34 @@ def decode_mt(s):
                   if int(m.group(1)) < 256 else '', s)
 
 
+VFR_RE = re.compile(r'''(\d{2})\s?°\s?(\d{2})\s?[’'”“"°]\s?(\d{2}(?:[.,]\d+)?)\s?[”“"’']{1,2}\s?([NS])\s?[-–]\s?(\d{3})\s?°\s?(\d{2})\s?[’'”“"°]\s?(\d{2}(?:[.,]\d+)?)\s?[”“"’']{1,2}\s?([EW])\s?([A-Z][A-Z0-9]{0,3})(?:\s*\(.{0,3}\))?\s*$''')
+
+
+def parse_vfr_points(text):
+    """Points de report VFR du tableau de la VAC : « description  43°29’41” N - 000°22’12” W N » (le dernier mot est l'identifiant)."""
+    out, prev = {}, ''
+    for line in (l.strip() for l in text.splitlines()):
+        m = VFR_RE.search(line)
+        if not m:
+            prev = line
+            continue
+        g = m.groups()
+        la = int(g[0]) + int(g[1]) / 60 + float(g[2].replace(',', '.')) / 3600
+        lo = int(g[4]) + int(g[5]) / 60 + float(g[6].replace(',', '.')) / 3600
+        desc = line[:m.start()].strip(' :-') or prev.strip(' :-')
+        pid = g[8]
+        if pid not in out:   # la VAC répète parfois le tableau (français / anglais)
+            out[pid] = {'id': pid, 'la': round(la if g[3] == 'N' else -la, 5), 'lo': round(lo if g[7] == 'E' else -lo, 5), 'desc': re.sub(r'\s+', ' ', desc)[:120]}
+        prev = ''
+    return sorted(out.values(), key=lambda p: p['id'])
+
+
+assert parse_vfr_points('Lème : Château d’eau / Water tower43°29’41” N - 000°22’12” WN\nMonein\n43°24’54” N - 000°34’32” WW\nSautron47° 15\' 26" N - 001° 41\' 07" WNW (1)') == [
+    {'id': 'N', 'la': 43.49472, 'lo': -0.37, 'desc': 'Lème : Château d’eau / Water tower'},
+    {'id': 'NW', 'la': 47.25722, 'lo': -1.68528, 'desc': 'Sautron'},
+    {'id': 'W', 'la': 43.415, 'lo': -0.57556, 'desc': 'Monein'}]
+
+
 def parse_vac(icao, data):
     import io
     import pypdf
@@ -443,6 +471,9 @@ def parse_vac(icao, data):
     chart = '\n'.join(charts)
     lines = [l.strip() for l in chart.splitlines() if l.strip()]
     info = {'icao': icao, 'pages': len(pages)}
+    pts = parse_vfr_points('\n'.join(pages))
+    if pts:
+        info['vfrpts'] = pts
     m = re.search(r'ALT AD\s*:\s*(\d+)\s*\((\d+) ?hPa\)', chart)
     if m:
         info['alt'], info['hpa'] = int(m.group(1)), int(m.group(2))
@@ -551,7 +582,7 @@ def parse_vac(icao, data):
 
 
 OPENAIR_URL = 'https://planeur-net.github.io/airspace/france.txt'
-VAC_PARSER = 3   # à incrémenter quand l'analyse des VAC change (force une nouvelle analyse)
+VAC_PARSER = 4   # à incrémenter quand l'analyse des VAC change (force une nouvelle analyse)
 
 
 def _oa_coord(s):
@@ -839,6 +870,68 @@ def collect_cams():
         print('  contrôles récents : inchangé')
 
 
+PPR_RE = re.compile(r'\bPPR\b|\bO/R\b|\bPN\b|préavis|prior (?:permission|notice)|autorisation préalable|réservation|parking|stationnement', re.I)
+MAIL_RE = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
+URL_RE = re.compile(r'(?:https?://|www\.)[^\s,;()]+')
+
+
+def ppr_contacts(v):
+    """Phrases de la VAC sur le PPR / préavis / stationnement, avec les e-mails et sites cités (texte tel quel, à vérifier)."""
+    txt = re.sub(r'-\n(?=[a-zà-ü])', '', '\n'.join(str(v.get(k) or '') for k in ('infos', 'consignes', 'carburant')))
+    lines = [re.sub(r'\s+', ' ', l).strip() for l in txt.splitlines()]
+    snips = []
+    for i, l in enumerate(lines):
+        if re.search(r'RFFS|SSLIA|Niveau \d|Level \d|Péril animalier', l):
+            continue   # niveaux de protection incendie « sur demande » : sans objet pour l'aviation légère
+        if not PPR_RE.search(l) or re.search(r'\b(?:for|with|the|these|only|from|outside|before|which|have)\b', l, re.I) and not re.search(r'[àéèêç]', l):
+            continue   # garde la version française des consignes bilingues
+        s = l
+        for nxt in lines[i + 1:i + 3]:   # numéro ou adresse sur la ligne suivante
+            if re.search(r'TEL|@|http|www\.|\d{2} \d{2} \d{2}', nxt) and len(s) < 220:
+                s += ' ' + nxt
+        s = s[:240]
+        if s not in snips and not any(s in x for x in snips):
+            snips.append(s)
+    allt = '\n'.join(lines)
+    mails = sorted({m.rstrip('.') for m in MAIL_RE.findall(allt)})
+    web = sorted({u.rstrip('.') for u in URL_RE.findall(allt)})
+    return {'ppr': snips[:4], 'mails': mails[:4], 'web': web[:3]}
+
+
+assert ppr_contacts({'infos': 'PPR 48 HR par/ by TEL : 06 08 53 01 67\nE-mail : bsi-pau@douane.finances.gouv.fr'}) == {
+    'ppr': ['PPR 48 HR par/ by TEL : 06 08 53 01 67 E-mail : bsi-pau@douane.finances.gouv.fr'], 'mails': ['bsi-pau@douane.finances.gouv.fr'], 'web': []}
+
+
+VIG_PH = [('wind', 'vent violent'), ('snow', 'neige-verglas'), ('ice', 'neige-verglas'), ('thunder', 'orages'), ('fog', 'brouillard'),
+          ('high-temp', 'canicule'), ('high temp', 'canicule'), ('low-temp', 'grand froid'), ('low temp', 'grand froid'),
+          ('coastal', 'vagues-submersion'), ('forest', 'feux de forêt'), ('avalanche', 'avalanches'), ('flood', 'crues'), ('rain', 'pluie-inondation')]
+
+
+def collect_vigilance():
+    """Vigilance Météo-France par département, via le flux public MeteoAlarm (EUMETNET, licence équivalente CC BY 4.0)."""
+    print('Vigilance (MeteoAlarm)')
+    try:
+        x = get('https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-france', timeout=60)
+        deps = {}
+        for e in re.findall(r'<entry>(.*?)</entry>', x, re.S):
+            g = lambda tag: (re.search(f'<{tag}>([^<]*)</{tag}>', e) or [None, ''])[1]  # noqa: E731
+            title = g('title').lower()
+            lvl = next((n for n, w in ((3, 'red'), (2, 'orange'), (1, 'yellow')) if title.startswith(w)), 0)
+            if not lvl or g('cap:status') != 'Actual' or g('cap:message_type') == 'Cancel':
+                continue
+            ev = (g('cap:event') + ' ' + title).lower()
+            ph = next((fr for en, fr in VIG_PH if en in ev), g('cap:event'))
+            deps.setdefault(html.unescape(g('cap:areaDesc')), []).append(
+                {'lvl': lvl, 'ph': ph, 'from': g('cap:onset') or g('cap:effective'), 'to': g('cap:expires')})
+        for k, v in deps.items():   # une ligne par phénomène et période
+            deps[k] = [dict(t) for t in {tuple(sorted(d.items())) for d in v}]
+        print(f'  {len(deps)} départements en vigilance jaune ou plus')
+        save('vigilance.json', {'generated': NOW.isoformat(), 'source': 'Météo-France via MeteoAlarm (EUMETNET)', 'deps': deps})
+    except Exception as e:  # noqa: BLE001
+        print('  vigilance : échec', e)
+        fallback('vigilance.json')
+
+
 def collect_fees():
     """Taxes d'atterrissage proposées par les membres (issues GitHub « taxe » validées par l'étiquette « valide »)."""
     repo, token = os.environ.get('GITHUB_REPOSITORY'), os.environ.get('GITHUB_TOKEN')
@@ -890,7 +983,7 @@ def write_status():
 
 
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees', 'vigilance']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -903,8 +996,17 @@ if __name__ == '__main__':
         collect_cams()
     if 'fees' in what:
         collect_fees()
+    if 'vigilance' in what:
+        collect_vigilance()
     if os.path.exists(os.path.join(OUT, 'vac.json')):   # extrait léger pour la carte (carburant, paiement) : 700 ko -> quelques dizaines
         vac = json.load(open(os.path.join(OUT, 'vac.json'), encoding='utf-8'))
+        # points de report VFR du cycle en cours, lus dans les VAC ; terrain sans tableau dans sa VAC : ancien export SIA
+        old = json.load(open(os.path.join(ROOT, 'data', 'vfr_points.json'), encoding='utf-8'))
+        pts = {k: v['vfrpts'] for k, v in (vac.get('data') or {}).items() if v.get('vfrpts')}
+        kept = {k: [dict(p, old=old.get('effDate')) for p in v] for k, v in old['data'].items() if k not in pts}
+        if pts:
+            save('vfr_points.json', {'source': f"SIA - VAC du cycle {vac.get('cycle')} (+ export XML SIA du {old.get('effDate')} pour {len(kept)} terrains)",
+                                     'effDate': vac.get('cycle'), 'data': {**kept, **pts}})
         save('escale.json', {'generated': vac.get('generated'), 'cycle': vac.get('cycle'),
-                             'data': {k: {'escale': v['escale']} for k, v in (vac.get('data') or {}).items() if v.get('escale')}})
+                             'data': {k: {'escale': {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or []}} for k, v in (vac.get('data') or {}).items()}})
     write_status()

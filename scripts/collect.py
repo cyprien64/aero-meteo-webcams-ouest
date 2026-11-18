@@ -1082,10 +1082,11 @@ def collect_pratique():
 
 
 def write_status():
-    prev = {}
+    prev, prev_run = {}, None
     if FALLBACK_URL:
         try:
-            prev = json.loads(get(f'{FALLBACK_URL}/data/live/status.json', timeout=30)).get('files', {})
+            old = json.loads(get(f'{FALLBACK_URL}/data/live/status.json', timeout=30))
+            prev, prev_run = old.get('files', {}), old.get('run')
         except Exception:  # noqa: BLE001
             prev = {}
     files = {}
@@ -1094,7 +1095,7 @@ def write_status():
         last_ok = NOW.isoformat() if st.startswith('ok') or st.startswith('repris') else (prev.get(name) or {}).get('last_ok')
         files[name] = {'state': st, 'last_ok': last_ok}
     with open(os.path.join(OUT, 'status.json'), 'w', encoding='utf-8') as f:
-        json.dump({'run': NOW.isoformat(), 'files': files}, f, ensure_ascii=False, indent=1)
+        json.dump({'run': NOW.isoformat(), 'prev_run': prev_run, 'files': files}, f, ensure_ascii=False, indent=1)
     print('État :', {k: v['state'] for k, v in files.items()})
 
 

@@ -13,8 +13,10 @@ for name, hours in LIMITS.items():
     lo = f.get('last_ok')
     age = (now - datetime.fromisoformat(lo)).total_seconds() / 3600 if lo else 9999
     print(f'{name:14s} {f.get("state", "?"):40s} dernier succès il y a {age:.1f} h (max {hours} h)')
-    # une seule alerte par panne : la collecte tourne toutes les 15 min, on n'échoue qu'au franchissement du seuil
-    if hours < age <= hours + 0.5:
+    # une seule alerte par panne : on échoue au passage qui franchit le seuil (GitHub saute ou retarde des passages,
+    # d'où la comparaison avec l'ancienneté au passage précédent plutôt qu'une fenêtre fixe)
+    prev_age = age - (now - datetime.fromisoformat(st['prev_run'])).total_seconds() / 3600 if st.get('prev_run') else age - 0.5   # sans passage précédent connu : fenêtre de 30 min
+    if age > hours and prev_age <= hours:
         bad.append(f'{name} non mis à jour depuis {age:.0f} h ({f.get("state")})')
 if bad:
     print('::error::' + ' | '.join(bad))

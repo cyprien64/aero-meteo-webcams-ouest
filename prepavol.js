@@ -963,7 +963,9 @@
       const tIsa = 15 - 2 * elev / 1000, temp = m && m.temp != null ? m.temp : tIsa;
       const factor = (1 + 0.10 * elev / 1000) * (1 + 0.10 * Math.max(0, temp - tIsa) / 10);
       const base = f.T.takeoff ? (grass ? (f.T.takeoff.grass || f.T.takeoff.hard * 1.15) : f.T.takeoff.hard) : null;
-      const pc = { elev, temp, grass, head: (rw && rw.best.head) || 0, mass: role === 'DÉPART' ? mb.mass : landMass };
+      // vent : rien si VRB ; vent de face compté seulement si le décollage / l'atterrissage a lieu dans les 2 h (sinon seule la pénalité de vent arrière reste)
+      const head0 = m && m.wdir !== 'VRB' && rw ? rw.best.head || 0 : 0, soon = Math.abs((role === 'DÉPART' ? depT : eta) - Date.now()) < 2 * 3600e3;
+      const pc = { elev, temp, grass, head: soon ? head0 : Math.min(0, head0), mass: role === 'DÉPART' ? mb.mass : landMass };
       const tod = f.T.takeoff && f.T.takeoff.table ? perfDist(f.T.takeoff.table, pc) : base ? Math.round(base * factor / 10) * 10 : null;
       const ldg = f.T.landing && f.T.landing.table ? perfDist(f.T.landing.table, pc) : null;
       const cons = classifyConsignes(v);
@@ -1423,7 +1425,7 @@
     const s = [it(b.depInfo, 'tod', 'Décollage'), it(b.arrInfo, 'ldg', 'Atterrissage'), it(b.altInfo, 'ldg', 'Dégagement')].filter(Boolean);
     if (!s.length) return '';
     const tab = b.f.T.takeoff && b.f.T.takeoff.table;
-    return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, vent METAR, herbe)' : 'estimation'}, passage 15 m.</p>`;
+    return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, herbe ; vent de face METAR compté seulement si le vol est dans les 2 h)' : 'estimation'}, passage 15 m.</p>`;
   }
   function summaryHtml(b, sfx = '') {
     const al = alertsOf(b);
@@ -1855,7 +1857,7 @@
     table(['Terrain', 'Alt.', 'Temp.', 'Piste', 'Longueur', 'Décollage 15 m', 'Atterr. 15 m', 'Piste probable / vent'],
       [perfRow(b.depInfo), perfRow(b.arrInfo), perfRow(b.altInfo)].filter(Boolean), { x: M + 115, y: yFuelStart, size: 7.5, keepY: true });
     y = Math.max(yFuel, doc.lastAutoTable.finalY) + 3;
-    if (b.f.T.takeoff && b.f.T.takeoff.table) para(`Distances calculées avec les tableaux du manuel de vol : altitude et température du terrain (METAR, sinon ISA), masse au décollage / à l'atterrissage, vent METAR sur la piste probable, +${Math.round((b.f.T.takeoff.table.grass - 1) * 100)} % (décollage) / +${Math.round(((b.f.T.landing.table || b.f.T.takeoff.table).grass - 1) * 100)} % (atterrissage) sur herbe sèche. Herbe mouillée, pente et état de la piste non pris en compte.`, { size: 7, color: [90, 90, 90] });
+    if (b.f.T.takeoff && b.f.T.takeoff.table) para(`Distances calculées avec les tableaux du manuel de vol : altitude et température du terrain (METAR, sinon ISA), masse au décollage / à l'atterrissage, vent METAR sur la piste probable (sans vent si VRB ; vent de face compté seulement pour un vol dans les 2 h, vent arrière toujours), +${Math.round((b.f.T.takeoff.table.grass - 1) * 100)} % (décollage) / +${Math.round((((b.f.T.landing && b.f.T.landing.table) || b.f.T.takeoff.table).grass - 1) * 100)} % (atterrissage) sur herbe sèche. Herbe mouillée, pente et état de la piste non pris en compte.`, { size: 7, color: [90, 90, 90] });
     else if (b.f.T.takeoff) para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur)${b.f.T.takeoff.grass ? ` / ${b.f.T.takeoff.grass} m (herbe)` : ''}, majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
     if (b.f.T.landing && !b.f.T.landing.table) para(`${b.f.T.landing.note} : ${b.f.T.landing.hard} m (dur)${b.f.T.landing.grass ? ` / ${b.f.T.landing.grass} m (herbe)` : ''} (abaques du manuel de vol).`, { size: 7, color: [90, 90, 90] });
 

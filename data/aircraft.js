@@ -97,24 +97,33 @@ window.AIRCRAFT_TYPES = {
     sheet: 'F-XXXX',
     source: 'Manuel de vol Grob G120A (extraits publics), Wikipedia, Learn ATC — consommations estimées (plage 34-83 L/h du manuel)',
   },
+  // ---- Robin R3000/180 : manuel de vol (édition 1, janvier 1998, révision 1 de décembre 1999) ----
   'R3000-180': {
     label: 'Robin R3000/180',
-    fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoir', cap: null, arm: null }] },
-    mtow: 1150,
-    arms: { pilot: null, copilot: null, pax: null, bag: null },
-    envelope: null,
+    // Manuel : 2 x 113 L (226 L utilisables). Capacité réelle de l'avion du club : 160 L (indiquée par le club).
+    fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoirs d\'aile G + D', cap: 160, arm: 0.25 }] },
+    mtow: 1150,   // catégorie N (catégorie U : 1000 kg)
+    arms: { pilot: 0.55, copilot: 0.55, pax: 1.33, bag: 1.9 },   // sièges AV réglables : 0,50 à 0,60 m
+    envelope: [[0.29, 0], [0.29, 825], [0.403, 1150], [0.548, 1150], [0.548, 0]],
     regimes: [
-      { name: 'Croisière éco 65 % (estimation)', tas: 128, ff: 32 },
-      { name: 'Croisière 75 % (estimation)', tas: 138, ff: 38 },
+      { name: '2000 ft - 2400 t/mn', tas: 114, ff: 34 },
+      { name: '2000 ft - 2500 t/mn', tas: 121, ff: 38 },
+      { name: '5500 ft - 2500 t/mn', tas: 122, ff: 36 },
+      { name: '5500 ft - 2600 t/mn', tas: 130, ff: 38 },
+      { name: '8500 ft - 2500 t/mn', tas: 122, ff: 33 },
+      { name: '8500 ft - 2700 t/mn', tas: 138, ff: 38 },
     ],
-    defaultRegime: 0,
-    climb: { extraMin: 2, extraFuel: 4 },
-    speeds: { VNE: 170 },
-    takeoff: { hard: 310, grass: null, note: 'Distance de décollage publiée (Wikipedia, R3000)' },
-    minPerLitre: 1.9,
+    defaultRegime: 1,
+    climb: { extraMin: 2, extraFuel: 4 },   // règle du log ; manuel : 3000 ft en 3,5 min / 4 L, 5500 ft en 7 min / 7 L
+    speeds: { VSO: 49, VS1: 57, VR: 59, 'V passage 15 m': 70, Vx: '67/78', Vy: '78/92', 'V finesse max': 86, VA: 115, VFE: 94, VNO: 134, VNE: 170,
+      Vapp: 65, 'Vapp courte': 62, 'Vw 90° max': 22 },
+    takeoff: { hard: 565, grass: 650, note: 'Décollage (passage 15 m), Zp 0, std +15, 1150 kg, volets décollage' },
+    landing: { hard: 530, grass: 742, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 1150 kg, volets atterrissage' },
+    minPerLitre: 1.6,
     sheet: 'F-XXXX',
-    source: 'Wikipedia (FR/EN), Aeropedia — consommations estimées, capacité carburant non confirmée',
+    source: 'Manuel de vol R3000/180 (édition 1, janvier 1998) - capacité carburant 160 L selon le club',
   },
+
 };
 
 window.AIRCRAFT = [

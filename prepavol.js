@@ -1816,6 +1816,7 @@
       [perfRow(b.depInfo), perfRow(b.arrInfo), perfRow(b.altInfo)].filter(Boolean), { x: M + 115, y: yFuelStart, size: 7.5, keepY: true });
     y = Math.max(yFuel, doc.lastAutoTable.finalY) + 3;
     if (b.f.T.takeoff) para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur)${b.f.T.takeoff.grass ? ` / ${b.f.T.takeoff.grass} m (herbe)` : ''}, majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
+    if (b.f.T.landing) para(`${b.f.T.landing.note} : ${b.f.T.landing.hard} m (dur)${b.f.T.landing.grass ? ` / ${b.f.T.landing.grass} m (herbe)` : ''} (abaques du manuel de vol).`, { size: 7, color: [90, 90, 90] });
 
     // ---------------------------------------------------------------- 2. BRIEFINGS DÉPART / ARRIVÉE (portrait)
     const briefTerrain = (t, kind) => {

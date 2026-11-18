@@ -14,7 +14,6 @@ window.AIRCRAFT_TYPES = {
     ],
     defaultRegime: 1,
     climb: { extraMin: 2, extraFuel: 4 },   // règle du log : +2 min et +4 L sur la 1re branche
-    taxiFuel: 0,
     speeds: { VSO: 45, VR: 55, Vx: '59/73', Vy: 70, 'V finesse max': 73, VFE: 92, VNO: 140, VNE: 166, 'Vapp (1,45) volets 1': 75, 'Vatt (1,30) volets 2': 60, 'Vw 90° max': 22 },
     takeoff: { hard: 760, grass: 870, note: 'Distance de décollage 15 m, std +15, à la masse max' },
     minPerLitre: 4,
@@ -29,20 +28,32 @@ window.AIRCRAFT_TYPES = {
     mtow: 1100,
     arms: { pilot: 0.41, copilot: 0.41, pax: 1.19, bag: 1.9 },
     envelope: [[0.257, 0], [0.257, 820], [0.462, 1100], [0.564, 1100], [0.564, 0]],
+    // croisière : tableau 5-8 du manuel (1100 kg, atmosphère standard), vitesse propre en kt
     regimes: [
-      { name: 'Attente (50 %)', tas: 85, ff: 22 },
-      { name: 'FL 60 - 72 %', tas: 115, ff: 24 },
-      { name: 'Croisière normale (72 %)', tas: 120, ff: 24 },
-      { name: 'FL 80 - 85 %', tas: 126, ff: 28 },
-      { name: 'FL 100 - 72 %', tas: 118, ff: 23 },
+      { name: '2000 ft - 70 %', tas: 110, ff: 22.1 },
+      { name: '2000 ft - 80 %', tas: 117, ff: 25.8 },
+      { name: '4000 ft - 70 %', tas: 111, ff: 22.1 },
+      { name: '4000 ft - 80 %', tas: 119, ff: 25.8 },
+      { name: '6000 ft - 70 %', tas: 113, ff: 22.1 },
+      { name: '6000 ft - 80 %', tas: 121, ff: 25.8 },
+      { name: '8000 ft - 70 %', tas: 115, ff: 22.1 },
+      { name: '8000 ft - 80 %', tas: 123, ff: 25.8 },
+      { name: '10000 ft - 70 %', tas: 116, ff: 22.1 },
     ],
     defaultRegime: 2,
-    climb: { extraMin: 2, extraFuel: 4 },
-    taxiFuel: 0,
+    // montée : tableau 5-6 (1100 kg) [altitude ft, min, L, NM]
+    climb: { extraMin: 2, extraFuel: 4, table: [[0, 0, 0, 0], [2000, 2.7, 1.5, 3.7], [4000, 5.6, 3.1, 7.7], [6000, 8.5, 4.7, 12], [8000, 11.5, 6.5, 16.8], [10000, 14.8, 8.3, 21.5], [12000, 18.9, 10.4, 28.4]] },
     speeds: { VSO: 49, VR: 60, Vx: 68, Vy: 78, 'V finesse max': 78, VFE: 92, VNO: 140, VNE: 146, 'Vapp (1,45) volets 10°': 85, 'Vatt (1,30) volets 30°': 65, 'Vw 90° max': 22 },
-    takeoff: { hard: 545, grass: 630, note: 'Distance de décollage 15 m, std +15, Zp 0, à la masse max' },
+    // tableaux 5-2 / 5-3 (décollage, colonnes ISA à ISA+30 ramenées en °C) et 5-10 (atterrissage, 1100 kg seulement)
+    takeoff: { hard: 400, grass: 460, note: 'Décollage (passage 15 m), Zp 0, ISA, 1100 kg, volets 1er cran',
+      table: { m: [1100, 1000], grass: 1.15, tail: 0.05, wind: [[0, 1], [10, 0.85], [20, 0.65], [30, 0.55]],
+        rows: { 0: [[15, 400, 312], [25, 432, 337], [35, 466, 363], [45, 501, 391]], 1000: [[13, 423, 330], [23, 457, 356], [33, 492, 384], [43, 530, 413]], 2000: [[11, 447, 349], [21, 483, 377], [31, 521, 406], [41, 560, 437]], 3000: [[9, 473, 370], [19, 511, 399], [29, 551, 430], [39, 593, 463]], 4000: [[7, 501, 391], [17, 541, 422], [27, 583, 455], [37, 628, 490]], 5000: [[5, 531, 414], [15, 573, 447], [25, 618, 482], [35, 665, 519]], 6000: [[3, 562, 439], [13, 607, 474], [23, 655, 511], [33, 704, 550]], 7000: [[1, 603, 471], [11, 651, 508], [21, 702, 548], [31, 756, 590]], 8000: [[-1, 648, 506], [9, 699, 546], [19, 754, 589], [29, 811, 633]] } } },
+    landing: { hard: 415, grass: 480, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 1100 kg, volets atterrissage',
+      table: { m: [1100, 1000], grass: 1.15, tail: 0.05, wind: [[0, 1], [10, 0.85], [20, 0.65], [30, 0.55]],
+        rows: { 0: [[-5, 355, 355], [15, 415, 415], [35, 480, 480]], 2500: [[-13, 375, 375], [7, 440, 440], [27, 510, 510]], 5000: [[-21, 390, 390], [-1, 460, 460], [19, 535, 535]] } } },
     minPerLitre: 2.5,
     sheet: 'F-HNDI',
+    source: 'Manuel de vol DR400 TAE 125-02-114 « 155CDI » (1002719, édition 0, révision 2) - F-HCOY',
   },
   'DR400-120': {
     label: 'DR400/120 2+2',
@@ -50,14 +61,28 @@ window.AIRCRAFT_TYPES = {
     mtow: 900,
     arms: { pilot: 0.41, copilot: 0.41, pax: 1.19, bag: 1.9 },
     envelope: [[0.205, 0], [0.205, 750], [0.428, 900], [0.564, 900], [0.564, 0]],
-    regimes: [{ name: 'Croisière éco (2500 t/mn)', tas: 100, ff: 24 }],
-    defaultRegime: 0,
-    climb: { extraMin: 2, extraFuel: 4 },
-    speeds: { VSO: 45, VR: 55, Vx: '59/73', Vy: 70, 'V finesse max': 73, VFE: 92, VNO: 140, VNE: 166, 'Vapp (1,45) volets 1': 75, 'Vatt (1,30) volets 2': 60, 'Vw 90° max': 22 },
-    takeoff: { hard: 760, grass: 870, note: 'Distance de décollage 15 m, std +15, à la masse max (feuille F-XXXX du log ACB)' },
-    minPerLitre: 2.5,
+    // croisière : tableau « performances en palier » du manuel (900 kg, 75 %) ; vitesses du tableau prises comme vitesses propres (prudent)
+    regimes: [
+      { name: '0 ft - 2420 t/mn', tas: 104, ff: 25 },
+      { name: '3000 ft - 2520 t/mn', tas: 109, ff: 25 },
+      { name: '5000 ft - 2560 t/mn', tas: 112, ff: 25 },
+      { name: '7500 ft - 2660 t/mn', tas: 117, ff: 25 },
+      { name: 'Croisière éco log ACB (2500 t/mn)', tas: 100, ff: 24 },
+    ],
+    defaultRegime: 1,
+    // montée : 570 ft/min au sol, -43 ft/min par 1000 ft (manuel 5.05), à 80 kt ; carburant plein gaz estimé à 30 L/h (non donné par le manuel)
+    climb: { extraMin: 2, extraFuel: 4, table: [[0, 0, 0, 0], [2000, 3.8, 1.9, 5.1], [4000, 8.4, 4.2, 11.1], [6000, 14, 7, 18.7], [8000, 21.5, 10.8, 28.7], [10000, 32.7, 16.3, 43.6]] },
+    speeds: { VSO: 45, VS1: 51, VR: 54, 'V passage 15 m': 70, Vx: 70, Vy: 78, 'V finesse max': 73, VFE: 92, VNO: 140, VNE: 166, Vapp: 60, 'Vw 90° max': 22 },   // manuel DR400/120
+    // tableaux 5.03 (décollage) et 5.07 (atterrissage) du manuel
+    takeoff: { hard: 535, grass: 615, note: 'Décollage (passage 15 m), Zp 0, std +15, 900 kg, volets 1er cran',
+      table: { m: [900, 700], grass: 1.15, tail: 0.05, wind: [[0, 1], [10, 0.85], [20, 0.65], [30, 0.55]],
+        rows: { 0: [[-5, 480, 285], [15, 535, 315], [35, 590, 345]], 4000: [[-13, 645, 375], [7, 720, 415], [27, 800, 460]], 8000: [[-21, 890, 500], [-1, 1000, 560], [19, 1125, 620]] } } },
+    landing: { hard: 460, grass: 530, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 900 kg, volets 2e cran',
+      table: { m: [900, 700], grass: 1.15, tail: 0.05, wind: [[0, 1], [10, 0.78], [20, 0.63], [30, 0.52]],
+        rows: { 0: [[-5, 435, 365], [15, 460, 385], [35, 485, 400]], 4000: [[-13, 475, 395], [7, 505, 420], [27, 535, 440]], 8000: [[-21, 525, 430], [-1, 555, 460], [19, 590, 485]] } } },
+    minPerLitre: 2.4,
     sheet: 'F-XXXX',
-    source: 'Feuille DR400/120 (F-XXXX) du log ACB',
+    source: 'Manuel de vol DR400/120 (édition 10, révision 7) - F-HPYR ; bras de levier et enveloppe : log ACB',
   },
   // ---- Avions ajoutés d'après des sources publiques : À VÉRIFIER avec le manuel de vol de l'avion ----
   'JODEL-D112': {
@@ -135,7 +160,7 @@ window.AIRCRAFT_TYPES = {
 
 window.AIRCRAFT = [
   { reg: 'F-HAFF', type: 'DR400-ROTAX', empty: 543, arm: 0.409 },
-  { reg: 'F-HPYR', type: 'DR400-ROTAX', empty: 541, arm: 0.393 },
+  { reg: 'F-HPYR', type: 'DR400-120', empty: 541, arm: 0.393 },
   { reg: 'F-GLDS', type: 'DR400-ROTAX', empty: 530, arm: 0.402, bagArm: 1.1 },
   { reg: 'F-GKQR', type: 'DR400-ROTAX', empty: 552, arm: 0.408 },
   { reg: 'F-HCOY', type: 'DR401-CDI', empty: 701, arm: 0.338 },

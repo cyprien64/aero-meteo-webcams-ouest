@@ -106,6 +106,10 @@
     return { min: Math.max(0, Math.round(t - cr)), fuel: Math.max(0, Math.round(fu - cr * ff / 60)) + TAXI_L,
       src: `manuel : montée ${Math.round(t)} min / ${fu.toFixed(1)} L jusqu'à ${ft} ft, + ${TAXI_L} L de roulage` };
   }
+  if (TYPES['DR401-CDI'] && TYPES['DR400-120']) {   // valeurs lues dans les manuels F-HCOY (155CDI) et F-HPYR (DR400/120)
+    console.assert(perfDist(TYPES['DR401-CDI'].takeoff.table, { elev: 2000, temp: 21, mass: 1100, head: 0 }) === 480, 'perfDist CDI 2000 ft ISA+10');   // 483
+    console.assert(perfDist(TYPES['DR400-120'].landing.table, { elev: 4000, temp: 7, mass: 700, head: 0 }) === 420, 'perfDist DR400/120 att. 700 kg');
+  }
   if (TYPES['R3000-180']) { const c = climbExtra(TYPES['R3000-180'], 5500, 0, 121, 38); console.assert(c.min === 2 && c.fuel === 6, 'climbExtra R3000', c); }
 
   // régime « 5500 ft - 2500 t/mn » -> 5500 (null si le nom ne donne pas d'altitude)

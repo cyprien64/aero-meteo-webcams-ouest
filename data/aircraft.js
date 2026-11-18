@@ -114,7 +114,8 @@ window.AIRCRAFT_TYPES = {
       { name: '8500 ft - 2700 t/mn', tas: 138, ff: 38 },
     ],
     defaultRegime: 1,
-    climb: { extraMin: 2, extraFuel: 4 },   // règle du log ; manuel : 3000 ft en 3,5 min / 4 L, 5500 ft en 7 min / 7 L
+    // table : montée du manuel (§5.06), [altitude ft, temps min, carburant L (mise en route et roulage compris), distance NM]
+    climb: { extraMin: 2, extraFuel: 4, table: [[0, 0, 0, 0], [3000, 3.5, 4, 5.2], [5500, 7, 7, 10], [8500, 12.5, 13, 18], [11500, 21, 20, 28]] },
     speeds: { VSO: 49, VS1: 57, VR: 59, 'V passage 15 m': 70, Vx: '67/78', Vy: '78/92', 'V finesse max': 86, VA: 115, VFE: 94, VNO: 134, VNE: 170,
       Vapp: 65, 'Vapp courte': 62, 'Vw 90° max': 22 },
     // table : tableaux du manuel (§5) — rows[altitude ft] = [température °C, distance 15 m à m[0] kg, à m[1] kg] ;

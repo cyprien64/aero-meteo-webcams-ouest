@@ -100,8 +100,8 @@ window.AIRCRAFT_TYPES = {
   // ---- Robin R3000/180 : manuel de vol (édition 1, janvier 1998, révision 1 de décembre 1999) ----
   'R3000-180': {
     label: 'Robin R3000/180',
-    // Manuel : 2 x 113 L (226 L utilisables). Capacité réelle de l'avion du club : 160 L (indiquée par le club).
-    fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoirs d\'aile G + D', cap: 160, arm: 0.25 }] },
+    // Avion du club : 2 réservoirs d'aile de 80 L (le manuel indique 2 x 113 L) ; même bras de levier, donc comptés ensemble
+    fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoirs d\'aile G + D (2 x 80 L)', cap: 160, arm: 0.25 }] },
     mtow: 1150,   // catégorie N (catégorie U : 1000 kg)
     arms: { pilot: 0.55, copilot: 0.55, pax: 1.33, bag: 1.9 },   // sièges AV réglables : 0,50 à 0,60 m
     envelope: [[0.29, 0], [0.29, 825], [0.403, 1150], [0.548, 1150], [0.548, 0]],
@@ -121,7 +121,7 @@ window.AIRCRAFT_TYPES = {
     landing: { hard: 530, grass: 742, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 1150 kg, volets atterrissage' },
     minPerLitre: 1.6,
     sheet: 'F-XXXX',
-    source: 'Manuel de vol R3000/180 (édition 1, janvier 1998) - capacité carburant 160 L selon le club',
+    source: 'Manuel de vol R3000/180 (édition 1, janvier 1998) - réservoirs 2 x 80 L selon le club',
   },
 
 };

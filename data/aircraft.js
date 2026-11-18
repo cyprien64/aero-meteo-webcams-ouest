@@ -73,6 +73,7 @@ window.AIRCRAFT_TYPES = {
   // ---- Avions ajoutés d'après des sources publiques : À VÉRIFIER avec le manuel de vol de l'avion ----
   'JODEL-D112': {
     label: 'Jodel D112',
+    seats: 2,
     fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoir', cap: 60, arm: null }] },
     mtow: 530,
     arms: { pilot: null, copilot: null, pax: null, bag: null },
@@ -92,6 +93,7 @@ window.AIRCRAFT_TYPES = {
   },
   'GROB-G120A': {
     label: 'Grob G120A',
+    seats: 2,
     fuel: { name: 'AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoirs (utilisable)', cap: 252, arm: null }] },
     mtow: 1490,
     arms: { pilot: null, copilot: null, pax: null, bag: null },
@@ -144,15 +146,16 @@ window.AIRCRAFT_TYPES = {
 
 };
 
+// price : tarif club en € par heure de vol (non renseigné pour F-GLDS et F-GKQR)
 window.AIRCRAFT = [
-  { reg: 'F-HAFF', type: 'DR400-ROTAX', empty: 543, arm: 0.409 },
-  { reg: 'F-HPYR', type: 'DR400-ROTAX', empty: 541, arm: 0.393 },
+  { reg: 'F-HAFF', type: 'DR400-ROTAX', empty: 543, arm: 0.409, price: 205 },
+  { reg: 'F-HPYR', type: 'DR400-ROTAX', empty: 541, arm: 0.393, price: 205 },
   { reg: 'F-GLDS', type: 'DR400-ROTAX', empty: 530, arm: 0.402, bagArm: 1.1 },
   { reg: 'F-GKQR', type: 'DR400-ROTAX', empty: 552, arm: 0.408 },
-  { reg: 'F-HCOY', type: 'DR401-CDI', empty: 701, arm: 0.338 },
-  { reg: 'F-HNDI', type: 'DR401-CDI', empty: 684, arm: 0.291 },
-  { reg: 'F-GSUR', type: 'DR400-120', empty: 582, arm: 0.358 },
-  { reg: 'F-PKFC', type: 'JODEL-D112', empty: 300, arm: null, note: 'masse à vide à vérifier (pesée)' },
-  { reg: 'D-EPDH', type: 'GROB-G120A', empty: 1050, arm: null, note: 'masse à vide à vérifier (pesée)' },
-  { reg: 'F-HMRA', type: 'R3000-180', empty: 650, arm: null, note: 'masse à vide à vérifier (pesée)' },
+  { reg: 'F-HCOY', type: 'DR401-CDI', empty: 701, arm: 0.338, price: 241 },
+  { reg: 'F-HNDI', type: 'DR401-CDI', empty: 684, arm: 0.291, price: 241 },
+  { reg: 'F-GSUR', type: 'DR400-120', empty: 582, arm: 0.358, price: 35 },
+  { reg: 'F-PKFC', type: 'JODEL-D112', empty: 300, arm: null, note: 'masse à vide à vérifier (pesée)', price: 87 },
+  { reg: 'D-EPDH', type: 'GROB-G120A', empty: 1050, arm: null, note: 'masse à vide à vérifier (pesée)', price: 32 },
+  { reg: 'F-HMRA', type: 'R3000-180', empty: 650, arm: null, note: 'masse à vide à vérifier (pesée)', price: 165 },
 ];

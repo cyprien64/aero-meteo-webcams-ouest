@@ -527,6 +527,7 @@
           <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
           <option value="none" ${f.avoid === 'none' ? 'selected' : ''}>Ne rien contourner</option></select></label>
         <datalist id="pil-list">${Object.keys(store.get('pilots', {})).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+        <label>Partage du coût entre (personnes)<input id="pf-share" type="number" min="1" max="4" value="${esc(f.share || 1)}"></label>
         <label>Pilote (nom, profil mémorisé sur cet appareil)<input id="pf-pil" list="pil-list" value="${esc(f.pil || '')}" autocomplete="off"></label>
         <label>Licence / prorogation SEP valable jusqu'au<input id="pf-lic" type="date"></label>
         <label>Certificat médical valable jusqu'au<input id="pf-med" type="date"></label>
@@ -660,7 +661,7 @@
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
       exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
       stages: v('#pf-stages').toUpperCase(), turn: +v('#pf-turn') || 0, refuel: v('#pf-refuel') === '1',
-      stalts: v('#pf-stalts').toUpperCase(), lic: v('#pf-lic'), med: v('#pf-med'),
+      stalts: v('#pf-stalts').toUpperCase(), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
     if (f.pil) store.set('pilots', { ...store.get('pilots', {}), [f.pil]: { m: f.m1, lic: f.lic, med: f.med } });
@@ -745,6 +746,7 @@
           b.vigil = A.vigOnRoute(sp, b.depT.getTime(), b.eta.getTime());
         } catch (e) { console.warn('vigilance', e); }
         b.mountain = mountainOf(b);
+        b.altCmp = await altitudeCompare(b, b.mids, b.depElev).catch((e) => { console.warn('altitudes', e); return null; });
         b.changes = snapshotDiff(b);
         trip.push(b);
         time = new Date(b.eta.getTime() + f.turn * 6e4);
@@ -761,15 +763,20 @@
         }
       }
       trip.forEach((b) => { b.trip = trip; });
+      prog.textContent = 'Créneaux de départ…';
+      trip[0].slots = await departureSlots(trip).catch((e) => { console.warn('créneaux', e); return null; });
+      // VAC des terrains de la route : mises en cache pour être consultables hors ligne
+      [...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))].forEach((id) => fetch(`data/vac/${id}.pdf`).catch(() => {}));
       drawTrip(trip);
       try {
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
-      out.innerHTML = (trip.length > 1 ? tripHtml(trip) : '') + trip.map((b, i) => trip.length > 1
+      out.innerHTML = slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
+      const ck = $('#pf-check'); if (ck) ck.addEventListener('change', (e) => { const st = store.get(checkKey(trip[0]), []); st[+e.target.dataset.i] = e.target.checked; store.set(checkKey(trip[0]), st); });
       lastBrief = trip[0]; lastTrip = trip; window.AWW_LASTTRIP = trip;
       prog.textContent = '';
       const histId = makePdf ? Date.now() : null;
@@ -1144,7 +1151,7 @@
       f, userIds, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, wxRoute: await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message })),
+      profile, mids, depElev: elevOf(f.dep), wxRoute: await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message })),
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -1557,6 +1564,7 @@
       const oh = outsideHours(t.v, t.when);
       if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
+    semiCircular(b).forEach((x) => al.push(`Règle semi-circulaire : ${x.lg.from}→${x.lg.to} (Rm ${r3(x.lg.tm)}°, vers l'${x.east ? 'est' : 'ouest'}) à ${b.f.ft} ft, à plus de 3000 ft sol — prendre ${x.east ? 'un millier impair' : 'un millier pair'} + 500 ft${x.sug ? `, par exemple ${x.sug} ft` : ''}.`));
     const rf = regFt(b.f.rg.name);
     if (rf != null && Math.abs(rf - b.f.ft) > 1500) al.push(`Régime « ${b.f.rg.name} » prévu pour ${rf} ft alors que la croisière est à ${b.f.ft} ft : vitesse et consommation à revoir.`);
     for (const [k, lbl] of [['lic', 'Licence / prorogation'], ['med', 'Certificat médical']]) {
@@ -1605,6 +1613,227 @@
     return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, herbe ; vent de face compté seulement avec le METAR d\'un vol dans les 2 h)' : 'estimation'}, passage 15 m. Montée : ${esc(b.climb.src)}.</p>
       <p class="meta">📝 Route plan de vol (case 15) : <code id="pf-icao${sfx}">${esc(icaoRoute(b))}</code> <button class="btn" id="pf-icao-copy${sfx}">Copier</button></p>`;
   }
+  // ================================================================== compléments de préparation
+  const vacAt = (id) => (VAC && VAC.data && VAC.data[id]) || null;
+  // temps (min) d'une branche pour une vitesse propre et un vent donnés (même formule que le calcul des branches)
+  function legMinutes(dist, tc, w, tas) {
+    const ws = w && w.spd != null ? w : { dir: 0, spd: 0 }, wa = rad(ws.dir - tc);
+    const wca = deg(Math.asin(Math.max(-1, Math.min(1, (ws.spd / tas) * Math.sin(wa)))));
+    return dist / Math.max(20, tas * Math.cos(rad(wca)) - ws.spd * Math.cos(wa)) * 60;
+  }
+  // régime le plus proche d'une altitude (types dont les régimes sont nommés « 5500 ft - … »), sinon celui choisi
+  function regimeFor(T, alt, rg) {
+    const rs = T.regimes.filter((r) => regFt(r.name) != null);
+    if (!rs.length) return rg;
+    const best = Math.min(...rs.map((r) => Math.abs(regFt(r.name) - alt))), near = rs.filter((r) => Math.abs(regFt(r.name) - alt) === best);
+    return near.find((r) => rg && r.name.split(' - ')[1] === rg.name.split(' - ')[1]) || near[0];
+  }
+
+  // ---------- règle semi-circulaire (au-dessus de 3000 ft sol) : Rm 000-179 -> milliers impairs + 500, 180-359 -> pairs + 500
+  const semiOk = (ft, tm) => (ft - 500) % 1000 === 0 && ((ft - 500) / 1000) % 2 === (tm < 180 ? 1 : 0);
+  console.assert(semiOk(3500, 90) && semiOk(4500, 270) && !semiOk(4500, 90) && !semiOk(5000, 90), 'semiOk');
+  function semiCircular(b) {
+    const out = []; let acc = 0;
+    for (const lg of b.legs) {
+      const seg = (b.profile || []).filter((p) => p.along >= acc - .5 && p.along <= acc + lg.dist + .5);
+      const lowGround = seg.length ? Math.min(...seg.map((p) => p.ft)) : 0;
+      acc += lg.dist;
+      if (b.f.ft - lowGround <= 3000 || semiOk(b.f.ft, lg.tm)) continue;
+      const floor = Math.max(lg.safe ? lg.safe.alt : 0, 3500);
+      let sug = null; for (let a = 3500; a <= 12500; a += 1000) if (a >= floor && semiOk(a, lg.tm)) { sug = a; break; }
+      out.push({ lg, sug, east: lg.tm < 180 });
+    }
+    return out;
+  }
+
+  // ---------- comparaison d'altitudes de croisière (vent Open-Meteo déjà téléchargé : même requête, en cache)
+  async function altitudeCompare(b, mids, depElev) {
+    if (!b.winds) return null;
+    const times = b.winds.map((w) => w.at), maxSafe = Math.max(0, ...b.legs.map((l) => (l.safe ? l.safe.alt : 0)));
+    const rows = [];
+    for (const alt of [...new Set([2500, 3500, 4500, 5500, 6500, 7500, b.f.ft])].sort((x, y) => x - y)) {
+      const ws = await windsAloft(mids, alt, times), rg = regimeFor(b.f.T, alt, b.f.rg), cl = climbExtra(b.f.T, alt, depElev, rg.tas, rg.ff);
+      const cruise = b.legs.reduce((s, lg, i) => s + legMinutes(lg.dist, lg.tc, ws[i], rg.tas), 0);
+      const min = Math.round(cruise) + cl.min;
+      rows.push({ alt, min, fuel: Math.round(cruise * rg.ff / 60) + cl.fuel, low: alt < maxSafe, semi: b.legs.every((lg) => semiOk(alt, lg.tm)), rg: rg.name, cur: alt === b.f.ft });
+    }
+    const ok = rows.filter((r) => !r.low), best = ok.sort((x, y) => x.fuel - y.fuel || x.min - y.min)[0], cur = rows.find((r) => r.cur);
+    return { rows: rows.sort((x, y) => x.alt - y.alt), best, cur, maxSafe };
+  }
+
+  // ---------- terrains de déroutement le long de la route
+  const DIVERT_NM = 15;
+  function diversions(b) {
+    const finesse = b.f.T.glide || 9;
+    return b.legs.map((lg) => {
+      const n = Math.max(2, Math.ceil(lg.dist / 2)), near = new Map(); let worst = { d: 0, at: 0 };
+      for (let k = 0; k <= n; k++) {
+        const p = destPt(lg.a, lg.tc, lg.dist * k / n);
+        let best = null;
+        for (const a of A.APTS) { const d = distNm(p, [a.la, a.lo]); if (!best || d < best.d) best = { a, d }; if (d <= 10 && (!near.has(a.icao) || near.get(a.icao).d > d)) near.set(a.icao, { a, d, along: lg.dist * k / n }); }
+        if (best && best.d > worst.d) worst = { d: best.d, at: lg.dist * k / n, a: best.a };
+      }
+      const glide = lg.safe ? Math.max(0, (b.f.ft - lg.safe.terrain) * finesse / 6076) : null;
+      return { lg, list: [...near.values()].filter((x) => x.a.icao !== lg.from && x.a.icao !== lg.to).sort((x, y) => x.along - y.along), worst, glide };
+    });
+  }
+  function diversionsHtml(b) {
+    const dv = diversions(b);
+    return `<h4>Terrains de déroutement le long de la route</h4>
+      ${dv.map((x) => `<p class="meta" style="margin:2px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> : ${x.list.length ? x.list.slice(0, 6).map((t) => `${esc(t.a.icao)} ${esc(t.a.name)} (${t.d.toFixed(0)} NM, à ${t.along.toFixed(0)} NM)`).join(' · ') : 'aucun terrain à moins de 10 NM'}
+        — terrain le plus éloigné : <b>${x.worst.d.toFixed(0)} NM</b>${x.glide != null ? ` (plané ≈ ${x.glide.toFixed(0)} NM depuis ${b.f.ft} ft)` : ''}</p>
+        ${x.worst.d > DIVERT_NM ? `<div class="warn">⚠️ ${esc(x.lg.from)}→${esc(x.lg.to)} : jusqu'à ${x.worst.d.toFixed(0)} NM de tout terrain (à ${x.worst.at.toFixed(0)} NM de ${esc(x.lg.from)}) — repérer les champs utilisables sur la carte.</div>` : ''}`).join('')}`;
+  }
+
+  // ---------- charge restante et graphique de centrage
+  function loadMargins(b) {
+    const mb = b.mb, T = b.f.T, d = T.fuel.density, arm0 = T.fuel.tanks[0].arm, bagArm = b.f.ac.bagArm || T.arms.bag;
+    const margin = T.mtow - mb.mass, capLeft = Math.max(0, (T.fuel.tanks[0].cap || 0) - b.f.fuel);
+    const ok = (dm, arm) => mb.cg == null || arm == null || mb.inEnv((mb.mom + dm * arm) / (mb.mass + dm), mb.mass + dm);
+    let fuel = 0; while (fuel + 1 <= capLeft && (fuel + 1) * d <= margin && ok((fuel + 1) * d, arm0)) fuel++;
+    let bag = 0; while (bag + 1 <= margin && ok(bag + 1, bagArm)) bag++;
+    return { margin: Math.round(margin), fuel, bag, limitFuel: fuel < capLeft ? ((fuel + 1) * d > margin ? 'masse max' : 'centrage') : 'réservoir plein', limitBag: bag < Math.floor(margin) ? 'centrage' : 'masse max' };
+  }
+  function cgSvg(b) {
+    const env = b.mb.env; if (!env || b.mb.cg == null) return '';
+    const xs = env.map((p) => p[0]), ms = env.map((p) => p[1]).filter((m) => m > 0);
+    const x0 = Math.min(...xs) - .02, x1 = Math.max(...xs) + .02, m0 = Math.min(...ms, b.landMass) - 60, m1 = b.f.T.mtow + 40, W = 320, H = 170;
+    const X = (x) => 30 + (x - x0) / (x1 - x0) * (W - 40), Y = (m) => H - 20 - (Math.max(m, m0) - m0) / (m1 - m0) * (H - 30);
+    const pt = (cg, m, l, c) => `<circle cx="${X(cg)}" cy="${Y(m)}" r="4" fill="${c}"/><text x="${X(cg) + 6}" y="${Y(m) + 4}" font-size="10" fill="currentColor">${l}</text>`;
+    const col = (cg, m) => (b.mb.inEnv(cg, m) ? '#2ecc40' : '#ff4136');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:360px;display:block" role="img" aria-label="Enveloppe de centrage">
+      <polygon points="${env.map(([x, m]) => `${X(x)},${Y(m)}`).join(' ')}" fill="rgba(0,150,220,.15)" stroke="#39c" />
+      <line x1="${X(b.mb.cg)}" y1="${Y(b.mb.mass)}" x2="${X(b.mb.ldgCg)}" y2="${Y(b.landMass)}" stroke="currentColor" stroke-dasharray="3 3"/>
+      ${pt(b.mb.cg, b.mb.mass, 'Déc.', col(b.mb.cg, b.mb.mass))}${b.mb.ldgCg != null ? pt(b.mb.ldgCg, b.landMass, 'Att.', col(b.mb.ldgCg, b.landMass)) : ''}
+      <text x="30" y="${H - 5}" font-size="9" fill="currentColor">${x0.toFixed(2)} m</text><text x="${W - 40}" y="${H - 5}" font-size="9" fill="currentColor">${x1.toFixed(2)} m</text>
+      <text x="2" y="${Y(b.f.T.mtow) + 3}" font-size="9" fill="currentColor">${b.f.T.mtow}</text></svg>`;
+  }
+  function loadHtml(b) {
+    const L = loadMargins(b);
+    return `<h4>Masse, centrage et charge restante</h4>
+      <p class="meta">Marge sous la masse max : <b>${L.margin} kg</b>. On peut encore ajouter <b>${L.fuel} L</b> de carburant (limite : ${L.limitFuel}) ou <b>${L.bag} kg</b> de bagages (limite : ${L.limitBag}${b.mb.cg == null ? ', centrage non calculé' : ''} ; vérifier aussi la charge max de la soute).</p>
+      ${cgSvg(b)}`;
+  }
+
+  // ---------- check-list avant départ (mémorisée sur l'appareil, imprimée dans le PDF)
+  const CHECK_ITEMS = ['Documents avion : CEN / CDN, certificat d\'immatriculation, assurance, licence station, carnet de route, manuel de vol',
+    'Documents pilote : licence et qualification valides, certificat médical, pièce d\'identité', 'Avion réservé, potentiel et carnet de route vérifiés',
+    'Météo consultée (TEMSI, WINTEM, METAR / TAF, aviation.meteo.fr)', 'NOTAM, SUP AIP et AZBA consultés (SOFIA)', 'Carburant vérifié (quantité, purge) et huile',
+    'Masse et centrage vérifiés', 'Terrains : VAC à jour, PPR / horaires, carburant disponible', 'Plan de vol déposé (si requis) ou prévenu quelqu\'un', 'Visite pré-vol faite'];
+  const checkKey = (b) => { const b0 = (b.trip || [b])[0]; return `check.${b0.f.ac.reg}.${b0.f.dep}.${b0.depT.toISOString().slice(0, 10)}`; };
+  function checkHtml(b, sfx) {
+    const st = store.get(checkKey(b), []);
+    return `<h4>Check-list avant départ</h4><div class="checklist" id="pf-check${sfx}">${CHECK_ITEMS.map((t, i) => `<label style="display:block;margin:2px 0"><input type="checkbox" data-i="${i}" ${st[i] ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</div>`;
+  }
+
+  // ---------- coût du vol et comparaison des avions du club
+  const feeNum = (id) => { const f = A.feeFor ? A.feeFor(id) : null, m = f && String(f.tarif).replace(',', '.').match(/(\d+(?:\.\d+)?)/); return m ? +m[1] : 0; };
+  const seatsOf = (T) => T.seats || 4;
+  function tripCost(trip) {
+    const f = trip[0].f, min = trip.reduce((s, b) => s + b.totMin, 0), fees = trip.reduce((s, b) => s + feeNum(b.f.arr), 0);
+    const price = f.ac.price || (FLEET.find((x) => x.reg === f.ac.baseReg) || {}).price;
+    const occ = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? 2 : 0);
+    const cmp = FLEET.filter((ac) => ac.price).map((ac) => {
+      const T = TYPES[ac.type], rg = regimeFor(T, f.ft, T.regimes[T.defaultRegime]);
+      let tot = 0, maxNeed = 0;
+      for (const b of trip) {
+        const cl = climbExtra(T, f.ft, 0, rg.tas, rg.ff), m = b.legs.reduce((s, lg) => s + legMinutes(lg.dist, lg.tc, lg.wind, rg.tas), 0) + cl.min;
+        tot += m; maxNeed = Math.max(maxNeed, Math.round(m * rg.ff / 60) + cl.fuel + Math.round(f.res / 60 * rg.ff) + (b.altLeg ? Math.round(b.altLeg.min * rg.ff / 60) : 0));
+      }
+      const cap = T.fuel.tanks.reduce((s, t) => s + (t.cap || 0), 0), why = [];
+      if (occ > seatsOf(T)) why.push(`${seatsOf(T)} places`);
+      if (maxNeed > cap) why.push(`autonomie (${maxNeed} L requis, ${cap} L)`);
+      const mass = (ac.empty || 0) + f.m1 + f.m2 + f.m3 + f.m4 + Math.min(cap, maxNeed) * T.fuel.density;
+      if (mass > T.mtow) why.push(`masse ${Math.round(mass)} kg > ${T.mtow} kg`);
+      return { ac, T, min: Math.round(tot), cost: Math.round(tot / 60 * ac.price + fees), why };
+    }).sort((x, y) => (x.why.length - y.why.length) || x.cost - y.cost);
+    return { min, fees, price, cost: price ? Math.round(min / 60 * price + fees) : null, occ, cmp };
+  }
+  function costHtml(trip) {
+    const c = tripCost(trip), n = Math.max(1, trip[0].f.share || 1), best = c.cmp.find((x) => !x.why.length);
+    return `<h4>Coût du vol</h4>
+      <p class="meta">${esc(trip[0].f.ac.reg)} : ${hhmm(c.min)} de vol${c.price ? ` × ${c.price} €/h` : ' (tarif horaire non renseigné)'}${c.fees ? ` + ${c.fees} € de taxes d'atterrissage` : ''} = <b>${c.cost != null ? c.cost + ' €' : '?'}</b>${c.cost != null && n > 1 ? `, soit <b>${Math.round(c.cost / n)} € par personne</b> (${n})` : ''}. Temps de vol estimé (hors roulage), taxes connues seulement.</p>
+      ${best ? `<div class="okk">💶 Avion le moins cher pour ce vol : <b>${esc(best.ac.reg)}</b> (${esc(best.T.label)}) — ${hhmm(best.min)}, ${best.cost} €${c.cost != null && best.ac.reg !== trip[0].f.ac.baseReg ? `, soit ${c.cost - best.cost} € de moins` : ''}.</div>` : ''}
+      <table class="legs"><tr><th>Avion</th><th>Temps</th><th>Coût</th><th>Possible ?</th></tr>
+      ${c.cmp.map((x) => `<tr><td>${esc(x.ac.reg)} ${esc(x.T.label)}</td><td>${hhmm(x.min)}</td><td>${x.cost} €</td><td>${x.why.length ? '❌ ' + esc(x.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
+      <p class="meta">Comparaison au régime le plus proche de ${trip[0].f.ft} ft, avec le vent prévu ; centrage et carburant disponible aux escales non vérifiés pour les autres avions.</p>`;
+  }
+
+  // ---------- fiche radio par étape (messages types, à adapter)
+  const rwyNum = (qfu) => String(Math.round(qfu / 10) % 36 || 36).padStart(2, '0');   // QFU 128° -> piste 13
+  const cityOf = (id) => ((A.aptByIcao[id] || {}).name || id).split(/ (?:Pyrénées|Pays|Île|Ile|Atlantique|Bretagne|Val|Le Sequestre|Dordogne|Brie|Seyresse)\b|[-–(]/)[0].trim();
+  function radioCard(b) {
+    const f = b.f, reg = f.ac.reg, typ = f.T.label.replace(/^Robin /, '').split(/[ /]/)[0], pob = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? 2 : 0);
+    const svc = (id) => { const l = ((vacAt(id) || {}).freqs || []).join(' | '), fr = (re) => { const m = l.match(re); return m ? m[1] : ''; };
+      return { twr: fr(/TWR[^|]*?(\d{3}\.\d{2,3})/), gnd: fr(/(?:GND|SOL)[^|]*?(\d{3}\.\d{2,3})/), afis: fr(/AFIS[^|]*?(\d{3}\.\d{2,3})/), aa: fr(/A\/A[^|]*?(\d{3}\.\d{2,3})/) || '123.500', atis: /ATIS/.test(l) }; };
+    const d = svc(f.dep), a = svc(f.arr), cd = cityOf(f.dep), ca = cityOf(f.arr), l0 = b.legs[0], lN = b.legs[b.legs.length - 1];
+    const rows = [];
+    if (d.gnd || d.twr) rows.push(['Mise en route / roulage', `${d.gnd || d.twr}`, `${cd} ${d.gnd ? 'Sol' : 'Tour'}, ${reg}, ${typ}, ${pob} POB, au parking${d.atis ? ", avec l'information" : ''}, VFR à destination de ${ca}, demandons le roulage.`]);
+    else rows.push(['Roulage', d.afis || d.aa, `${cd} ${d.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, roule vers le point d'arrêt piste ${b.depInfo.rw ? rwyNum(b.depInfo.rw.best.qfu) : '..'}${d.afis ? ', pour un vol VFR à destination de ' + ca : ''}.`]);
+    if (d.twr) rows.push(['Sortie', d.twr, `${cd} Tour, ${reg}, ${/^[A-Z]{1,3}-[A-Z]+/.test(l0.to) ? `au point ${l0.to}` : 'quittons la zone'}, ${f.ft} ft, quittons la fréquence.`]);
+    const seen = new Set();
+    b.legs.forEach((lg) => lg.airspaces.filter((s) => s.call && s.freq && /TMA|CTR|CTA|SIV|RMZ|TMZ/.test(s.kind || '')).forEach((s) => {
+      if (seen.has(s.call)) return; seen.add(s.call);
+      rows.push([`En route (${s.name})`, String(s.freq).split(' / ')[0], `${s.call}, ${reg}, ${typ}, VFR de ${cd} à ${ca}, ${lg.from === f.dep ? 'au départ de ' + cd : 'à proximité de ' + lg.from}, ${f.ft} ft, transpondeur 7000, ${/SIV|INFO/i.test(s.call + s.kind) ? "demandons l'information de vol" : 'demandons le transit'}.`]);
+    }));
+    if (a.twr) rows.push(['Arrivée', a.twr, `${ca} Tour, ${reg}, ${typ}, ${/^[A-Z]{1,3}-[A-Z]+/.test(lN.from) ? `au point ${lN.from}` : `à 5 NM de ${ca}`}, ${f.ft} ft${a.atis ? ", avec l'information" : ''}, pour intégration.`]);
+    else rows.push(['Arrivée', a.afis || a.aa, `${ca} ${a.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, à 5 NM du terrain, ${f.ft} ft, pour intégration${b.arrInfo.rw ? ' piste ' + rwyNum(b.arrInfo.rw.best.qfu) : ''}.`]);
+    return rows;
+  }
+  const radioHtml = (b) => `<details><summary><b>📻 Fiche radio de l'étape</b> (messages types, à adapter aux consignes de la VAC)</summary>
+      <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table></details>`;
+
+  // ---------- meilleur créneau de départ (même nav, départ de 7 h à 17 h locales)
+  async function departureSlots(trip) {
+    const b0 = trip[0], bN = trip[trip.length - 1], dur = bN.eta - b0.depT, dep = A.aptByIcao[b0.f.dep], arr = A.aptByIcao[bN.f.arr];
+    const day = b0.depT.toISOString().slice(0, 10), next = new Date(b0.depT.getTime() + 864e5).toISOString().slice(0, 10);
+    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+dep.la).toFixed(3)},${(+arr.la).toFixed(3)}&longitude=${(+dep.lo).toFixed(3)},${(+arr.lo).toFixed(3)}`
+      + `&hourly=temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,precipitation&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${next}`);
+    if (!Array.isArray(d)) d = [d];
+    const at = (i, t) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { t: h.temperature_2m[k], td: h.dew_point_2m[k], ws: h.wind_speed_10m[k], wd: h.wind_direction_10m[k], g: h.wind_gusts_10m[k], vis: h.visibility[k], rr: h.precipitation[k] }; };
+    const vw = (b0.f.T.speeds || {})['Vw 90° max'] || 20, dayStart = Date.UTC(b0.depT.getUTCFullYear(), b0.depT.getUTCMonth(), b0.depT.getUTCDate());
+    const loc = new Date(b0.depT), slots = [];
+    for (let h = 7; h <= 17; h++) {
+      loc.setHours(h, 0, 0, 0); const t0 = new Date(loc), t1 = new Date(t0.getTime() + dur);
+      const p = at(0, t0), q = at(1, t1); if (!p || !q) continue;
+      const cross = (x, id) => { const rw = runwayFor(vacAt(id), x.wd, x.ws); return rw ? Math.round(rw.best.cross) : null; };
+      const why = [];
+      for (const [x, id, lbl] of [[p, b0.f.dep, 'départ'], [q, bN.f.arr, 'arrivée']]) {
+        const c = cross(x, id), base = Math.round((x.t - x.td) * 400 / 100) * 100;
+        if (c != null && c > vw) why.push(`travers ${c} kt à l'${lbl}`);
+        if (x.g > 25) why.push(`rafales ${Math.round(x.g)} kt à l'${lbl}`);
+        if (x.vis != null && x.vis < 5000) why.push(`visi ${Math.round(x.vis / 100) / 10} km à l'${lbl}`);
+        if (base < 1500) why.push(`base ~${base} ft à l'${lbl}`);
+        if (x.rr >= 1) why.push(`pluie ${x.rr} mm à l'${lbl}`);
+      }
+      if (b0.night && b0.night.day && t0 < b0.night.day) why.push('avant le jour aéronautique');
+      if (bN.night && t1 > bN.night.night) why.push('arrivée de nuit');
+      if (trip.some((b) => b.rtba.some((r) => r.crossed && r.below && r.slots.some((s) => slotOverlap(s, dayStart, t0.getTime(), t1.getTime()))))) why.push('AZBA active sur la route');
+      slots.push({ t0, h, p, q, why, score: why.length * 100 + Math.max(p.ws, q.ws) });
+    }
+    const best = slots.slice().sort((x, y) => x.score - y.score)[0];
+    return { slots, best };
+  }
+  function slotsHtml(trip) {
+    const s = trip[0].slots; if (!s || !s.slots.length) return '';
+    const hl = (x) => `${String(x.h).padStart(2, '0')} h`;
+    return `<h4>Meilleur créneau de départ (${trip[0].depT.toLocaleDateString('fr-FR')})</h4>
+      <div class="${s.best.why.length ? 'warn' : 'okk'}">🕐 Meilleur départ <b>${hl(s.best)}</b> (heure locale) : ${s.best.why.length ? esc(s.best.why.join(', ')) : `vent ${Math.round(s.best.p.ws)} kt au départ, ${Math.round(s.best.q.ws)} kt à l'arrivée, sans contrainte détectée`}.</div>
+      <table class="legs trip"><tr><th>Départ</th><th>Vent dép.</th><th>Vent arr.</th><th>Base est.</th><th>Visi</th><th>Contraintes</th></tr>
+      ${s.slots.map((x) => `<tr${x === s.best ? ' style="font-weight:bold"' : ''}><td>${hl(x)}</td><td>${r3(x.p.wd)}/${Math.round(x.p.ws)}${x.p.g > x.p.ws + 5 ? 'G' + Math.round(x.p.g) : ''}</td><td>${r3(x.q.wd)}/${Math.round(x.q.ws)}</td>
+        <td>${Math.round(Math.min(x.p.t - x.p.td, x.q.t - x.q.td) * 4) * 100} ft</td><td>${Math.round(Math.min(x.p.vis, x.q.vis) / 1000)} km</td><td style="text-align:left">${x.why.length ? esc(x.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
+      <p class="meta">Prévision Open-Meteo au départ et à l'arrivée (base estimée par l'écart température / point de rosée). Indicatif : confirmer avec TAF, TEMSI et AZBA du jour.</p>`;
+  }
+
+  function altCmpHtml(b) {
+    const c = b.altCmp; if (!c || !c.best) return '';
+    const d = c.cur ? { min: c.cur.min - c.best.min, fuel: c.cur.fuel - c.best.fuel } : null;
+    return `<details><summary><b>🧭 Altitude de croisière selon le vent</b> — ${c.best.alt === b.f.ft ? `${b.f.ft} ft est déjà la meilleure` : `à ${c.best.alt} ft${d ? ` tu gagnes ${d.min} min et ${d.fuel} L` : ''}`}</summary>
+      <table class="legs"><tr><th>Altitude</th><th>Temps</th><th>Carburant</th><th>Régime</th><th>Remarque</th></tr>
+      ${c.rows.map((r) => `<tr${r === c.best ? ' style="font-weight:bold"' : ''}><td>${r.alt} ft${r.cur ? ' (prévue)' : ''}</td><td>${hhmm(r.min)}</td><td>${r.fuel} L</td><td>${esc(r.rg.name || r.rg)}</td><td style="text-align:left">${[r.low && `sous l'alti sécu (${c.maxSafe} ft)`, !r.semi && 'hors règle semi-circulaire au-dessus de 3000 ft sol'].filter(Boolean).join(', ') || '✅'}</td></tr>`).join('')}</table>
+      <p class="meta">Vent Open-Meteo à l'heure de passage, montée comprise. Choisir aussi selon les espaces aériens, la base des nuages et le givrage.</p></details>`;
+  }
+  const vacLinks = (b) => `<p class="meta">📄 VAC (copie du cycle en cours, consultable hors ligne après le calcul) : ${[...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].map((id) => `<a href="data/vac/${id}.pdf" target="_blank" rel="noopener">${id}</a>`).join(' · ')}</p>`;
   function summaryHtml(b, sfx = '') {
     const al = alertsOf(b);
     const nt = b.night;
@@ -1620,11 +1849,16 @@
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
       ${perfLine(b, sfx)}
+      ${altCmpHtml(b)}
+      ${loadHtml(b)}
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       ${azbaHtml(b)}
       ${mountainHtml(b)}
+      ${diversionsHtml(b)}
+      ${radioHtml(b)}
+      ${vacLinks(b)}
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
       ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
         <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
@@ -2184,6 +2418,36 @@
     const others = b.zones.filter((x) => !x.z.rtba);
     if (others.length) table(['Zone', 'Limites', 'Position', 'Remarques'], others.map((x) => [`${x.z.id} ${x.z.name}`, `${x.z.lower} - ${x.z.upper}`, (x.crossed ? 'TRAVERSÉE' : `à ${x.d.toFixed(0)} NM`) + (x.below ? '' : '\nhors altitude'), (x.z.rmk || '').slice(0, 240)]), { size: 6.8, at: { columnStyles: { 0: { cellWidth: 36 }, 1: { cellWidth: 30 }, 2: { cellWidth: 20 } } } });
 
+    // ---------------------------------------------------------------- compléments : altitude, déroutements, charge, coût, radio, check-list
+    progress('PDF : compléments…');
+    newPage('portrait', 'COMPLÉMENTS');
+    if (b.altCmp && b.altCmp.best) {
+      h2('Altitude de croisière selon le vent');
+      table(['Altitude', 'Temps', 'Carburant', 'Régime', 'Remarque'], b.altCmp.rows.map((r) => [`${r.alt} ft${r.cur ? ' (prévue)' : ''}${r === b.altCmp.best ? ' *' : ''}`, hhmm(r.min), `${r.fuel} L`, r.rg,
+        [r.low && 'sous l\'alti sécu', !r.semi && 'hors règle semi-circulaire'].filter(Boolean).join(', ') || 'OK']), { size: 7.5 });
+    }
+    const semi = semiCircular(b);
+    if (semi.length) para(`Règle semi-circulaire (au-dessus de 3000 ft sol : Rm 000-179 milliers impairs + 500, Rm 180-359 milliers pairs + 500) : ${semi.map((x) => `${x.lg.from}-${x.lg.to} Rm ${r3(x.lg.tm)} -> ${x.sug || '?'} ft`).join(' ; ')}.`, { size: 8, color: [170, 40, 0] });
+    h2('Terrains de déroutement le long de la route');
+    table(['Branche', 'Terrains à moins de 10 NM (distance, position)', 'Plus loin d\'un terrain'], diversions(b).map((x) => [`${x.lg.from} -> ${x.lg.to}`,
+      x.list.slice(0, 6).map((t) => `${t.a.icao} ${t.a.name} (${t.d.toFixed(0)} NM, à ${t.along.toFixed(0)} NM)`).join('\n') || 'aucun', `${x.worst.d.toFixed(0)} NM${x.glide != null ? `\nplané ~${x.glide.toFixed(0)} NM` : ''}`]), { size: 7.3 });
+    h2('Charge restante');
+    const lm = loadMargins(b);
+    para(`Marge sous la masse max ${lm.margin} kg : encore ${lm.fuel} L de carburant (limite ${lm.limitFuel}) ou ${lm.bag} kg de bagages (limite ${lm.limitBag}).`, { size: 8.5 });
+    if (!b.stage || b.stage === 1) {
+      const tc = tripCost(b.trip || [b]);
+      h2('Coût du vol');
+      para(`${b.f.ac.reg} : ${hhmm(tc.min)} x ${tc.price || '?'} EUR/h${tc.fees ? ` + ${tc.fees} EUR de taxes` : ''} = ${tc.cost != null ? tc.cost + ' EUR' : '?'}${tc.cost != null && (b.f.share || 1) > 1 ? `, soit ${Math.round(tc.cost / b.f.share)} EUR par personne` : ''}.`, { size: 8.5 });
+      table(['Avion', 'Temps', 'Coût', 'Possible ?'], tc.cmp.map((x) => [`${x.ac.reg} ${x.T.label}`, hhmm(x.min), `${x.cost} EUR`, x.why.join(', ') || 'oui']), { size: 7.5 });
+    }
+    h2('Fiche radio (messages types, à adapter)');
+    table(['Phase', 'Fréq.', 'Message'], radioCard(b), { size: 7.5, at: { columnStyles: { 0: { cellWidth: 32 }, 1: { cellWidth: 16 } } } });
+    if (!b.stage || b.stage === 1) {
+      h2('Check-list avant départ');
+      const st = store.get(checkKey(b), []);
+      CHECK_ITEMS.forEach((t, i) => para(`[${st[i] ? 'X' : ' '}] ${t}`, { size: 8.5, gap: .6 }));
+    }
+
     // pied de page
     const n = doc.getNumberOfPages();
     for (let i = 1; i <= n; i++) {
@@ -2210,7 +2474,9 @@
         for (const id of vacIds) {
           progress(`PDF : ajout de la VAC ${id}…`);
           try {
-            const r = await fetch(VAC.data[id].url); if (!r.ok) throw new Error(r.status);
+            let r = await fetch(`data/vac/${id}.pdf`).catch(() => null);
+            if (!r || !r.ok || !/pdf/.test(r.headers.get('content-type') || '')) r = await fetch(VAC.data[id].url);
+            if (!r.ok) throw new Error(r.status);
             const src = await PDFLib.PDFDocument.load(await r.arrayBuffer(), { ignoreEncryption: true });
             (await out.copyPages(src, src.getPageIndices())).forEach((p) => out.addPage(p));
           } catch (e) { failed.push(id); }
@@ -2345,7 +2611,7 @@
 
   // ================================================================== historique des préparations (12)
   const HIST_CACHE = 'aww-history';
-  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts'];
+  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share'];
   function histStart(id, trip) {
     const b = trip[0], f = lastForm || b.f;
     const list = store.get('hist', []);
@@ -2421,7 +2687,7 @@
     let o; try { o = JSON.parse(b64d(m[1])); } catch (e) { console.warn('lien de vol illisible', e); return; }
     history.replaceState(null, '', location.pathname + location.search);
     // le lien vient de l'extérieur : nombres en nombres, textes limités aux caractères d'une route (pas de HTML)
-    const NUM = ['regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'empty', 'turn'];
+    const NUM = ['regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'empty', 'turn', 'share'];
     const safe = (k, v) => NUM.includes(k) ? (Number(v) || 0) : k === 'refuel' ? !!v : String(v).replace(/[^A-Za-z0-9 ./+-]/g, '').slice(0, 120);
     const clean = Object.fromEntries(SHARE_KEYS.filter((k) => k in o && k !== 'time').map((k) => [k, safe(k, o[k])]));
     store.set('form', { ...store.get('form', {}), ...clean });

@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'data', 'live')
 os.makedirs(OUT, exist_ok=True)
+VACDIR = os.path.join(ROOT, 'data', 'vac')   # copies des VAC publiées avec le site (le SIA bloque leur téléchargement depuis une page web)
 FALLBACK_URL = os.environ.get('FALLBACK_URL', '').rstrip('/')
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
 BBOX = '42.0,-5.4,49.0,2.6'
@@ -303,6 +304,36 @@ def collect_supaip():
 # ---------------------------------------------------------------- AIP : cycle AIRAC, zones P/R/D, VAC
 SIA_DVD = 'https://www.sia.aviation-civile.gouv.fr/media/dvd'
 MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+
+def vac_dir_for(cycle):
+    """Dossier des VAC en PDF ; vidé au changement de cycle AIRAC (conservé entre deux passages par le cache GitHub)."""
+    os.makedirs(VACDIR, exist_ok=True)
+    mark = os.path.join(VACDIR, 'cycle.txt')
+    if not os.path.exists(mark) or open(mark).read().strip() != cycle:
+        for f in os.listdir(VACDIR):
+            os.remove(os.path.join(VACDIR, f))
+        open(mark, 'w').write(cycle)
+    return VACDIR
+
+
+def ensure_vac_pdfs(folder, cycle, icaos):
+    """Télécharge les VAC manquantes du cycle (une seule fois par cycle grâce au cache)."""
+    d = vac_dir_for(cycle)
+    base = f'{SIA_DVD}/{folder}/Atlas-VAC/PDF_AIPparSSection/VAC/AD/AD-2.'
+    n = 0
+    for icao in icaos:
+        dest = os.path.join(d, icao + '.pdf')
+        if os.path.exists(dest):
+            continue
+        try:
+            with opener.open(urllib.request.Request(base + icao + '.pdf', headers={'User-Agent': UA}), timeout=60) as r:
+                if 'pdf' in (r.headers.get('Content-Type') or ''):
+                    open(dest, 'wb').write(r.read()); n += 1
+        except Exception as e:  # noqa: BLE001
+            print('  VAC pdf', icao, e)
+        time.sleep(0.2)
+    print(f'  VAC en PDF : {n} téléchargées, {len([f for f in os.listdir(d) if f.endswith(".pdf")])} disponibles')
 
 
 def current_cycle():
@@ -740,6 +771,7 @@ def collect_aip():
             if prev.get('cycle') == cycle and prev.get('v') == VAC_PARSER and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
                 save('vac.json', prev, True); save('zones.json', prevz, True); save('airspaces.json', preva, True)
                 print('  inchangé (même cycle)')
+                ensure_vac_pdfs(folder, cycle, list((prev.get('data') or {}).keys()))
                 return
         except Exception:  # noqa: BLE001
             pass
@@ -751,6 +783,7 @@ def collect_aip():
         print('  zones : échec', e)
         fallback('zones.json')
     vac = {}
+    vdir = vac_dir_for(cycle)
     base = f'{SIA_DVD}/{folder}/Atlas-VAC/PDF_AIPparSSection/VAC/AD/AD-2.'
     for a in aerodromes():
         icao = a[0]
@@ -762,6 +795,7 @@ def collect_aip():
                 if 'pdf' not in (r.headers.get('Content-Type') or ''):
                     continue
                 data = r.read()
+            open(os.path.join(vdir, icao + '.pdf'), 'wb').write(data)
             info = parse_vac(icao, data)
             info['url'] = base + icao + '.pdf'
             vac[icao] = info

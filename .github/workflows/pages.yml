@@ -30,6 +30,16 @@ jobs:
       - name: Dépendance (lecture des cartes VAC)
         run: python3 -m pip install --quiet pypdf
 
+      # VAC en PDF (≈ 70 Mo) : téléchargées une fois par cycle AIRAC puis gardées dans le cache GitHub
+      - name: Cycle AIRAC en vigueur
+        id: cyc
+        run: echo "c=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import collect; print(collect.current_cycle()[1])' 2>/dev/null || echo inconnu)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: data/vac
+          key: vac-pdf-${{ steps.cyc.outputs.c }}
+
       - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
         env:
           FALLBACK_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
@@ -43,7 +53,7 @@ jobs:
         run: |
           mkdir _site
           cp -r index.html map.html *.js *.css *.json app.webmanifest icons lib data _site/
-          (cd _site && zip -qr ../site.zip .) && mv site.zip _site/
+          (cd _site && zip -qr ../site.zip . -x 'data/vac/*') && mv site.zip _site/
 
       - uses: actions/upload-pages-artifact@v3
         with:

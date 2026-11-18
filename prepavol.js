@@ -73,6 +73,28 @@
     return ins;
   }
   const inPoly = (p, poly) => { const [x, y] = P(p); return inPolyXY(x, y, poly.map(P)); };
+
+  // ---------- distances 15 m d'après les tableaux du manuel de vol (data/aircraft.js : takeoff.table / landing.table)
+  // interpolation linéaire dans une suite [[x, y]…] triée, prolongée au-delà des bords
+  const lerp = (pts, x) => { let i = 1; while (i < pts.length - 1 && x > pts[i][0]) i++; const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); };
+  function perfDist(tb, { elev, temp, mass, head, grass }) {
+    const alts = Object.keys(tb.rows).map(Number).sort((a, b) => a - b);
+    // température : pas d'extrapolation vers le froid (raccourcirait la distance) ; masse : pas en dessous de la plus légère du tableau
+    const at = (k) => lerp(alts.map((a) => [a, lerp(tb.rows[a].map((r) => [r[0], r[k]]), Math.max(temp, tb.rows[a][0][0]))]), Math.max(0, elev));
+    let d = lerp([[tb.m[1], at(2)], [tb.m[0], at(1)]], Math.max(tb.m[1], mass));
+    d *= head >= 0 ? lerp(tb.wind, Math.min(head, tb.wind[tb.wind.length - 1][0])) : 1 - tb.tail * head;
+    if (grass) d *= tb.grass;
+    return Math.round(d / 10) * 10;
+  }
+  if (TYPES['R3000-180']) {   // contrôles : valeurs lues directement dans le manuel R3000
+    const to = TYPES['R3000-180'].takeoff.table, ld = TYPES['R3000-180'].landing.table, chk = (v, e, m) => console.assert(v === e, `perfDist ${m} : ${v} ≠ ${e}`);
+    chk(perfDist(to, { elev: 0, temp: 15, mass: 1150, head: 0 }), 570, 'déc. std');   // 565 arrondi à 10 m
+    chk(perfDist(to, { elev: 4000, temp: 7, mass: 950, head: 0 }), 670, 'déc. 4000 ft 950 kg');
+    chk(perfDist(to, { elev: 2000, temp: 11, mass: 1150, head: 0 }), 690, 'déc. 2000 ft interpolé');   // (565+810)/2 = 687,5
+    chk(perfDist(to, { elev: 0, temp: 15, mass: 1150, head: 10 }), 450, 'déc. vent de face 10 kt');
+    chk(perfDist(to, { elev: 0, temp: 15, mass: 1150, head: -4 }), 680, 'déc. vent arrière 4 kt');
+    chk(perfDist(ld, { elev: 0, temp: 15, mass: 1150, head: 0, grass: true }), 740, 'att. herbe');
+  }
   function polyRouteDist(poly, pts) {
     const q = poly.map(P);
     for (let i = 0; i < pts.length - 1; i++) {
@@ -648,20 +670,23 @@
     return { set: s.set, night, day, latestDep: new Date(night.getTime() - b.totMin * 6e4), late: b.eta > night, early: day && b.depT < day, pts, firstDark };
   }
   function tripHtml(trip) {
+    const cgCell = (cg, m) => cg == null ? '–' : `<span style="color:${trip[0].mb.inEnv(cg, m) ? '#2ecc40' : '#ff6b6b'}">${Math.round(m)} kg · ${cg.toFixed(3)}</span>`;
     const rows = trip.map((b) => {
       const rem = b.loaded - b.totFuel, ok = rem >= b.resFuel + (b.altLeg ? b.altLeg.fuel : 0);
       return `<tr><td>${b.stage}</td><td>${esc(b.f.dep)}→${esc(b.f.arr)}</td><td>${utc(b.depT)}</td><td>${utc(b.eta)}</td><td>${hhmm(b.totMin)}</td><td>${b.loaded} L</td><td>${b.totFuel} L</td>
-        <td style="color:${ok ? '#2ecc40' : '#ff6b6b'}"><b>${Math.round(rem)} L</b></td><td>${b.night ? utc(b.night.latestDep) : '–'}</td></tr>`;
+        <td style="color:${ok ? '#2ecc40' : '#ff6b6b'}"><b>${Math.round(rem)} L</b></td><td>${b.night ? utc(b.night.latestDep) : '–'}</td>
+        <td>${cgCell(b.mb.cg, b.mb.mass)}</td><td>${cgCell(b.mb.ldgCg, b.landMass)}</td></tr>`;
     }).join('');
     const totMin = trip.reduce((s, b) => s + b.totMin, 0), totFuel = trip.reduce((s, b) => s + b.totFuel, 0), totDist = trip.reduce((s, b) => s + b.totDist, 0);
     const last = trip[trip.length - 1];
     const warn = trip.filter((b) => b.night && b.night.early).map((b) => `Étape ${b.stage} : départ ${utc(b.depT)} avant le jour aéronautique (${utc(b.night.day)}).`).concat(trip.filter((b) => b.night && b.night.late).map((b) => `Étape ${b.stage} : arrivée ${utc(b.eta)} après la nuit aéronautique (${utc(b.night.night)}) — décoller au plus tard à ${utc(b.night.latestDep)}.`)
+      .concat(trip.filter((b) => (b.mb.cg != null && !b.mb.inEnv(b.mb.cg, b.mb.mass)) || (b.mb.ldgCg != null && !b.mb.inEnv(b.mb.ldgCg, b.landMass))).map((b) => `Étape ${b.stage} : centrage hors limites (${b.f.dep} → ${b.f.arr}).`))
       .concat(trip.filter((b) => b.loaded - b.totFuel < b.resFuel + (b.altLeg ? b.altLeg.fuel : 0)).map((b) => `Étape ${b.stage} : carburant restant à l'arrivée inférieur à dégagement + réserve finale — prévoir un avitaillement à ${b.f.dep}.`)));
     return `<h4>Voyage en ${trip.length} étapes</h4>
-      <table class="legs"><tr><th>#</th><th>Étape</th><th>Départ</th><th>Arrivée</th><th>Durée</th><th>À bord</th><th>Conso</th><th>Reste</th><th>Dernier déc.</th></tr>${rows}
-      <tr><th></th><th>Total</th><th></th><th></th><th>${hhmm(totMin)}</th><th></th><th>${totFuel} L</th><th></th><th></th></tr></table>
+      <table class="legs trip"><tr><th>#</th><th>Étape</th><th>Départ</th><th>Arrivée</th><th>Durée</th><th>À bord</th><th>Conso</th><th>Reste</th><th>Dernier déc.</th><th>Masse · centrage déc.</th><th>à l'atterr.</th></tr>${rows}
+      <tr><th></th><th>Total</th><th></th><th></th><th>${hhmm(totMin)}</th><th></th><th>${totFuel} L</th><th></th><th></th><th></th><th></th></tr></table>
       <p class="meta">${totDist.toFixed(0)} NM · escale ${last.f.turn} min · ${last.f.refuel ? 'plein à chaque escale' : 'sans avitaillement aux escales'} · « Dernier déc. » = dernier décollage pour arriver avant la nuit aéronautique (coucher du soleil + 30 min).</p>
-      ${warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Carburant et horaires compatibles sur toutes les étapes.</div>'}`;
+      ${warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Carburant, centrage et horaires compatibles sur toutes les étapes.</div>'}`;
   }
   window.addEventListener('aww-clear', () => { if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } stopPick(); });
   function drawTrip(trip) {
@@ -926,6 +951,8 @@
     const sunDep = sunTimes(depT, pts[0][0], pts[0][1]);
     const mb = massBalance(f);
     const landMass = mb.mass - totFuel * f.T.fuel.density;
+    // centrage à l'atterrissage : carburant consommé pris dans le réservoir principal
+    mb.ldgCg = mb.cg == null ? null : (mb.mom - totFuel * f.T.fuel.density * f.T.fuel.tanks[0].arm) / landMass;
     const terrain = (id, role) => {
       const v = vacOf(id), a = A.aptByIcao[id];
       const w = wx.find((x) => x.id === id);
@@ -936,9 +963,11 @@
       const tIsa = 15 - 2 * elev / 1000, temp = m && m.temp != null ? m.temp : tIsa;
       const factor = (1 + 0.10 * elev / 1000) * (1 + 0.10 * Math.max(0, temp - tIsa) / 10);
       const base = f.T.takeoff ? (grass ? (f.T.takeoff.grass || f.T.takeoff.hard * 1.15) : f.T.takeoff.hard) : null;
-      const tod = base ? Math.round(base * factor / 10) * 10 : null;
+      const pc = { elev, temp, grass, head: (rw && rw.best.head) || 0, mass: role === 'DÉPART' ? mb.mass : landMass };
+      const tod = f.T.takeoff && f.T.takeoff.table ? perfDist(f.T.takeoff.table, pc) : base ? Math.round(base * factor / 10) * 10 : null;
+      const ldg = f.T.landing && f.T.landing.table ? perfDist(f.T.landing.table, pc) : null;
       const cons = classifyConsignes(v);
-      return { id, role, a, v, m, rw, len, grass, elev, temp, tod, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
+      return { id, role, a, v, m, rw, len, grass, elev, temp, tod, ldg, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
     };
     const depInfo = terrain(f.dep, 'DÉPART'), arrInfo = terrain(f.arr, 'ARRIVÉE'), altInfo = f.alt ? terrain(f.alt, 'DÉGAGEMENT') : null;
 
@@ -1367,6 +1396,7 @@
     if (b.mb.mass > b.f.T.mtow) al.push(`Masse au décollage ${Math.round(b.mb.mass)} kg > MTOW ${b.f.T.mtow} kg.`);
     if (b.mb.cg == null) al.push(`Centrage non calculé : bras de levier ${b.f.T.label} à compléter (manuel de vol / fiche de pesée).`);
     else if (!b.mb.inEnv(b.mb.cg, b.mb.mass)) al.push(`Centrage hors limites au décollage (${b.mb.cg.toFixed(3)} m).`);
+    if (b.mb.ldgCg != null && !b.mb.inEnv(b.mb.ldgCg, b.landMass)) al.push(`Centrage hors limites à l'atterrissage à ${b.f.arr} (${b.mb.ldgCg.toFixed(3)} m, ${Math.round(b.landMass)} kg).`);
     if (b.f.ac.note) al.push(`${b.f.ac.reg} : ${b.f.ac.note}. Performances : ${b.f.T.source || 'log ACB'}.`);
     const tanks = b.f.T.fuel.tanks;
     if ((tanks[0].cap && b.f.fuel > tanks[0].cap) || (tanks[1] && b.f.aux > tanks[1].cap)) al.push('Quantité de carburant supérieure à la capacité des réservoirs.');
@@ -1374,6 +1404,7 @@
       if (t.rw && t.rw.best.cross != null && b.f.T.speeds['Vw 90° max'] && t.rw.best.cross > b.f.T.speeds['Vw 90° max']) al.push(`${t.id} : vent traversier ${Math.round(t.rw.best.cross)} kt > ${b.f.T.speeds['Vw 90° max']} kt démontré.`);
       if (t.len && t.tod && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
     }
+    for (const t of [b.arrInfo, b.altInfo].filter(Boolean)) if (t.len && t.ldg && t.ldg > t.len * 0.85) al.push(`${t.id} : distance d'atterrissage ${t.ldg} m pour une piste de ${t.len} m — vérifier les performances.`);
     b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
     b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
@@ -1386,6 +1417,14 @@
     return al;
   }
 
+  // distances 15 m comparées à la piste (tableaux du manuel si disponibles, sinon estimation)
+  function perfLine(b) {
+    const it = (t, k, lbl) => t && t[k] ? `${lbl} ${esc(t.id)} <b>${t[k]} m</b>${t.len ? ` / piste ${t.len} m` : ''}${t.grass ? ' (herbe)' : ''}` : '';
+    const s = [it(b.depInfo, 'tod', 'Décollage'), it(b.arrInfo, 'ldg', 'Atterrissage'), it(b.altInfo, 'ldg', 'Dégagement')].filter(Boolean);
+    if (!s.length) return '';
+    const tab = b.f.T.takeoff && b.f.T.takeoff.table;
+    return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, vent METAR, herbe)' : 'estimation'}, passage 15 m.</p>`;
+  }
   function summaryHtml(b, sfx = '') {
     const al = alertsOf(b);
     const nt = b.night;
@@ -1399,7 +1438,8 @@
         <td>${l.wind ? `${r3(l.wind.dir)}/${Math.round(l.wind.spd)}` : '–'}</td><td>${r3(l.hm)}°</td><td>${l.min}'</td><td>${l.fuel} L</td></tr>`).join('')}
       <tr><th>Total</th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}) · à bord ${b.loaded} L.
-        Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}.</p>
+        Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
+      ${perfLine(b)}
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
@@ -1773,7 +1813,7 @@
     table(['Élément', 'Masse (kg)', 'Bras (m)', 'Moment'], mb.rows.map((r) => [r[0], r[1].toFixed(0), n3(r[2]), typeof r[2] === 'number' ? (r[1] * r[2]).toFixed(1) : '-']).concat([
       [{ content: 'Total décollage', styles: { fontStyle: 'bold' } }, { content: mb.mass.toFixed(0), styles: { fontStyle: 'bold' } }, { content: n3(mb.cg), styles: { fontStyle: 'bold' } }, mb.mom != null ? mb.mom.toFixed(1) : '-'],
       ['MTOW / marge', `${b.f.T.mtow} / ${Math.round(b.f.T.mtow - mb.mass)}`, mb.cg == null ? (b.f.T.cgLimits ? `limites ${b.f.T.cgLimits.join(' - ')} m` : 'centrage à calculer') : mb.inEnv(mb.cg, mb.mass) ? 'Centrage OK' : 'HORS LIMITES', ''],
-      ['Masse à l\'atterrissage (est.)', b.landMass.toFixed(0), '', ''],
+      ['Masse à l\'atterrissage (est.)', b.landMass.toFixed(0), n3(mb.ldgCg), mb.ldgCg == null ? '' : mb.inEnv(mb.ldgCg, b.landMass) ? 'Centrage OK' : 'HORS LIMITES'],
     ]), { x: M, width: 125, size: 8, keepY: true });
     const yMb = doc.lastAutoTable.finalY;
     // enveloppe de centrage
@@ -1785,7 +1825,7 @@
     doc.setDrawColor(0, 102, 153); doc.setLineWidth(.6);
     const envPts = env.map((p) => [X(p[0]), Y(p[1])]);
     for (let i = 0; i < envPts.length - 1; i++) doc.line(envPts[i][0], envPts[i][1], envPts[i + 1][0], envPts[i + 1][1]);
-    const ptsMb = mb.cg == null ? [] : [[mb.cg, mb.mass, 'TO'], [(mb.mom - b.totFuel * b.f.T.fuel.density * b.f.T.fuel.tanks[0].arm) / b.landMass, b.landMass, 'LDG']];
+    const ptsMb = mb.cg == null ? [] : [[mb.cg, mb.mass, 'TO'], [mb.ldgCg, b.landMass, 'LDG']];
     ptsMb.forEach(([a, m, l]) => { doc.setFillColor(l === 'TO' ? 220 : 30, l === 'TO' ? 30 : 140, 30); doc.circle(X(a), Y(m), 1.1, 'F'); doc.setFontSize(6.5); doc.text(l, X(a) + 1.5, Y(m) - 1); });
     if (ptsMb.length) doc.line(X(ptsMb[0][0]), Y(ptsMb[0][1]), X(ptsMb[1][0]), Y(ptsMb[1][1]));
     doc.setFontSize(6.5); doc.setTextColor(90);
@@ -1810,13 +1850,14 @@
     ], { x: M, width: 110, size: 8, keepY: true });
     const yFuel = doc.lastAutoTable.finalY;
     // performances décollage
-    const perfRow = (t) => t ? [t.id, `${t.elev} ft`, `${Math.round(t.temp)}°C`, t.grass ? 'herbe' : 'dur', t.len ? `${t.len} m` : '?', t.tod ? `${t.tod} m` : 'manuel de vol',
+    const perfRow = (t) => t ? [t.id, `${t.elev} ft`, `${Math.round(t.temp)}°C`, t.grass ? 'herbe' : 'dur', t.len ? `${t.len} m` : '?', t.tod ? `${t.tod} m` : 'manuel de vol', t.ldg ? `${t.ldg} m` : '-',
       t.rw ? `QFU ${t.rw.best.qfu}° : ${t.rw.best.head != null ? `${t.rw.best.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(t.rw.best.head))} kt, travers ${Math.round(t.rw.best.cross)} kt` : 'vent ?'}` : '-'] : null;
-    table(['Terrain', 'Alt.', 'Temp.', 'Piste', 'Longueur', 'Décollage 15 m (est.)', 'Piste probable / vent'],
+    table(['Terrain', 'Alt.', 'Temp.', 'Piste', 'Longueur', 'Décollage 15 m', 'Atterr. 15 m', 'Piste probable / vent'],
       [perfRow(b.depInfo), perfRow(b.arrInfo), perfRow(b.altInfo)].filter(Boolean), { x: M + 115, y: yFuelStart, size: 7.5, keepY: true });
     y = Math.max(yFuel, doc.lastAutoTable.finalY) + 3;
-    if (b.f.T.takeoff) para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur)${b.f.T.takeoff.grass ? ` / ${b.f.T.takeoff.grass} m (herbe)` : ''}, majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
-    if (b.f.T.landing) para(`${b.f.T.landing.note} : ${b.f.T.landing.hard} m (dur)${b.f.T.landing.grass ? ` / ${b.f.T.landing.grass} m (herbe)` : ''} (abaques du manuel de vol).`, { size: 7, color: [90, 90, 90] });
+    if (b.f.T.takeoff && b.f.T.takeoff.table) para(`Distances calculées avec les tableaux du manuel de vol : altitude et température du terrain (METAR, sinon ISA), masse au décollage / à l'atterrissage, vent METAR sur la piste probable, +${Math.round((b.f.T.takeoff.table.grass - 1) * 100)} % (décollage) / +${Math.round(((b.f.T.landing.table || b.f.T.takeoff.table).grass - 1) * 100)} % (atterrissage) sur herbe sèche. Herbe mouillée, pente et état de la piste non pris en compte.`, { size: 7, color: [90, 90, 90] });
+    else if (b.f.T.takeoff) para(`${b.f.T.takeoff.note} : ${b.f.T.takeoff.hard} m (dur)${b.f.T.takeoff.grass ? ` / ${b.f.T.takeoff.grass} m (herbe)` : ''}, majorée ~10 % par 1000 ft d'altitude terrain et ~10 % par 10 °C au-dessus de l'ISA (estimation - utiliser les abaques du manuel de vol / DF15).`, { size: 7, color: [90, 90, 90] });
+    if (b.f.T.landing && !b.f.T.landing.table) para(`${b.f.T.landing.note} : ${b.f.T.landing.hard} m (dur)${b.f.T.landing.grass ? ` / ${b.f.T.landing.grass} m (herbe)` : ''} (abaques du manuel de vol).`, { size: 7, color: [90, 90, 90] });
 
     // ---------------------------------------------------------------- 2. BRIEFINGS DÉPART / ARRIVÉE (portrait)
     const briefTerrain = (t, kind) => {
@@ -1846,7 +1887,7 @@
       rows.push(['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' - ' + fee.note : ''} (${fee.source || 'tableau du club'}${fee.maj ? ', ' + fee.maj : ''})` : 'non renseignée - voir airfield.directory / aeroPS / exploitant']);
       if (es.exploitant || (es.tel_ad || []).length) rows.push(['Exploitant', [es.exploitant, ...(es.tel || [])].filter(Boolean).join(' · ')]);
       if (kind === 'DÉPART') {
-        rows.push(['Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
+        rows.push([b.f.T.takeoff && b.f.T.takeoff.table ? 'Décollage (manuel)' : 'Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
         const l0 = b.legs[0];
         const vx = resolvePt(l0.to);
         if (vx && vx.kind === 'vfr') rows.push(['Point de sortie', `${l0.to} : ${vx.desc} (Rm ${r3(l0.tm)}°, ${l0.dist.toFixed(1)} NM)`]);
@@ -1860,6 +1901,7 @@
         const vp = vfrOf(t.id); if (vp.length) rows.push(['Points VFR publiés', vp.map((p) => `${p.id} : ${p.desc}`).join('\n')]);
         rows.push(['Arrivée par', `Rm ${r3(lN.tm)}° depuis ${lN.from} — descendre pour l'altitude du tour de piste (${(v.tdp || [])[0] || 'voir VAC'})`]);
         rows.push(['Derniers contacts', lN.airspaces.slice(-4).map((s) => `${s.name} : ${s.call} ${s.freq}`).join('\n') || 'Classe G - SIV / A/A']);
+        if (t.ldg) rows.push(['Atterrissage (manuel)', `${t.ldg} m (depuis 15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.landMass)} kg`]);
         rows.push(['Carburant à l\'arrivée', `${b.loaded - b.totFuel} L estimés (réserve + dégagement requis : ${b.resFuel + (b.altLeg ? b.altLeg.fuel : 0)} L)`]);
         rows.push(['Vitesses d\'approche', Object.entries(b.f.T.speeds).filter(([k]) => /Vapp|Vatt/.test(k)).map(([k, s]) => `${k} : ${s} kt`).join(' · ')]);
         if (b.altLeg) rows.push(['Dégagement', `${b.altLeg.to} : Rm ${r3(b.altLeg.tm)}°, ${b.altLeg.dist.toFixed(0)} NM, ${b.altLeg.min} min, ${b.altLeg.fuel} L`]);

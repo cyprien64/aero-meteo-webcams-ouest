@@ -117,8 +117,14 @@ window.AIRCRAFT_TYPES = {
     climb: { extraMin: 2, extraFuel: 4 },   // règle du log ; manuel : 3000 ft en 3,5 min / 4 L, 5500 ft en 7 min / 7 L
     speeds: { VSO: 49, VS1: 57, VR: 59, 'V passage 15 m': 70, Vx: '67/78', Vy: '78/92', 'V finesse max': 86, VA: 115, VFE: 94, VNO: 134, VNE: 170,
       Vapp: 65, 'Vapp courte': 62, 'Vw 90° max': 22 },
-    takeoff: { hard: 565, grass: 650, note: 'Décollage (passage 15 m), Zp 0, std +15, 1150 kg, volets décollage' },
-    landing: { hard: 530, grass: 742, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 1150 kg, volets atterrissage' },
+    // table : tableaux du manuel (§5) — rows[altitude ft] = [température °C, distance 15 m à m[0] kg, à m[1] kg] ;
+    // wind = coefficient selon le vent de face (kt), tail = +x par kt de vent arrière, grass = coefficient herbe sèche
+    takeoff: { hard: 565, grass: 650, note: 'Décollage (passage 15 m), Zp 0, std +15, 1150 kg, volets décollage',
+      table: { m: [1150, 950], grass: 1.15, tail: 0.05, wind: [[0, 1], [10, 0.8], [20, 0.65], [30, 0.55]],
+        rows: { 0: [[-5, 485, 400], [15, 565, 465], [35, 645, 535]], 4000: [[-13, 730, 605], [7, 810, 670], [27, 935, 770]], 8000: [[-21, 995, 820], [-1, 1155, 955], [19, 1345, 1110]] } } },
+    landing: { hard: 530, grass: 742, note: 'Atterrissage (depuis 15 m), Zp 0, std +15, 1150 kg, volets atterrissage',
+      table: { m: [1150, 900], grass: 1.4, tail: 0.05, wind: [[0, 1], [10, 0.8], [20, 0.65], [30, 0.55]],
+        rows: { 0: [[-5, 510, 420], [15, 530, 440], [35, 545, 450]], 4000: [[-13, 555, 460], [7, 585, 485], [27, 610, 505]], 8000: [[-21, 630, 520], [-1, 665, 550], [19, 705, 580]] } } },
     minPerLitre: 1.6,
     sheet: 'F-XXXX',
     source: 'Manuel de vol R3000/180 (édition 1, janvier 1998) - réservoirs 2 x 80 L selon le club',

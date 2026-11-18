@@ -270,6 +270,7 @@ a.lnk { color: #7cc0ff; cursor: pointer; text-decoration: underline; }
 table.legs { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; }
 table.legs th, table.legs td { border-bottom: 1px solid rgba(255,255,255,.15); padding: 3px 4px; text-align: right; }
 table.legs th:first-child, table.legs td:first-child { text-align: left; }
+table.legs.trip { display: block; overflow-x: auto; }   /* 11 colonnes : défile sur tablette */
 .wxbar { display: flex; gap: 2px; margin: 4px 0; }
 .wxbar span { flex: 1; height: 12px; border-radius: 2px; cursor: help; }
 .gramet-cv { width: 100%; border-radius: 8px; background: #fff; display: block; }

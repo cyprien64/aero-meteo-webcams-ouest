@@ -811,6 +811,77 @@ def collect_aip():
         fallback('vac.json')
 
 
+# ---------------------------------------------------------------- zones à statut particulier (une fois par jour)
+STAC_ZSM = 'https://www.stac.aviation-civile.gouv.fr/fr/zsm'
+ACT_RE = re.compile(r"(?<!\d)(\d{2,4}) (parachutage|voltige) (.+?) ((?:FL ?\d{2,3}|\d{3,5} ?ft (?:AMSL|ASFC)))(.{0,160}?)"
+                    r"(\d{2})°(\d{2})'(\d{2})\"([NS]) , (\d{3})°(\d{2})'(\d{2})\"([EW])(.{0,400}?)"
+                    r"(?=(?<!\d)\d{2,4} (?:parachutage|voltige|aéromodélisme|treuillage|vol|lâcher|largage|activité|essais)|$)")
+
+
+def parse_activities(page):
+    """ENR 5.5 : zones de parachutage et de voltige (position du centre, plafond, horaires, consignes)."""
+    x = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', page))).replace('’', "'")
+    out = []
+    for m in ACT_RE.finditer(x):
+        la = int(m[6]) + int(m[7]) / 60 + int(m[8]) / 3600
+        lo = int(m[10]) + int(m[11]) / 60 + int(m[12]) / 3600
+        la, lo = (-la if m[9] == 'S' else la), (-lo if m[13] == 'W' else lo)
+        if re.search(r"°|\bFL ?\d|ft (?:AMSL|ASFC)", m[3]) or re.search(r"°", m[5]):
+            continue   # deux entrées collées (texte mal découpé) : position douteuse
+        if 41.5 < la < 49.5 and -6.5 < lo < 3.5:
+            out.append({'num': m[1], 'kind': m[2], 'name': m[3].strip()[:60], 'upper': m[4].strip(), 'hours': m[5].strip(' .')[:60],
+                        'la': round(la, 4), 'lo': round(lo, 4), 'rmk': re.sub(r'^SFC\s*', '', m[14].strip())[:240]})
+    return out
+
+
+def parse_zsm(kml):
+    """STAC : zones de sensibilité majeure (gypaète barbu), altitude minimale de survol en ft."""
+    out = []
+    for pm in re.findall(r'<Placemark>(.*?)</Placemark>', kml, re.S):
+        g = lambda k: (re.search(rf'name="{k}">([^<]*)', pm) or [None, ''])[1]  # noqa: E731
+        if g('actif').strip() not in ('1', ''):
+            continue
+        c = re.search(r'<coordinates>(.*?)</coordinates>', pm, re.S)
+        if not c:
+            continue
+        pts = [tuple(map(float, q.split(',')[:2])) for q in c.group(1).split()]
+        poly = [[round(la, 4), round(lo, 4)] for lo, la in pts[::max(1, len(pts) // 24)]]
+        if len(poly) < 3 or not (41.5 < poly[0][0] < 49.5 and -6.5 < poly[0][1] < 3.5):
+            continue
+        try:
+            ft = round(float(g('h_survol_ft')) / 100) * 100
+        except ValueError:
+            continue
+        out.append({'name': g('nom_aire').strip() or g('code_zsm').split('|')[-1].strip(), 'ft': ft, 'esp': g('espece').strip(), 'dep': g('code_dep').strip(), 'poly': poly})
+    return out
+
+
+def collect_special():
+    print('Zones particulières (ENR 5.5, ZSM du STAC)')
+    try:
+        folder, cycle = current_cycle()
+        if FALLBACK_URL:
+            try:
+                prev = json.loads(get(f'{FALLBACK_URL}/data/live/special.json', timeout=30))
+                age = (NOW - datetime.fromisoformat(prev['generated'])).total_seconds() / 3600
+                if prev.get('cycle') == cycle and age < 24:
+                    save('special.json', prev, True)
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+        act = parse_activities(get(f'{SIA_DVD}/{folder}/FRANCE/AIRAC-{cycle}/html/eAIP/FR-ENR-5.5-fr-FR.html', timeout=180))
+        page = get(STAC_ZSM, timeout=60)
+        link = re.search(r'href="([^"]+\.kml)"', page)
+        zsm = parse_zsm(get(link.group(1), timeout=120)) if link else []
+        print(f'  {len(act)} zones de parachutage / voltige, {len(zsm)} ZSM')
+        if not act and not zsm:
+            raise RuntimeError('rien de lu')
+        save('special.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP ENR 5.5 ; STAC (ZSM)', 'act': act, 'zsm': zsm})
+    except Exception as e:  # noqa: BLE001
+        print('  zones particulières : échec', e)
+        fallback('special.json')
+
+
 # ---------------------------------------------------------------- webcams : pannes (hebdomadaire) et images figées (toutes les 6 h)
 IMG_RE = re.compile(r'\.(jpe?g|png|webp)(\?|$)', re.I)
 
@@ -1134,7 +1205,7 @@ def write_status():
 
 
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'cams', 'fees', 'pratique', 'vigilance']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -1143,6 +1214,8 @@ if __name__ == '__main__':
         collect_supaip()
     if 'aip' in what:
         collect_aip()
+    if 'special' in what:
+        collect_special()
     if 'cams' in what:
         collect_cams()
     if 'fees' in what:

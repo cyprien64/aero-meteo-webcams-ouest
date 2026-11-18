@@ -1,5 +1,5 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v25';
+const VERSION = 'aww-v26';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
@@ -7,7 +7,7 @@ const SHELL = [
   'data/vfr_points.json', 'data/fees.json', 'data/template/log_nav_acb.xlsx', 'data/template/log_meta.json',
   'icons/icon48.png', 'icons/icon192.png',
 ];
-const LIVE = ['metar.json', 'taf.json', 'notam.json', 'supaip.json', 'zones.json', 'vac.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'pratique_club.json', 'osm_near.json', 'vigilance.json'].map((f) => `data/live/${f}`);
+const LIVE = ['metar.json', 'taf.json', 'notam.json', 'supaip.json', 'zones.json', 'vac.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'pratique_club.json', 'osm_near.json', 'vigilance.json', 'special.json'].map((f) => `data/live/${f}`);
 
 // cache: 'reload' : sinon le cache HTTP (10 min sur GitHub Pages) remplit la nouvelle version avec d'anciens fichiers
 const fresh = (u) => new Request(u, { cache: 'reload' });

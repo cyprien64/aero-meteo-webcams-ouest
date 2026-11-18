@@ -246,11 +246,12 @@
   A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
 
   // ================================================================== données
-  let ZONES = null, VAC = null, ASP = null;
+  let ZONES = null, VAC = null, ASP = null, SPECIAL = null;
   async function loadAip() {
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
     if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
+    if (!SPECIAL) SPECIAL = await A.getLive('special.json').catch(() => ({ act: [], zsm: [] }));
     await loadVfr();
   }
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
@@ -531,6 +532,12 @@
         <label>Pilote (nom, profil mémorisé sur cet appareil)<input id="pf-pil" list="pil-list" value="${esc(f.pil || '')}" autocomplete="off"></label>
         <label>Licence / prorogation SEP valable jusqu'au<input id="pf-lic" type="date"></label>
         <label>Certificat médical valable jusqu'au<input id="pf-med" type="date"></label>
+        <label><input id="pf-nuit" type="checkbox"> Qualification vol de nuit</label>
+        <details class="full" id="pf-logbox"><summary>📓 Carnet de vol récent (expérience récente, prorogation SEP)</summary>
+          <div id="pf-log"></div>
+          <div class="row"><input id="pf-log-d" type="date"><input id="pf-log-n" type="number" min="1" max="20" value="1" style="width:60px" title="atterrissages"> atterrissage(s)
+            <label><input id="pf-log-i" type="checkbox"> avec instructeur</label><button type="button" class="btn" id="pf-log-add">Ajouter</button></div>
+        </details>
         <details class="full arms-box" id="pf-arms-box"><summary>⚖️ Bras de levier et enveloppe de centrage (fiche de pesée)</summary>
           <p class="meta">Valeurs en mètres depuis la référence du manuel de vol. Vide = valeur par défaut (indiquée en grisé). Mémorisé pour chaque avion sur cet appareil.</p>
           <div class="prep-form" id="pf-arms"></div>
@@ -570,7 +577,20 @@
     });
     syncAux();
     // profil pilote : masse et dates de validité mémorisées localement (jamais dans le lien de partage)
-    const loadPilot = () => { const pr = store.get('pilots', {})[$('#pf-pil').value.trim()]; if (!pr) return; if (pr.m) $('#pf-m1').value = pr.m; $('#pf-lic').value = pr.lic || ''; $('#pf-med').value = pr.med || ''; };
+    const showLog = () => {
+      const name = $('#pf-pil').value.trim(), log = (pilotOf(name).log || []).slice().sort((x, y) => y.d.localeCompare(x.d)), d90 = Date.now() - 90 * 864e5;
+      $('#pf-log').innerHTML = !name ? '<p class="meta">Indique d\'abord le nom du pilote.</p>' : `<p class="meta">${log.filter((e) => Date.parse(e.d) >= d90).reduce((s, e) => s + (+e.n || 0), 0)} atterrissage(s) dans les 90 derniers jours.</p>`
+        + log.slice(0, 30).map((e, i) => `<div class="meta">${e.d.split('-').reverse().join('/')} · ${e.n} att.${e.i ? ' · instructeur' : ''}${e.reg ? ' · ' + esc(e.reg) : ''}${e.r ? ' · ' + esc(e.r) : ''} <button type="button" class="btn" data-del="${esc(e.d + '|' + i)}">✕</button></div>`).join('');
+      $('#pf-log').querySelectorAll('[data-del]').forEach((x) => x.addEventListener('click', () => {
+        const all = store.get('pilots', {}), pr = all[name] || {}, k = log[+x.dataset.del.split('|')[1]];
+        pr.log = (pr.log || []).filter((e) => e !== k && !(e.d === k.d && e.n === k.n && e.r === k.r)); all[name] = pr; store.set('pilots', all); showLog();
+      }));
+    };
+    const loadPilot = () => { const pr = store.get('pilots', {})[$('#pf-pil').value.trim()]; showLog(); if (!pr) return; if (pr.m) $('#pf-m1').value = pr.m; $('#pf-lic').value = pr.lic || ''; $('#pf-med').value = pr.med || ''; $('#pf-nuit').checked = !!pr.nuit; };
+    $('#pf-log-add').addEventListener('click', () => {
+      const name = $('#pf-pil').value.trim(), d = $('#pf-log-d').value; if (!name || !d) return;
+      addLog(name, { d, n: +$('#pf-log-n').value || 1, i: $('#pf-log-i').checked }); showLog();
+    });
     $('#pf-pil').addEventListener('change', loadPilot); loadPilot();
     // régime : prendre celui dont l'altitude est la plus proche de la croisière (même régime moteur si possible)
     $('#pf-ft').addEventListener('change', () => {
@@ -664,7 +684,7 @@
       stalts: v('#pf-stalts').toUpperCase(), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
-    if (f.pil) store.set('pilots', { ...store.get('pilots', {}), [f.pil]: { m: f.m1, lic: f.lic, med: f.med } });
+    if (f.pil) { const all = store.get('pilots', {}); all[f.pil] = { ...(all[f.pil] || {}), m: f.m1, lic: f.lic, med: f.med, nuit: $('#pf-nuit').checked }; store.set('pilots', all); }
     const base = FLEET.find((x) => x.reg === f.reg) || FLEET[0];
     const ac = { ...base, baseReg: base.reg, reg: f.immat || base.reg, empty: f.empty || base.empty };
     const T0 = TYPES[ac.type], o = store.get('arms.' + base.reg, {});
@@ -806,6 +826,11 @@
     on('pf-ics', () => exportIcs(b));
     on('pf-gps', () => flightMode(b.trip || [b]));
     on('pf-share', () => shareFlight(sfx));
+    on('pf-logit', (e) => {
+      const trip = b.trip || [b];
+      addLog(b.f.pil, { d: localInput(b.depT).slice(0, 10), n: trip.length, i: false, reg: b.f.ac.reg, r: [trip[0].f.dep, ...trip.map((x) => x.f.arr)].join('-') });
+      e.target.textContent = '📓 Ajouté au carnet ✔'; e.target.disabled = true;
+    });
     on('pf-icao-copy', (e) => { navigator.clipboard.writeText(icaoRoute(b)).then(() => { e.target.textContent = 'Copié ✔'; }, () => { e.target.textContent = 'Copie impossible : sélectionner le texte'; }); });
     if (b.gramet && !b.gramet.err && $('#pf-gramet' + sfx)) drawGramet($('#pf-gramet' + sfx), b.gramet, b);
     on('pf-gramet-big', () => {
@@ -1237,11 +1262,15 @@
     const ter = `M${X(0)},${Y(0)} ` + v.profile.map((p) => `L${X(p.along).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(' ') + ` L${X(v.total)},${Y(0)} Z`;
     const rects = v.segs.filter((s) => s.lower < top).map((s) => ({ ...s, upper: Math.min(s.upper, top) })).map((s) => `<rect x="${X(s.from).toFixed(1)}" y="${Y(s.upper).toFixed(1)}" width="${Math.max(1, X(s.to) - X(s.from)).toFixed(1)}" height="${Math.max(1, Y(s.lower) - Y(s.upper)).toFixed(1)}" fill="${s.color}" fill-opacity=".18" stroke="${s.color}" stroke-width=".8"><title>${esc(s.name)} ${s.lower}-${s.upper} ft</title></rect>`).join('');
     const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${h - 6}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
+    const ci = cruiseIcing(b), g0 = b.gramet && !b.gramet.err ? b.gramet.cols.filter((c) => c.iso0 != null) : [];
+    const ice = ci.map((p, i) => { if (!p.cloud) return ''; const a = i ? (ci[i - 1].along + p.along) / 2 : p.along, z = i < ci.length - 1 ? (p.along + ci[i + 1].along) / 2 : p.along;
+      return `<rect x="${X(a).toFixed(1)}" y="${(Y(b.f.ft) - 5).toFixed(1)}" width="${Math.max(2, X(z) - X(a)).toFixed(1)}" height="10" fill="${p.icing ? '#ff3b30' : '#cfd8dc'}" fill-opacity=".55"><title>${p.icing ? 'givrage probable' : 'nuage'} ${Math.round(p.cc)} %, ${Math.round(p.T)} °C</title></rect>`; }).join('')
+      + (g0.length > 1 ? `<polyline points="${g0.map((c) => `${X(c.along).toFixed(1)},${Y(Math.min(c.iso0, top)).toFixed(1)}`).join(' ')}" fill="none" stroke="#4fc3f7" stroke-dasharray="4 3"><title>isotherme 0 °C</title></polyline>` : '');
     const grid = [0, 0.25, 0.5, 0.75, 1].map((k) => `<text x="2" y="${(Y(top * k) + 3).toFixed(1)}" font-size="8" fill="#9bd">${Math.round(top * k / 100) * 100}</text>`).join('');
     const marks = [];
     let acc = 0; b.legs.forEach((lg, i) => { if (i) marks.push([acc, lg.from]); acc += lg.dist; });
     const mk = marks.map(([a, n]) => `<line x1="${X(a)}" x2="${X(a)}" y1="8" y2="${h - 18}" stroke="#fff" stroke-opacity=".25"/><text x="${X(a) + 2}" y="16" font-size="8" fill="#fff">${esc(n)}</text>`).join('');
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="background:rgba(0,0,0,.25);border-radius:5px">${grid}${rects}<path d="${ter}" fill="#8d6e63" fill-opacity=".85"/><line x1="${X(0)}" x2="${X(v.total)}" y1="${Y(b.f.ft)}" y2="${Y(b.f.ft)}" stroke="#ff2bd6" stroke-width="2"/>${mk}${wx}
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="background:rgba(0,0,0,.25);border-radius:5px">${grid}${rects}<path d="${ter}" fill="#8d6e63" fill-opacity=".85"/>${ice}<line x1="${X(0)}" x2="${X(v.total)}" y1="${Y(b.f.ft)}" y2="${Y(b.f.ft)}" stroke="#ff2bd6" stroke-width="2"/>${mk}${wx}
       <text x="${X(0)}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[0])}</text><text x="${X(v.total) - 26}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[b.ids.length - 1])}</text></svg>`;
   }
 
@@ -1564,6 +1593,8 @@
       const oh = outsideHours(t.v, t.when);
       if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
+    al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b));
+    recentAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
     semiCircular(b).forEach((x) => al.push(`Règle semi-circulaire : ${x.lg.from}→${x.lg.to} (Rm ${r3(x.lg.tm)}°, vers l'${x.east ? 'est' : 'ouest'}) à ${b.f.ft} ft, à plus de 3000 ft sol — prendre ${x.east ? 'un millier impair' : 'un millier pair'} + 500 ft${x.sug ? `, par exemple ${x.sug} ft` : ''}.`));
     const rf = regFt(b.f.rg.name);
     if (rf != null && Math.abs(rf - b.f.ft) > 1500) al.push(`Régime « ${b.f.rg.name} » prévu pour ${rf} ft alors que la croisière est à ${b.f.ft} ft : vitesse et consommation à revoir.`);
@@ -1613,6 +1644,131 @@
     return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, herbe ; vent de face compté seulement avec le METAR d\'un vol dans les 2 h)' : 'estimation'}, passage 15 m. Montée : ${esc(b.climb.src)}.</p>
       <p class="meta">📝 Route plan de vol (case 15) : <code id="pf-icao${sfx}">${esc(icaoRoute(b))}</code> <button class="btn" id="pf-icao-copy${sfx}">Copier</button></p>`;
   }
+  // ================================================================== sécurité : minima VFR, frontière, zones particulières, givrage
+  // points de la route tous les ~step NM, avec la branche et la distance depuis le départ
+  function routeSamples(b, step = 3) {
+    const out = []; let acc = 0;
+    b.legs.forEach((lg, i) => { const n = Math.max(1, Math.ceil(lg.dist / step)); for (let k = (i ? 1 : 0); k <= n; k++) out.push({ p: destPt(lg.a, lg.tc, lg.dist * k / n), lg, along: acc + lg.dist * k / n }); acc += lg.dist; });
+    return out;
+  }
+  const ftOf = (s) => { const v = parseAlt(s); return v == null ? null : v; };
+
+  // ---------- minima VFR (SERA) selon la classe d'espace à l'altitude de croisière
+  function vfrMinima(b) {
+    if (!b.wxRoute || !b.wxRoute.pts) return [];
+    const asp = (ASP && ASP.data) || [], out = [], seen = new Set();
+    for (const p of b.wxRoute.pts) {
+      const inside = asp.filter((s) => s.kind !== 'SIV' && inPoly(p.p, s.poly) && (ftOf(s.lower) ?? 0) <= b.f.ft && (ftOf(s.upper) ?? 99999) + (/ASFC|AGL/i.test(s.upper || '') ? p.elevFt : 0) >= b.f.ft);
+      const ctl = inside.find((s) => /^[ABCDE]$/.test(s.cls || '') || s.kind === 'CTR');
+      const low = b.f.ft <= Math.max(3000, (p.elevFt || 0) + 1000);
+      const req = ctl ? { vis: b.f.ft >= 10000 ? 8000 : 5000, sep: 1000, lbl: `classe ${ctl.cls || 'D'} (${ctl.name})` }
+        : low ? { vis: 1500, sep: 0, lbl: 'classe G sous 3000 ft / 1000 ft sol' } : { vis: 5000, sep: 1000, lbl: 'classe G au-dessus de 3000 ft' };
+      const cloudy = p.low != null && p.low >= 50 && p.baseAmsl != null;
+      const why = [];
+      if (p.vis != null && p.vis < req.vis) why.push(`visibilité ${Math.floor(p.vis / 100) / 10} km`);
+      if (cloudy && p.baseAmsl < b.f.ft + req.sep) why.push(`base ~${p.baseAmsl} ft`);
+      if (!why.length) continue;
+      const key = `${p.leg}|${req.lbl}`; if (seen.has(key)) continue; seen.add(key);
+      const lg = b.legs[p.leg];
+      out.push(`Minima VFR ${lg.from}→${lg.to} vers ${utc(p.at)} : en ${req.lbl} il faut ${req.vis / 1000} km${req.sep ? ` et ${req.sep} ft sous les nuages (1500 m horizontalement)` : ' et rester hors des nuages en vue du sol'} ; prévu ${why.join(', ')} pour une croisière à ${b.f.ft} ft.`);
+    }
+    // CTR au départ / à l'arrivée : plafond 1500 ft et 5 km au sol (METAR, vol dans les 2 h)
+    for (const t of [b.depInfo, b.arrInfo]) {
+      if (!t.m || Math.abs(t.when - Date.now()) > 2 * 3600e3 || !asp.some((s) => s.kind === 'CTR' && t.a && inPoly([t.a.la, t.a.lo], s.poly))) continue;
+      const ceil = Math.min(...(t.m.clouds || []).filter((c) => /BKN|OVC|VV/.test(c.cover) && c.base != null).map((c) => c.base), 99999);
+      const vis = t.m.visib != null ? (String(t.m.visib).includes('+') ? 10000 : parseFloat(t.m.visib) * 1609) : 10000;
+      if (ceil < 1500 || vis < 5000) out.push(`CTR de ${t.id} : plafond ${ceil < 99999 ? ceil + ' ft' : '?'} / visibilité ${Math.round(vis / 100) / 10} km sous les minima VFR (1500 ft et 5 km) — VFR spécial sur autorisation seulement.`);
+    }
+    return out;
+  }
+
+  // ---------- passage de frontière
+  const inFrance = (p) => (window.FRANCE || []).some((ring) => inPolyXY(p[1], p[0], ring.map(([la, lo]) => [lo, la])));
+  if (window.FRANCE) console.assert(inFrance([43.38, -0.42]) && !inFrance([43.36, -1.79]) && !inFrance([42.55, 1.6]), 'inFrance (Pau, Saint-Sébastien, Andorre)');
+  function borderInfo(b) {
+    if (!window.FRANCE) return null;
+    const ids = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean), foreignAd = ids.filter((id) => !id.startsWith('LF'));
+    const out = routeSamples(b, 3).filter((x) => !inFrance(x.p) && !(x.p[0] > 43.2 && x.p[1] < -1.6 && x.p[0] < 47.6));   // ignore la mer au large de la côte atlantique
+    if (!out.length && !foreignAd.length) return null;
+    const andorra = out.some((x) => x.p[0] > 42.42 && x.p[0] < 42.66 && x.p[1] > 1.4 && x.p[1] < 1.79);
+    const customs = ids.filter((id) => id.startsWith('LF')).map((id) => { const t = (vacAt(id) || {}).infos || '', m = t.split(/MET :8 -/)[1]; return m ? [id, m.split(/Douanes, Police/)[0].replace(/\s+/g, ' ').trim().slice(0, 220)] : null; }).filter(Boolean);
+    return { out, andorra, foreignAd, customs, first: out[0] };
+  }
+  function borderAlerts(b) {
+    const x = borderInfo(b); if (!x) return [];
+    const al = [`Vol transfrontalier (${x.andorra ? 'Andorre / Espagne' : 'Espagne'}${x.first ? `, à partir de ${x.first.along.toFixed(0)} NM` : ''}) : plan de vol obligatoire (SOFIA, au moins 1 h avant), transpondeur, cartes et fréquences ENAIRE / Andorre.`];
+    if (x.foreignAd.length) al.push(`Terrain hors de France (${x.foreignAd.join(', ')}) : espace Schengen pour l'Espagne (pas de contrôle aux frontières), mais PPR / horaires et plan de vol à vérifier sur l'AIP espagnole.`);
+    if (x.andorra) al.push('Andorre hors espace Schengen et hors union douanière : pas d\'atterrissage possible en Andorre, survol avec plan de vol.');
+    if (x.foreignAd.some((id) => !/^LE/.test(id))) x.customs.forEach(([id, t]) => t && /douane|PPR|police/i.test(t) && al.push(`${id} douane / police (VAC) : ${t}`));
+    return al;
+  }
+
+  // ---------- zones particulières : ZSM gypaète (STAC), parachutage / voltige (ENR 5.5), cœur du Parc national des Pyrénées
+  // shortcut: contour du cœur du Parc national des Pyrénées très simplifié (±3 km), à remplacer par le contour officiel si disponible
+  const PNP_CORE = [[42.97, -0.78], [42.93, -0.55], [42.88, -0.32], [42.85, -0.05], [42.80, 0.13], [42.74, 0.20], [42.70, 0.05], [42.72, -0.15], [42.76, -0.33], [42.80, -0.55], [42.86, -0.72]];
+  function specialZones(b) {
+    const S = SPECIAL || {}, smp = routeSamples(b, 1), al = [], seen = new Set();
+    for (const z of S.zsm || []) {
+      const hit = smp.find((x) => inPoly(x.p, z.poly));
+      if (hit && b.f.ft < z.ft && !seen.has(z.name)) { seen.add(z.name); al.push(`ZSM gypaète « ${z.name} » traversée à ${b.f.ft} ft (vers ${hit.along.toFixed(0)} NM) : survol motorisé au-dessus de ${z.ft} ft, ou contourner (zones de sensibilité majeure du STAC, en période de reproduction).`); }
+    }
+    for (const a of S.act || []) {
+      const up = /^FL/.test(a.upper) ? +a.upper.replace(/\D/g, '') * 100 : parseInt(a.upper, 10);
+      const d = Math.min(...smp.map((x) => distNm(x.p, [a.la, a.lo])));
+      if (d <= 3 && b.f.ft <= up + 500) al.push(`Zone de ${a.kind} ${a.num} ${a.name} à ${d.toFixed(1)} NM de la route (jusqu'à ${a.upper}, ${a.hours}) — ${a.rmk.slice(0, 120)}`);
+    }
+    const pnp = smp.find((x) => inPoly(x.p, PNP_CORE));
+    if (pnp) { const ground = Math.max(0, ...(b.profile || []).filter((p) => inPoly(p.p, PNP_CORE)).map((p) => p.ft)); if (b.f.ft < ground + 3300) al.push(`Cœur du Parc national des Pyrénées (contour approximatif, vers ${pnp.along.toFixed(0)} NM) : survol à moins de 1000 m (3300 ft) au-dessus du sol interdit — relief jusqu'à ${ground} ft, croisière ${b.f.ft} ft. Vérifier sur la carte OACI.`); }
+    return al;
+  }
+
+  // ---------- nuages et givrage à l'altitude de croisière (GRAMET)
+  function cruiseIcing(b) {
+    const g = b.gramet; if (!g || g.err || !g.cols) return [];
+    const at = (c) => { const lv = c.lv; for (let k = 0; k < lv.length - 1; k++) if (lv[k].z <= b.f.ft && lv[k + 1].z >= b.f.ft) { const r = (b.f.ft - lv[k].z) / (lv[k + 1].z - lv[k].z); return { cc: lv[k].cc + (lv[k + 1].cc - lv[k].cc) * r, T: lv[k].T + (lv[k + 1].T - lv[k].T) * r }; } return null; };
+    return g.cols.map((c) => { const v = at(c); return v && { along: c.along, cc: v.cc, T: v.T, cloud: v.cc >= 50, icing: v.cc >= 50 && v.T <= 0 && v.T >= -15, iso0: c.iso0 }; }).filter(Boolean);
+  }
+  function icingAlerts(b) {
+    const pts = cruiseIcing(b), al = [];
+    const spans = (pred) => { const r = []; let cur = null; pts.forEach((p) => { if (pred(p)) { if (!cur) cur = { a: p.along, z: p.along }; cur.z = p.along; } else if (cur) { r.push(cur); cur = null; } }); if (cur) r.push(cur); return r; };
+    const fmt = (s) => s.map((x) => `${x.a.toFixed(0)}-${x.z.toFixed(0)} NM`).join(', ');
+    const ic = spans((p) => p.icing), cl = spans((p) => p.cloud && !p.icing), iso = pts.filter((p) => p.iso0 != null && p.iso0 < b.f.ft);
+    if (ic.length) al.push(`Givrage probable à ${b.f.ft} ft (nuage entre 0 et -15 °C) sur ${fmt(ic)} — descendre sous l'isotherme 0 °C (${Math.round(Math.min(...pts.map((p) => p.iso0 ?? 99999)) / 100) * 100} ft) ou reporter.`);
+    if (cl.length) al.push(`Croisière à ${b.f.ft} ft dans les nuages prévus sur ${fmt(cl)} (couverture ≥ 50 % au niveau de vol) — VFR impossible à cette altitude.`);
+    if (iso.length && !ic.length) al.push(`Croisière au-dessus de l'isotherme 0 °C sur ${iso.length} point(s) du GRAMET : risque de givrage en cas de nuage ou de précipitations.`);
+    return al;
+  }
+
+  // ---------- carnet de vol (profil pilote, sur l'appareil) et expérience récente
+  const pilotOf = (name) => (store.get('pilots', {})[name] || {});
+  function addLog(name, e) { const all = store.get('pilots', {}), pr = all[name] || {}; pr.log = [...(pr.log || []), e].slice(-300); all[name] = pr; store.set('pilots', all); }
+  function recentAlerts(b) {
+    const f = b.f, p = pilotOf(f.pil), log = p.log || [], al = [];
+    if (!f.pil) return al;
+    const day = 864e5, t = b.depT.getTime();
+    const ldg = log.filter((e) => t - Date.parse(e.d) <= 90 * day && Date.parse(e.d) <= t).reduce((s, e) => s + (+e.n || 0), 0);
+    if ((f.m2 > 0 || f.m3 > 0) && ldg < 3) al.unshift(`⛔ Expérience récente : ${ldg} atterrissage(s) dans les 90 jours d'après le carnet (3 décollages et 3 atterrissages requis pour emporter des passagers) — voler seul ou avec un instructeur avant.`);
+    else if (!log.length) al.push('Expérience récente non vérifiée : carnet de vol vide sur cet appareil (3 atterrissages dans les 90 jours requis pour emporter des passagers).');
+    if (f.lic) {
+      const end = Date.parse(f.lic + 'T23:59:59Z');
+      if (end - t < 365 * day && !log.some((e) => e.i && Date.parse(e.d) > end - 365 * day)) al.push(`Prorogation SEP avant le ${f.lic.split('-').reverse().join('/')} : 12 h de vol dans les 12 derniers mois dont 1 h avec un instructeur — aucun vol avec instructeur noté au carnet dans cette période.`);
+    }
+    if (b.night && (b.night.late || b.night.firstDark || b.night.early) && !p.nuit) al.unshift(`⛔ Vol de nuit prévu et qualification de nuit non indiquée dans le profil de ${f.pil}.`);
+    return al;
+  }
+  // VFR de nuit : terrain d'arrivée agréé (VAC) et avion apte
+  function nightAlerts(b) {
+    if (!b.night || !(b.night.late || b.night.firstDark || b.night.early)) return [];
+    const al = [], nightOk = (id) => { const t = (vacAt(id) || {}).infos || '', s = (t.split(/ATS :2 -/)[1] || '').split(/VFR de nuit \/ Night VFR :3/)[0]; return /Non agréé|Not approved|\bNIL\b/i.test(s) ? false : /Agréé|Approved/i.test(s) ? true : null; };
+    for (const id of [...(b.night.early ? [b.f.dep] : []), b.f.arr, b.f.alt].filter(Boolean)) {
+      const ok = nightOk(id);
+      if (ok === false) al.push(`⛔ ${id} n'est pas agréé VFR de nuit (VAC) : arrivée de nuit impossible.`);
+      else if (ok === null) al.push(`${id} : agrément VFR de nuit non trouvé dans la VAC, à vérifier (balisage, horaires).`);
+    }
+    al.push(`Vol de nuit : vérifier que ${b.f.ac.reg} est apte au VFR de nuit (équipements, CDN) et que le balisage des terrains est en service (NOTAM).`);
+    return al;
+  }
+
   // ================================================================== compléments de préparation
   const vacAt = (id) => (VAC && VAC.data && VAC.data[id]) || null;
   // temps (min) d'une branche pour une vitesse propre et un vent donnés (même formule que le calcul des branches)
@@ -1839,7 +1995,7 @@
     const nt = b.night;
     return `
       ${changesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-share${sfx}">🔗 Partager</button></div>
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
       <table class="legs"><tr><th>Branche</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>

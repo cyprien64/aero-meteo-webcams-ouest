@@ -813,6 +813,7 @@ def collect_aip():
 
 # ---------------------------------------------------------------- zones à statut particulier (une fois par jour)
 STAC_ZSM = 'https://www.stac.aviation-civile.gouv.fr/fr/zsm'
+SPECIAL_V = 2   # à incrémenter quand la lecture change (sinon la version publiée est reprise 24 h)
 def _dms(v):
     m = re.match(r"(\d{2,3})°(\d{2})'(\d{2}(?:[.,]\d+)?)\"([NSEW])", v.strip())
     if not m:
@@ -877,7 +878,7 @@ def collect_special():
             try:
                 prev = json.loads(get(f'{FALLBACK_URL}/data/live/special.json', timeout=30))
                 age = (NOW - datetime.fromisoformat(prev['generated'])).total_seconds() / 3600
-                if prev.get('cycle') == cycle and age < 24:
+                if prev.get('cycle') == cycle and prev.get('v') == SPECIAL_V and age < 24:
                     save('special.json', prev, True)
                     return
             except Exception:  # noqa: BLE001
@@ -889,7 +890,7 @@ def collect_special():
         print(f'  {len(act)} zones de parachutage / voltige, {len(zsm)} ZSM')
         if not act and not zsm:
             raise RuntimeError('rien de lu')
-        save('special.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'source': 'SIA eAIP ENR 5.5 ; STAC (ZSM)', 'act': act, 'zsm': zsm})
+        save('special.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'v': SPECIAL_V, 'source': 'SIA eAIP ENR 5.5 ; STAC (ZSM)', 'act': act, 'zsm': zsm})
     except Exception as e:  # noqa: BLE001
         print('  zones particulières : échec', e)
         fallback('special.json')

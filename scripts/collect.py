@@ -813,24 +813,37 @@ def collect_aip():
 
 # ---------------------------------------------------------------- zones à statut particulier (une fois par jour)
 STAC_ZSM = 'https://www.stac.aviation-civile.gouv.fr/fr/zsm'
-ACT_RE = re.compile(r"(?<!\d)(\d{2,4}) (parachutage|voltige) (.+?) ((?:FL ?\d{2,3}|\d{3,5} ?ft (?:AMSL|ASFC)))(.{0,160}?)"
-                    r"(\d{2})°(\d{2})'(\d{2})\"([NS]) , (\d{3})°(\d{2})'(\d{2})\"([EW])(.{0,400}?)"
-                    r"(?=(?<!\d)\d{2,4} (?:parachutage|voltige|aéromodélisme|treuillage|vol|lâcher|largage|activité|essais)|$)")
+def _dms(v):
+    m = re.match(r"(\d{2,3})°(\d{2})'(\d{2}(?:[.,]\d+)?)\"([NSEW])", v.strip())
+    if not m:
+        return None
+    x = int(m[1]) + int(m[2]) / 60 + float(m[3].replace(',', '.')) / 3600
+    return -x if m[4] in 'SW' else x
 
 
 def parse_activities(page):
-    """ENR 5.5 : zones de parachutage et de voltige (position du centre, plafond, horaires, consignes)."""
-    x = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', page))).replace('’', "'")
+    """ENR 5.5 : zones de parachutage et de voltige, lues champ par champ (identifiants des cellules de l'eAIP)."""
     out = []
-    for m in ACT_RE.finditer(x):
-        la = int(m[6]) + int(m[7]) / 60 + int(m[8]) / 3600
-        lo = int(m[10]) + int(m[11]) / 60 + int(m[12]) / 3600
-        la, lo = (-la if m[9] == 'S' else la), (-lo if m[13] == 'W' else lo)
-        if re.search(r"°|\bFL ?\d|ft (?:AMSL|ASFC)", m[3]) or re.search(r"°", m[5]):
-            continue   # deux entrées collées (texte mal découpé) : position douteuse
-        if 41.5 < la < 49.5 and -6.5 < lo < 3.5:
-            out.append({'num': m[1], 'kind': m[2], 'name': m[3].strip()[:60], 'upper': m[4].strip(), 'hours': m[5].strip(' .')[:60],
-                        'la': round(la, 4), 'lo': round(lo, 4), 'rmk': re.sub(r'^SFC\s*', '', m[14].strip())[:240]})
+    span = lambda blk, key: [html.unescape(re.sub(r'<[^>]+>', ' ', x)).strip() for x in re.findall(rf'id="[^"]*{key}"[^>]*>(.*?)</span>', blk, re.S)]  # noqa: E731
+    for blk in re.split(r'(?=<span id="[^"]*AIRSPACE\.TXT_NAME")', page)[1:]:
+        num = (span(blk, r'AIRSPACE\.TXT_NAME') or [''])[0]
+        kind = re.search(r'<span[^>]*>\s*(parachutage|voltige)\s*</span>', blk)
+        if not kind or not num:
+            continue
+        lats, lons = span(blk, r'AIRSPACE_VERTEX\.GEO_LAT'), span(blk, r'AIRSPACE_VERTEX\.GEO_LONG')
+        pts = [(a, b) for a, b in ((_dms(x), _dms(y)) for x, y in zip(lats, lons)) if a is not None and b is not None]
+        if not pts:
+            continue
+        la, lo = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+        if not (41.5 < la < 49.5 and -6.5 < lo < 3.5):
+            continue
+        clean = lambda v: re.sub(r'\s+', ' ', v).strip()  # noqa: E731
+        z = {'num': num, 'kind': kind[1], 'name': clean(' '.join(span(blk, r'NOM_USUEL')))[:60],
+             'upper': clean((span(blk, r'VAL_DIST_VER_UPPER[^"]*') or ['?'])[0]), 'hours': clean(' '.join(span(blk, r'TXT_RMK_WORK_HR')))[:80],
+             'la': round(la, 4), 'lo': round(lo, 4), 'rmk': clean(' '.join(span(blk, r'TXT_RMK_NAT')))[:240]}
+        if len(pts) >= 3:
+            z['poly'] = [[round(a, 4), round(b, 4)] for a, b in pts]
+        out.append(z)
     return out
 
 

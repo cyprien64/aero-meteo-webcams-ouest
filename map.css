@@ -180,10 +180,10 @@ input[type=checkbox]:focus-visible { outline: 2px solid #ffb703; outline-offset:
 .taf-plain { margin: 6px 0 0; padding-left: 16px; font-size: 12px; line-height: 1.45; }
 .taf-plain li { margin-bottom: 3px; }
 /* nouvelle version disponible */
-#update-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 1600; display: flex; gap: 10px; align-items: center;
+#update-bar, #remind-bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 1600; display: flex; gap: 10px; align-items: center;
   color: #eef4fb; border-radius: 12px; padding: 8px 12px; font: 13px system-ui, sans-serif; }
-#update-bar button { background: #0a84ff; color: #fff; border: 0; border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 600; }
-#update-bar button.x { background: transparent; padding: 5px; }
+#update-bar button, #remind-bar button { background: #0a84ff; color: #fff; border: 0; border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 600; }
+#update-bar button.x, #remind-bar button.x { background: transparent; padding: 5px; }
 .fav-star { background: none; border: none; color: #ffd60a; font-size: 20px; cursor: pointer; vertical-align: -2px; padding: 0 4px; }
 table.rwy-w { width: 100%; font-size: 12px; border-collapse: collapse; margin: 4px 0; } table.rwy-w td { padding: 2px 4px; border-bottom: 1px solid rgba(255,255,255,.08); }
 table.rwy-w tr.best td { color: #a6e36b; font-weight: 700; }
@@ -312,6 +312,18 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 #inflight .if-f { display: block; color: #cfe3f5; }
 #inflight .if-note, #inflight .if-wait { font-size: 10.5px; color: #8fb3cc; }
 #inflight .if-wait { font-size: 13px; color: #fff; }
+#remind-bar { bottom: 64px; max-width: calc(100% - 24px); flex-wrap: wrap; background: rgba(20, 30, 45, .92); }
+#inflight .warnc { color: #ffb340 !important; }
+#inflight .if-div { background: rgba(255, 159, 10, .12); border-radius: 9px; padding: 4px 8px; margin: 6px 0; }
+#inflight .if-dev b { font-size: 17px; }
+/* mode cockpit : plein écran, très contrasté, gros chiffres lisibles au soleil */
+#inflight.cockpit { z-index: 1700; top: 0; left: 0; transform: none; width: 100%; height: 100%; border-radius: 0; background: #000 !important; overflow: auto; font-size: 18px; padding: 14px; }
+#inflight.cockpit .if-big { font-size: 28px; }
+#inflight.cockpit .if-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+#inflight.cockpit .if-grid small { font-size: 14px; color: #fff; }
+#inflight.cockpit .if-grid b { font-size: 46px; color: #ffd60a; }
+#inflight.cockpit .if-f { font-size: 22px; color: #fff; }
+#inflight.cockpit .btn { font-size: 18px; padding: 10px 16px; }
 /* barre de chargement / erreurs */
 #loadbar { position: fixed; top: 82px; left: 50%; transform: translateX(-50%); z-index: 1500; max-width: min(640px, calc(100% - 24px));
   color: #eef4fb; border-radius: 12px; padding: 7px 12px; font: 12.5px system-ui, sans-serif; }

@@ -124,7 +124,7 @@
       const x = toks[i]; let m;
       if ((m = /^FM(\d\d)(\d\d)(\d\d)$/.exec(x))) {
         groups.push(cur); const from = dt(+m[1], +m[2], +m[3]);
-        groups.filter((g) => g.kind === 'TAF' || g.kind === 'FM').forEach((g) => { if (g.to > from) g.to = from; });
+        groups.filter((g) => g.kind === 'TAF' || g.kind === 'FM' || g.kind === 'BECMG').forEach((g) => { if (g.to > from) g.to = from; });
         cur = { kind: 'FM', from, to: vEnd, toks: [] }; continue;
       }
       if (/^(BECMG|TEMPO|PROB\d\d)$/.test(x)) {
@@ -155,6 +155,7 @@
   }
   console.assert((() => { const r = tafAt({ rawTAF: 'TAF LFBO 121455Z 1214/1318 27010G20KT 9999 BKN020 PROB40 TEMPO 1214/1218 4000 -RADZ BKN007 BKN025CB BECMG 1300/1302 0800 FG', validTimeFrom: Date.UTC(2026, 10, 12, 14) / 1000, validTimeTo: Date.UTC(2026, 10, 13, 18) / 1000 }, new Date(Date.UTC(2026, 10, 12, 16)));
     return r.bad.length === 1 && /PROB40 TEMPO : visibilité 4000 m, plafond 700 ft, CB/.test(r.bad[0]); })(), 'tafAt TEMPO');
+  console.assert(tafAt({ rawTAF: 'TAF LFBO 121455Z 1214/1318 27010KT 9999 BKN020 BECMG 1212/1214 0800 FG FM121800 9999 SCT030', validTimeFrom: Date.UTC(2026, 10, 12, 12) / 1000, validTimeTo: Date.UTC(2026, 10, 13, 18) / 1000 }, new Date(Date.UTC(2026, 10, 12, 20))).bad.length === 0, 'tafAt FM arrête le BECMG');
   console.assert(tafAt({ rawTAF: 'TAF LFBO 121455Z 1214/1318 27010KT 9999 BKN020 BECMG 1300/1302 0800 FG', validTimeFrom: Date.UTC(2026, 10, 12, 14) / 1000, validTimeTo: Date.UTC(2026, 10, 13, 18) / 1000 }, new Date(Date.UTC(2026, 10, 13, 10))).bad.length === 1, 'tafAt BECMG persistant');
 
   // ---------- NOTAM de fermeture (terrain QFALC, piste QMRLC, ou texte « AD/RWY … CLSD / FERME »)
@@ -189,6 +190,16 @@
   };
   const icaoRoute = (b) => [`N${String(Math.round(b.f.tas)).padStart(4, '0')}VFR`, ...b.pts.slice(1, -1).map((p) => 'DCT ' + icaoCoord(p))].join(' ') + (b.pts.length > 2 ? '' : ' DCT');
   console.assert(icaoCoord([43.3833, -0.4167]) === '4323N00025W', 'icaoCoord');
+
+  // carburant au départ de l'étape suivante : plein du réservoir principal (limité par la masse max) ou carburant restant
+  function nextFuel({ rem, cap, aux, refuel, dry, mtow, density }) {
+    if (!refuel) { const fuel = Math.round(Math.min(rem, cap)); return { fuel, aux: Math.round(rem - fuel), add: 0, limited: false }; }
+    const byMass = Math.floor((mtow - dry) / density) - aux, fuel = Math.max(Math.round(Math.min(rem, cap)), Math.min(cap, byMass));
+    return { fuel, aux, add: Math.max(0, Math.round(fuel + aux - rem)), limited: byMass < cap };
+  }
+  console.assert(nextFuel({ rem: 40, cap: 160, aux: 0, refuel: true, dry: 1000, mtow: 1150, density: 0.72 }).fuel === 160, 'nextFuel plein complet');
+  console.assert((() => { const x = nextFuel({ rem: 40, cap: 160, aux: 0, refuel: true, dry: 1100, mtow: 1150, density: 0.72 }); return x.fuel === 69 && x.limited && x.add === 29; })(), 'nextFuel limité par la masse');   // (1150-1100)/0,72 = 69 L
+  console.assert(nextFuel({ rem: 50, cap: 160, aux: 0, refuel: false, dry: 1000, mtow: 1150, density: 0.72 }).fuel === 50, 'nextFuel sans plein');
 
   // terrain de la zone le plus proche ayant un METAR (dégagement automatique des escales)
   function nearestMetarAd(id) {
@@ -585,7 +596,7 @@
         + log.slice(0, 30).map((e, i) => `<div class="meta">${e.d.split('-').reverse().join('/')} · ${e.n} att.${e.i ? ' · instructeur' : ''}${e.reg ? ' · ' + esc(e.reg) : ''}${e.r ? ' · ' + esc(e.r) : ''} <button type="button" class="btn" data-del="${esc(e.d + '|' + i)}">✕</button></div>`).join('');
       $('#pf-log').querySelectorAll('[data-del]').forEach((x) => x.addEventListener('click', () => {
         const all = store.get('pilots', {}), pr = all[name] || {}, k = log[+x.dataset.del.split('|')[1]];
-        pr.log = (pr.log || []).filter((e) => e !== k && !(e.d === k.d && e.n === k.n && e.r === k.r)); all[name] = pr; store.set('pilots', all); showLog();
+        pr.log = (pr.log || []).filter((e) => (k.id ? e.id !== k.id : !(e.d === k.d && e.n === k.n && e.r === k.r && !e.id))); all[name] = pr; store.set('pilots', all); showLog();
       }));
     };
     const loadPilot = () => { const pr = store.get('pilots', {})[$('#pf-pil').value.trim()]; showLog(); if (!pr) return; if (pr.m) $('#pf-m1').value = pr.m; $('#pf-lic').value = pr.lic || ''; $('#pf-med').value = pr.med || ''; $('#pf-nuit').checked = !!pr.nuit; };
@@ -775,21 +786,17 @@
         time = new Date(b.eta.getTime() + f.turn * 6e4);
         const rem = Math.max(0, b.loaded - b.totFuel), d = f.T.fuel.density;
         const can = f.refuel && k < legsDef.length - 1 ? fuelAvail(b.arrInfo.v && b.arrInfo.v.escale, f.T) : null;
-        if (f.refuel && can !== false) {
-          // plein du réservoir principal, limité pour rester sous la masse max au décollage suivant
-          const dry = b.mb.mass - b.loaded * d, byMass = Math.floor((f.T.mtow - dry) / d) - f.aux;
-          fuel = Math.max(Math.round(Math.min(rem, cap0 || rem)), Math.min(cap0 || f.fuel, byMass)); aux = f.aux;
-          if (k < legsDef.length - 1) b.fuelNote = { ok: can !== null, txt: `À ${b.f.arr} : mettre ${Math.max(0, Math.round(fuel + aux - rem))} L (${fuel + aux} L à bord au départ)${byMass < (cap0 || f.fuel) ? ` — plein limité par la masse max ${f.T.mtow} kg` : ''}${can === null ? ` — carburant ${f.T.fuel.name.split(' (')[0]} non confirmé par la VAC, appeler le terrain` : ''}.` };
-        } else {
-          fuel = Math.round(cap0 ? Math.min(rem, cap0) : rem); aux = Math.round(rem - fuel);
-          if (can === false) b.fuelNote = { ok: false, txt: `Pas de ${f.T.fuel.name.split(' (')[0]} à ${b.f.arr} (VAC) : pas de plein possible, l'étape suivante part avec ${Math.round(rem)} L.` };
-        }
+        const nx = nextFuel({ rem, cap: cap0 || f.fuel, aux: f.aux, refuel: f.refuel && can !== false, dry: b.mb.mass - b.loaded * d, mtow: f.T.mtow, density: d });
+        fuel = nx.fuel; aux = nx.aux;
+        if (f.refuel && can !== false && k < legsDef.length - 1) b.fuelNote = { ok: can !== null, txt: `À ${b.f.arr} : mettre ${nx.add} L (${fuel + aux} L à bord au départ)${nx.limited ? ` — plein limité par la masse max ${f.T.mtow} kg` : ''}${can === null ? ` — carburant ${f.T.fuel.name.split(' (')[0]} non confirmé par la VAC, appeler le terrain` : ''}.` };
+        if (can === false) b.fuelNote = { ok: false, txt: `Pas de ${f.T.fuel.name.split(' (')[0]} à ${b.f.arr} (VAC) : pas de plein possible, l'étape suivante part avec ${Math.round(rem)} L.` };
       }
       trip.forEach((b) => { b.trip = trip; });
       prog.textContent = 'Créneaux de départ…';
       trip[0].slots = await departureSlots(trip).catch((e) => { console.warn('créneaux', e); return null; });
       // VAC des terrains de la route : mises en cache pour être consultables hors ligne
-      [...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))].forEach((id) => fetch(`data/vac/${id}.pdf`).catch(() => {}));
+      if (window.caches) caches.open('aww-offline-vac').then((c) => Promise.all([...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))]
+        .map((id) => fetch(`data/vac/${id}.pdf`).then((r) => r.ok && c.put(`data/vac/${id}.pdf`, r)).catch(() => {})))).catch(() => {});
       drawTrip(trip);
       try {
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
@@ -1085,9 +1092,7 @@
     for (let i = 0; i < pts.length - 1; i++) {
       const dist = distNm(pts[i], pts[i + 1]), tc = bearing(pts[i], pts[i + 1]);
       const w = winds && winds[i] && winds[i].spd != null ? winds[i] : { dir: 0, spd: 0 };
-      const wa = rad(w.dir - tc);
-      const wca = deg(Math.asin(Math.max(-1, Math.min(1, (w.spd / f.tas) * Math.sin(wa)))));
-      const gs = Math.max(20, f.tas * Math.cos(rad(wca)) - w.spd * Math.cos(wa));
+      const { wca, gs } = windTriangle(tc, w, f.tas);
       const th = (tc + wca + 360) % 360;
       let min = Math.round(dist / gs * 60);
       let fuel = Math.round(min * f.ff / 60);
@@ -1735,7 +1740,7 @@
   function borderInfo(b) {
     if (!window.FRANCE) return null;
     const ids = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean), foreignAd = ids.filter((id) => !id.startsWith('LF'));
-    const out = routeSamples(b, 3).filter((x) => !inFrance(x.p) && !(x.p[0] > 43.2 && x.p[1] < -1.6 && x.p[0] < 47.6));   // ignore la mer au large de la côte atlantique
+    const out = routeSamples(b, 3).filter((x) => x.p[0] < 43.5 && !inFrance(x.p));   // seules frontières de la zone : Espagne et Andorre (la mer n'en est pas une)
     if (!out.length && !foreignAd.length) return null;
     const andorra = out.some((x) => x.p[0] > 42.42 && x.p[0] < 42.66 && x.p[1] > 1.4 && x.p[1] < 1.79);
     const customs = ids.filter((id) => id.startsWith('LF')).map((id) => { const t = (vacAt(id) || {}).infos || '', m = t.split(/MET :8 -/)[1]; return m ? [id, m.split(/Douanes, Police/)[0].replace(/\s+/g, ' ').trim().slice(0, 220)] : null; }).filter(Boolean);
@@ -1760,8 +1765,9 @@
       if (hit && b.f.ft < z.ft && !seen.has(z.name)) { seen.add(z.name); al.push(`ZSM gypaète « ${z.name} » traversée à ${b.f.ft} ft (vers ${hit.along.toFixed(0)} NM) : survol motorisé au-dessus de ${z.ft} ft, ou contourner (zones de sensibilité majeure du STAC, en période de reproduction).`); }
     }
     for (const a of S.act || []) {
-      const up = /^FL/.test(a.upper) ? +a.upper.replace(/\D/g, '') * 100 : parseInt(a.upper, 10);
       const d = Math.min(...smp.map((x) => distNm(x.p, [a.la, a.lo])));
+      const ground = /ASFC|AGL/i.test(a.upper) ? ((b.profile || []).reduce((m, q) => (!m || distNm(q.p, [a.la, a.lo]) < distNm(m.p, [a.la, a.lo]) ? q : m), null) || { ft: 0 }).ft : 0;
+      const up = /^FL/.test(a.upper) ? +a.upper.replace(/\D/g, '') * 100 : parseInt(a.upper, 10) + ground;
       if (d <= 3 && b.f.ft <= up + 500) al.push(`Zone de ${a.kind} ${a.num} ${a.name} à ${d.toFixed(1)} NM de la route (jusqu'à ${a.upper}, ${a.hours}) — ${a.rmk.slice(0, 120)}`);
     }
     const pnp = smp.find((x) => inPoly(x.p, PNP_CORE));
@@ -1788,7 +1794,7 @@
 
   // ---------- carnet de vol (profil pilote, sur l'appareil) et expérience récente
   const pilotOf = (name) => (store.get('pilots', {})[name] || {});
-  function addLog(name, e) { const all = store.get('pilots', {}), pr = all[name] || {}; pr.log = [...(pr.log || []), e].slice(-300); all[name] = pr; store.set('pilots', all); }
+  function addLog(name, e) { const all = store.get('pilots', {}), pr = all[name] || {}; pr.log = [...(pr.log || []), { ...e, id: Date.now() + Math.random() }].slice(-300); all[name] = pr; store.set('pilots', all); }
   function recentAlerts(b) {
     const f = b.f, p = pilotOf(f.pil), log = p.log || [], al = [];
     if (!f.pil) return al;
@@ -1846,11 +1852,13 @@
   // ================================================================== compléments de préparation
   const vacAt = (id) => (VAC && VAC.data && VAC.data[id]) || null;
   // temps (min) d'une branche pour une vitesse propre et un vent donnés (même formule que le calcul des branches)
-  function legMinutes(dist, tc, w, tas) {
+  // dérive (°) et vitesse sol (kt) pour une route vraie, un vent et une vitesse propre
+  function windTriangle(tc, w, tas) {
     const ws = w && w.spd != null ? w : { dir: 0, spd: 0 }, wa = rad(ws.dir - tc);
     const wca = deg(Math.asin(Math.max(-1, Math.min(1, (ws.spd / tas) * Math.sin(wa)))));
-    return dist / Math.max(20, tas * Math.cos(rad(wca)) - ws.spd * Math.cos(wa)) * 60;
+    return { wca, gs: Math.max(20, tas * Math.cos(rad(wca)) - ws.spd * Math.cos(wa)) };
   }
+  function legMinutes(dist, tc, w, tas) { return dist / windTriangle(tc, w, tas).gs * 60; }
   // régime le plus proche d'une altitude (types dont les régimes sont nommés « 5500 ft - … »), sinon celui choisi
   function regimeFor(T, alt, rg) {
     const rs = T.regimes.filter((r) => regFt(r.name) != null);

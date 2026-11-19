@@ -39,6 +39,7 @@ jobs:
         with:
           path: data/vac
           key: vac-pdf-${{ steps.cyc.outputs.c }}
+          restore-keys: vac-pdf-
 
       - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
         env:

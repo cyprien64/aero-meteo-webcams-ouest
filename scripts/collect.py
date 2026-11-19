@@ -887,6 +887,13 @@ def collect_special():
         page = get(STAC_ZSM, timeout=60)
         link = re.search(r'href="([^"]+\.kml)"', page)
         zsm = parse_zsm(get(link.group(1), timeout=120)) if link else []
+        if not zsm and FALLBACK_URL:   # lien ou format du STAC changé : on garde les ZSM publiées et on le signale
+            try:
+                zsm = json.loads(get(f'{FALLBACK_URL}/data/live/special.json', timeout=30)).get('zsm') or []
+            except Exception:  # noqa: BLE001
+                zsm = []
+            print('  ZSM illisibles : version précédente conservée')
+            STATUS['zsm'] = 'échec (version précédente conservée)'
         print(f'  {len(act)} zones de parachutage / voltige, {len(zsm)} ZSM')
         if not act and not zsm:
             raise RuntimeError('rien de lu')

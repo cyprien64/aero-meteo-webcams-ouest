@@ -3,7 +3,7 @@
 window.AIRCRAFT_TYPES = {
   'DR400-ROTAX': {
     label: 'DR400 Rotax 912iS',
-    fuel: { name: 'SP98 / UL91 (0,72)', density: 0.72, tanks: [{ name: 'Réservoir principal', cap: 109, arm: 1.12 }] },
+    fuel: { name: 'SP98 / UL91 / AVGAS 100LL (0,72)', density: 0.72, tanks: [{ name: 'Réservoir principal', cap: 109, arm: 1.12 }] },
     mtow: 865,
     arms: { pilot: 0.41, copilot: 0.41, pax: 1.19, bag: 1.19 },
     envelope: [[0.205, 0], [0.205, 750], [0.428, 865], [0.564, 865], [0.564, 0]],
@@ -128,6 +128,7 @@ window.AIRCRAFT_TYPES = {
     ],
     defaultRegime: 1,
     // table : montée du manuel (§5.06), [altitude ft, temps min, carburant L (mise en route et roulage compris), distance NM]
+    glide: 9.3,   // finesse moteur coupé (manuel §5.06)
     climb: { extraMin: 2, extraFuel: 4, table: [[0, 0, 0, 0], [3000, 3.5, 4, 5.2], [5500, 7, 7, 10], [8500, 12.5, 13, 18], [11500, 21, 20, 28]] },
     speeds: { VSO: 49, VS1: 57, VR: 59, 'V passage 15 m': 70, Vx: '67/78', Vy: '78/92', 'V finesse max': 86, VA: 115, VFE: 94, VNO: 134, VNE: 170,
       Vapp: 65, 'Vapp courte': 62, 'Vw 90° max': 22 },

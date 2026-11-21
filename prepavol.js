@@ -781,6 +781,7 @@
         } catch (e) { console.warn('vigilance', e); }
         b.mountain = mountainOf(b);
         b.altCmp = await altitudeCompare(b, b.mids, b.depElev).catch((e) => { console.warn('altitudes', e); return null; });
+        b.optAlt = await optimalAltitudes(b).catch((e) => { console.warn('altitude optimale', e); return null; });
         b.changes = snapshotDiff(b);
         trip.push(b);
         time = new Date(b.eta.getTime() + f.turn * 6e4);
@@ -833,6 +834,7 @@
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
+    on('pf-optalt', (e) => { $('#pf-ft').value = e.target.dataset.ft; $('#pf-ft').dispatchEvent(new Event('change')); run(false); });
     on('pf-ics', () => exportIcs(b));
     on('pf-gps', () => flightMode(b.trip || [b]));
     on('pf-share', () => shareFlight(sfx));
@@ -1776,10 +1778,11 @@
   }
 
   // ---------- nuages et givrage à l'altitude de croisière (GRAMET)
+  // nébulosité et température d'une colonne GRAMET à une altitude (interpolées entre niveaux de pression)
+  const grametAt = (c, ft) => { const lv = c.lv; for (let k = 0; k < lv.length - 1; k++) if (lv[k].z <= ft && lv[k + 1].z >= ft) { const r = (ft - lv[k].z) / (lv[k + 1].z - lv[k].z); return { cc: lv[k].cc + (lv[k + 1].cc - lv[k].cc) * r, T: lv[k].T + (lv[k + 1].T - lv[k].T) * r }; } return null; };
   function cruiseIcing(b) {
     const g = b.gramet; if (!g || g.err || !g.cols) return [];
-    const at = (c) => { const lv = c.lv; for (let k = 0; k < lv.length - 1; k++) if (lv[k].z <= b.f.ft && lv[k + 1].z >= b.f.ft) { const r = (b.f.ft - lv[k].z) / (lv[k + 1].z - lv[k].z); return { cc: lv[k].cc + (lv[k + 1].cc - lv[k].cc) * r, T: lv[k].T + (lv[k + 1].T - lv[k].T) * r }; } return null; };
-    return g.cols.map((c) => { const v = at(c); return v && { along: c.along, cc: v.cc, T: v.T, cloud: v.cc >= 50, icing: v.cc >= 50 && v.T <= 0 && v.T >= -15, iso0: c.iso0 }; }).filter(Boolean);
+    return g.cols.map((c) => { const v = grametAt(c, b.f.ft); return v && { along: c.along, cc: v.cc, T: v.T, cloud: v.cc >= 50, icing: v.cc >= 50 && v.T <= 0 && v.T >= -15, iso0: c.iso0 }; }).filter(Boolean);
   }
   function icingAlerts(b) {
     const pts = cruiseIcing(b), al = [];
@@ -1897,6 +1900,105 @@
     }
     const ok = rows.filter((r) => !r.low), best = ok.sort((x, y) => x.fuel - y.fuel || x.min - y.min)[0], cur = rows.find((r) => r.cur);
     return { rows: rows.sort((x, y) => x.alt - y.alt), best, cur, maxSafe };
+  }
+
+  // ---------- altitude optimale par branche : contraintes (relief, zones, espaces, NOTAM, nuages, givrage, règle semi-circulaire) puis moindre carburant
+  const OPT_ALTS = []; for (let a = 1500; a <= 9500; a += 500) OPT_ALTS.push(a);
+  // contraintes d'une branche : fonctions altitude -> null ou { why, hard } (hard = interdit / impossible, sinon point d'attention)
+  function legConstraints(b, i, acc) {
+    const lg = b.legs[i], end = acc + lg.dist, total = b.totDist, S = SPECIAL || {}, ck = [];
+    const smp = routeSamples(b, 2).filter((x) => x.lg === lg);
+    const prof = (b.profile || []).filter((p) => p.along >= acc - .5 && p.along <= end + .5);
+    const groundIn = (poly) => Math.max(0, ...prof.filter((p) => inPoly(p.p, poly)).map((p) => p.ft));
+    const lowGround = prof.length ? Math.min(...prof.map((p) => p.ft)) : 0;
+    const band = (lo, up, why, hard, w, ph) => ck.push((a) => (a >= lo && a <= up ? { why, hard, w, ph } : null));
+    if (lg.safe) band(-1e9, lg.safe.alt - 1, `relief ${lg.safe.terrain} ft (+1000 ft)`, true, 1e5);   // le relief passe avant tout le reste
+    // montée (~400 ft/NM depuis le départ) et descente (~300 ft/NM, 3°, jusqu'à l'arrivée) ; 1500-2000 ft (intégration) toujours possibles
+    const arr = b.legs[b.legs.length - 1].to, ae = A.aptByIcao[arr] ? +A.aptByIcao[arr].elev || 0 : 0;
+    band(Math.max(2000, (b.depElev || 0) + 1000 + 400 * end) + 1, 1e9, `montée trop courte depuis ${b.legs[0].from}`, true, 0, true);
+    band(Math.max(2000, ae + 1000 + 300 * (total - acc)) + 1, 1e9, `descente trop courte vers ${arr}`, true, 0, true);
+    const mt = b.mountain && b.mountain.legs.find((x) => x.lg === lg);
+    if (mt) band(-1e9, mt.minAlt - 1, `crêtes ${mt.hi.ft} ft${mt.wind && mt.wind.spd >= 20 ? ` avec vent ${Math.round(mt.wind.spd)} kt (+1500 ft)` : ''}`, true, 1e5);
+    if (smp.some((x) => inPoly(x.p, PNP_CORE))) { const g = groundIn(PNP_CORE); band(-1e9, g + 3299, `cœur du Parc national (1000 m au-dessus de ${g} ft)`, true); }
+    for (const z of S.zsm || []) if (smp.some((x) => inPoly(x.p, z.poly))) band(-1e9, z.ft - 1, `ZSM gypaète ${z.name} (survol au-dessus de ${z.ft} ft)`, true);
+    for (const a of S.act || []) if (Math.min(...smp.filter((x) => x.along > 8 && x.along < total - 8).map((x) => distNm(x.p, [a.la, a.lo]))) <= 3) { const up = /^FL/.test(a.upper) ? +a.upper.replace(/\D/g, '') * 100 : parseInt(a.upper, 10) + (/ASFC|AGL/i.test(a.upper) ? groundIn([[a.la - .05, a.lo - .07], [a.la + .05, a.lo - .07], [a.la + .05, a.lo + .07], [a.la - .05, a.lo + .07]]) : 0); if (up) band(0, up + 500, `${a.kind} ${a.name} (jusqu'à ${a.upper})`, false); }
+    // espaces contrôlés (classe A interdite au VFR, C / D / CTR sur clairance), hors 8 NM autour du départ et de l'arrivée de l'étape
+    for (const s of (ASP && ASP.data) || []) {
+      const cls = s.cls || '', ctl = /^[ACD]$/.test(cls) || s.kind === 'CTR'; if (!ctl) continue;
+      const inside = smp.filter((x) => x.along > 8 && x.along < total - 8 && inPoly(x.p, s.poly)); if (!inside.length) continue;
+      const g = isAgl(s.lower) || isAgl(s.upper) ? groundIn(s.poly) : 0, lo = (parseAlt(s.lower) ?? 0) + (isAgl(s.lower) ? g : 0), up = (parseAlt(s.upper) ?? 99999) + (isAgl(s.upper) ? g : 0);
+      band(lo, up, `${s.name} classe ${cls || 'D'}${cls === 'A' ? ' (interdite au VFR)' : ' (clairance)'}`, cls === 'A');
+    }
+    // zones P / R / D traversées par la branche : P interdite, RTBA active interdite, R / D à vérifier
+    for (const x of b.zones || []) {
+      if (polyRouteDist(x.z.poly, [lg.a, lg.b]) > 0) continue;
+      const r = x.z.rtba && (b.rtba || []).find((y) => y.z === x.z); if (x.z.rtba && !(r && r.conflict)) continue;
+      const g = isAgl(x.z.upper) ? groundIn(x.z.poly) : 0;
+      band(parseAlt(x.z.lower) ?? 0, (parseAlt(x.z.upper) ?? 99999) + g, `${x.z.id} ${x.z.name}${x.z.rtba ? ' (AZBA active)' : x.z.type === 'P' ? ' (interdite)' : ' (vérifier l\'activité)'}`, x.z.type === 'P' || !!x.z.rtba);
+    }
+    // NOTAM qui touchent la branche : zones réglementées / ZRT (code Q « R… ») interdites, activités (« W… » : parachutage, drones, voltige…) et obstacles à noter ;
+    // les autres (fréquences, services) n'ont rien à voir avec l'altitude, et ceux de la surface à l'illimité ne se contournent pas verticalement
+    for (const e of [...(b.enroute || []), ...(b.obst || [])]) {
+      const n = e.n, q = (n.q || '')[0]; if (!/[RWO]/.test(q) || e.along < acc - 1 || e.along > end + 1 || e.d > (n.r || 0) + 1 || n.lower == null || n.upper == null || (n.lower <= 0 && n.upper >= 999)) continue;
+      band(n.lower * 100, n.upper * 100, `NOTAM ${n.ref} ${n.q === 'RTTT' ? 'renvoi à un SUP AIP (zones à lire)' : q === 'R' ? 'zone réglementée' : q === 'O' ? 'obstacle' : 'activité'} (${A.fl(n.lower)}-${A.fl(n.upper)})`, q === 'R' && n.q !== 'RTTT');
+    }
+    // nuages bas prévus (Open-Meteo) : 500 ft sous la base à basse altitude, 1000 ft au-dessus de 3000 ft / 1000 ft sol
+    for (const p of (b.wxRoute && b.wxRoute.pts) || []) if (p.leg === i && p.low >= 50 && p.baseAmsl != null) ck.push((a) => (a > p.baseAmsl - (a <= Math.max(3000, (p.elevFt || 0) + 1000) ? 500 : 1000) ? { why: `nuages (base ~${p.baseAmsl} ft)`, hard: true } : null));
+    // GRAMET : dans les nuages, givrage
+    const cols = b.gramet && !b.gramet.err ? b.gramet.cols.filter((c) => c.along >= acc - 4 && c.along <= end + 4) : [];
+    ck.push((a) => { for (const c of cols) { const v = grametAt(c, a); if (v && v.cc >= 50) return { why: v.T <= 0 && v.T >= -15 ? 'givrage (GRAMET)' : 'dans les nuages (GRAMET)', hard: true }; } return null; });
+    ck.push((a) => (a - lowGround > 3000 && !semiOk(a, lg.tm) ? { why: 'règle semi-circulaire', hard: true } : null));
+    return ck;
+  }
+  async function optimalAltitudes(b) {
+    const T = b.f.T, times = b.winds ? b.winds.map((w) => w.at) : null;
+    let acc = 0; const C = b.legs.map((lg, i) => { const c = legConstraints(b, i, acc); acc += lg.dist; return c; });
+    // coût de chaque branche à chaque altitude : carburant (vent à l'altitude) + 1000 par interdiction + 6 par point d'attention
+    const tab = [];
+    for (const alt of OPT_ALTS) {
+      const ws = times ? await windsAloft(b.mids, alt, times) : [], rg = regimeFor(T, alt, b.f.rg);
+      tab.push(b.legs.map((lg, i) => {
+        const hits = C[i].map((f) => f(alt)).filter(Boolean), hard = hits.filter((h) => h.hard), min = legMinutes(lg.dist, lg.tc, ws[i], rg.tas);
+        const wt = (hs) => hs.reduce((s, h) => s + (h.w || (h.hard ? 1000 : 6)), 0), cruise = hits.filter((h) => !h.ph);
+        return { alt, w: ws[i], min, fuel: min * rg.ff / 60, hard, soft: hits.filter((h) => !h.hard), cost: min * rg.ff / 60 + wt(hits), costU: min * rg.ff / 60 + wt(cruise), hardU: cruise.filter((h) => h.hard).length, whyU: cruise.filter((h) => h.hard).map((h) => `${lg.from}→${lg.to} ${h.why}`), rg };
+      }));
+    }
+    const climbL = (from, to) => (to > from ? climbExtra(T, to, from, b.f.tas, b.f.ff).fuel - TAXI_L : 0);
+    // programmation dynamique sur les branches : montée comptée, 1 L de pénalité par changement d'altitude (évite les escaliers)
+    let best = OPT_ALTS.map((a, j) => ({ cost: tab[j][0].cost + climbL(b.depElev || 0, a), path: [j] }));
+    for (let i = 1; i < b.legs.length; i++) best = OPT_ALTS.map((a, j) => { const p = best.map((x, k) => ({ x, c: x.cost + climbL(OPT_ALTS[k], a) + (k === j ? 0 : 1) })).sort((u, v) => u.c - v.c)[0]; return { cost: p.c + tab[j][i].cost, path: [...p.x.path, j] }; });
+    const plan = best.sort((u, v) => u.cost - v.cost)[0].path.map((j, i) => tab[j][i]);
+    // plancher : contraintes qui interdisent l'altitude la plus basse (relief…) ; plafond : celles qui interdisent la plus haute (nuages…) ;
+    // une contrainte qui interdit les deux ne borne rien (elle est seulement signalée)
+    const limits = (i) => {
+      const col = tab.map((r) => r[i]), ws = (c) => c.hard.map((h) => h.why).filter((w) => w !== 'règle semi-circulaire');
+      const lo = ws(col[0]), hi = ws(col[col.length - 1]), fl = lo.filter((w) => !hi.includes(w)), ce = hi.filter((w) => !lo.includes(w));
+      const f = col.filter((c) => ws(c).some((w) => fl.includes(w))).pop(), c = col.find((x) => ws(x).some((w) => ce.includes(w)));
+      return { floor: f && { alt: f.alt + 500, why: ws(f).find((w) => fl.includes(w)) }, ceil: c && { alt: c.alt - 500, why: ws(c).find((w) => ce.includes(w)) } };
+    };
+    const total = (cs) => ({ fuel: Math.round(cs.reduce((s, c) => s + c.fuel, 0)), min: Math.round(cs.reduce((s, c) => s + c.min, 0)), hard: cs.reduce((s, c) => s + c.hardU, 0), why: cs.flatMap((c) => c.whyU) });
+    // altitude unique (celle du formulaire) : montée et descente déjà comptées par le log, donc ignorées ici
+    const uni = OPT_ALTS.map((a, j) => ({ alt: a, cs: tab[j], cost: tab[j].reduce((s, c) => s + c.costU, 0) + climbL(b.depElev || 0, a) })).sort((u, v) => u.cost - v.cost)[0];
+    const curJ = OPT_ALTS.indexOf(b.f.ft);
+    return { plan: plan.map((c, i) => ({ ...c, lg: b.legs[i], ...limits(i) })), tot: total(plan), uni: { alt: uni.alt, ...total(uni.cs) }, cur: curJ >= 0 ? total(tab[curJ]) : null, noWind: !times };
+  }
+  if (TYPES['R3000-180']) { const T = TYPES['R3000-180'], rg = T.regimes[T.defaultRegime];
+    optimalAltitudes({ f: { T, rg, tas: rg.tas, ff: rg.ff, ft: 4500 }, legs: [{ from: 'A', to: 'B', dist: 20, tc: 90, tm: 90, a: [43, -0.5], b: [43, -0.06], safe: { alt: 3000, terrain: 2000 } }], totDist: 20, winds: null, profile: [], zones: [], mids: [], depElev: 600 })
+      .then((o) => console.assert(o.plan[0].alt === 3000 && o.plan[0].floor.alt === 3000 && /relief/.test(o.plan[0].floor.why) && o.uni.alt === 3000, 'optimalAltitudes : relief puis le plus bas', o)); }
+  function optAltHtml(b, sfx = '') {
+    const o = b.optAlt; if (!o) return '';
+    const d = o.cur ? o.cur.fuel - o.uni.fuel : null;
+    return `<h4>🎯 Altitude optimale par branche</h4>
+      <table class="legs"><tr><th>Branche</th><th>Altitude</th><th>Vent</th><th>Plancher</th><th>Plafond</th><th>À noter</th></tr>
+      ${o.plan.map((c) => `<tr${c.hard.length ? ' style="color:#ff6b6b"' : ''}><td>${esc(c.lg.from)}→${esc(c.lg.to)}</td><td><b>${c.hard.length ? '⛔ impossible' : c.alt + ' ft'}</b></td><td>${c.w ? `${r3(c.w.dir)}/${Math.round(c.w.spd)}` : '–'}</td>
+        <td style="text-align:left">${c.floor ? `${c.floor.alt} ft : ${esc(c.floor.why)}` : '–'}</td><td style="text-align:left">${c.ceil ? `${c.ceil.alt} ft : ${esc(c.ceil.why)}` : '9500 ft'}</td>
+        <td style="text-align:left">${[...c.hard.map((h) => '⛔ ' + h.why), ...c.soft.map((h) => h.why)].map(esc).join(' · ') || '✅'}</td></tr>`).join('')}</table>
+      ${o.plan.filter((c) => c.hard.length).map((c) => `<div class="warn">⛔ ${esc(c.lg.from)}→${esc(c.lg.to)} : aucune altitude entre 1500 et 9500 ft ne respecte toutes les contraintes (${esc(c.hard.map((h) => h.why).join(', '))}) — modifier la route pour contourner, ou reporter.</div>`).join('')}
+      <p class="meta">Profil conseillé : <b>${o.plan.map((c) => (c.hard.length ? '⛔' : c.alt)).join(' → ')} ft</b> (${o.tot.fuel} L de croisière, ${hhmm(o.tot.min)}).
+        ${o.uni.hard ? `Altitude unique la moins contrainte : <b>${o.uni.alt} ft</b>, mais ⛔ ${esc(o.uni.why.join(' ; '))} — préférer le profil par branche.` : `Altitude unique conseillée : <b>${o.uni.alt} ft</b> (${o.uni.fuel} L, ${hhmm(o.uni.min)})${o.cur && o.uni.alt !== b.f.ft ? `, contre ${o.cur.fuel} L à ${b.f.ft} ft${d > 0 ? ` (−${d} L)` : ''}${o.cur.hard ? ` et ${o.cur.hard} contrainte(s) non respectée(s) à ${b.f.ft} ft` : ''}` : ''}.
+        ${o.uni.alt !== b.f.ft ? `<button class="btn" id="pf-optalt${sfx}" data-ft="${o.uni.alt}">Recalculer à ${o.uni.alt} ft</button>` : ''}`}</p>
+      <p class="meta">Calcul : relief +1000 ft, crêtes et vent, cœur du Parc national, ZSM, parachutage / voltige, espaces contrôlés (hors abords du départ et de l'arrivée), zones P / R / D, AZBA active, NOTAM à limites verticales, base des nuages prévue, GRAMET (nuages, givrage), règle semi-circulaire, puis le moins de carburant avec le vent${o.noWind ? ' (vent indisponible à cette date : sans vent)' : ''}, montée comprise.
+        Les SUP AIP n'ont pas de limites verticales dans les données : les lire dans la liste. Choix final au pilote (TEMSI, WINTEM, carte OACI).</p>`;
   }
 
   // ---------- terrains de déroutement le long de la route
@@ -2104,6 +2206,7 @@
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
       ${perfLine(b, sfx)}
       ${pnrHtml(b)}
+      ${optAltHtml(b, sfx)}
       ${altCmpHtml(b)}
       ${loadHtml(b)}
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
@@ -2681,6 +2784,12 @@
       h2('Altitude de croisière selon le vent');
       table(['Altitude', 'Temps', 'Carburant', 'Régime', 'Remarque'], b.altCmp.rows.map((r) => [`${r.alt} ft${r.cur ? ' (prévue)' : ''}${r === b.altCmp.best ? ' *' : ''}`, hhmm(r.min), `${r.fuel} L`, r.rg,
         [r.low && 'sous l\'alti sécu', !r.semi && 'hors règle semi-circulaire'].filter(Boolean).join(', ') || 'OK']), { size: 7.5 });
+    }
+    if (b.optAlt) {
+      h2('Altitude optimale par branche');
+      table(['Branche', 'Altitude', 'Plancher', 'Plafond', 'A noter'], b.optAlt.plan.map((c) => [`${c.lg.from} -> ${c.lg.to}`, c.hard.length ? 'IMPOSSIBLE' : `${c.alt} ft`, c.floor ? `${c.floor.alt} ft : ${c.floor.why}` : '-', c.ceil ? `${c.ceil.alt} ft : ${c.ceil.why}` : '9500 ft',
+        [...c.hard.map((h) => 'INTERDIT : ' + h.why), ...c.soft.map((h) => h.why)].join(' ; ') || 'OK']), { size: 7.3 });
+      para(`Profil conseillé : ${b.optAlt.plan.map((c) => (c.hard.length ? 'IMPOSSIBLE' : c.alt)).join(' -> ')} ft (${b.optAlt.tot.fuel} L). ${b.optAlt.uni.hard ? `Altitude unique la moins contrainte : ${b.optAlt.uni.alt} ft, mais : ${b.optAlt.uni.why.join(' ; ')}.` : `Altitude unique conseillée : ${b.optAlt.uni.alt} ft (${b.optAlt.uni.fuel} L).`}`, { size: 8 });
     }
     const semi = semiCircular(b);
     if (semi.length) para(`Règle semi-circulaire (au-dessus de 3000 ft sol : Rm 000-179 milliers impairs + 500, Rm 180-359 milliers pairs + 500) : ${semi.map((x) => `${x.lg.from}-${x.lg.to} Rm ${r3(x.lg.tm)} -> ${x.sug || '?'} ft`).join(' ; ')}.`, { size: 8, color: [170, 40, 0] });

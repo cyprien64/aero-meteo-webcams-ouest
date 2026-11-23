@@ -845,6 +845,7 @@
     });
     on('pf-icao-copy', (e) => { navigator.clipboard.writeText(icaoRoute(b)).then(() => { e.target.textContent = 'Copié ✔'; }, () => { e.target.textContent = 'Copie impossible : sélectionner le texte'; }); });
     if (b.gramet && !b.gramet.err && $('#pf-gramet' + sfx)) drawGramet($('#pf-gramet' + sfx), b.gramet, b);
+    bindProfile(b, sfx);
     on('pf-gramet-big', () => {
       const cv = document.createElement('canvas'); cv.width = 1800; cv.height = 860; drawGramet(cv, b.gramet, b);
       const w = window.open(''); if (w) { w.document.title = 'GRAMET ' + b.ids.join(' - '); w.document.body.style.margin = 0; const im = w.document.createElement('img'); im.src = cv.toDataURL('image/png'); im.style.width = '100%'; w.document.body.appendChild(im); }
@@ -1275,6 +1276,8 @@
   const WXCOL = ['#2ecc40', '#ff9f0a', '#ff3b30'], WXTXT = ['VFR favorable', 'VFR marginal', 'VFR défavorable'];
 
   // ================================================================== coupe verticale
+  // couleurs des espaces par classe, proches des cartes OACI / applications de navigation
+  const ASP_COL = { A: '#d32f2f', C: '#3949ab', D: '#1e88e5', E: '#43a047', G: '#9e9e9e', UNC: '#9e9e9e' };
   function verticalProfile(profile, asp, zones, cruiseFt) {
     if (!profile.length) return null;
     const segs = [];
@@ -1282,8 +1285,8 @@
       let cur = null;
       profile.forEach((pp, i) => {
         const inside = inPoly(pp.p, kind.poly);
-        if (inside && !cur) cur = { name, from: pp.along, to: pp.along, lower, upper, color, aglL: /ASFC|AGL/i.test(String(kind.lowerS)), aglU: /ASFC|AGL/i.test(String(kind.upperS)), ter: [] };
-        if (inside) { cur.to = pp.along; cur.ter.push(pp.ft); }
+        if (inside && !cur) cur = { name, from: pp.along, to: pp.along, lower, upper, color, aglL: /ASFC|AGL/i.test(String(kind.lowerS)), aglU: /ASFC|AGL/i.test(String(kind.upperS)), ter: [], pts: [], lowerS: kind.lowerS, upperS: kind.upperS, freq: kind.freq };
+        if (inside) { cur.to = pp.along; cur.ter.push(pp.ft); cur.pts.push([pp.along, pp.ft]); }
         if ((!inside || i === profile.length - 1) && cur) { segs.push(cur); cur = null; }
       });
     };
@@ -1292,7 +1295,7 @@
       const lo = parseAlt(s.lower), up = parseAlt(s.upper);
       if (lo === null || lo > 12000) continue;
       if (polyRouteDist(s.poly, profile.map((x) => x.p)) > 0) continue;
-      add(`${s.name} (${s.cls})`, { poly: s.poly, lowerS: s.lower, upperS: s.upper }, lo, Math.min(up ?? 12000, 12000), s.kind === 'CTR' ? '#1e88e5' : '#64b5f6');
+      add(`${s.name} (${s.cls})`, { poly: s.poly, lowerS: s.lower, upperS: s.upper, freq: s.freq }, lo, Math.min(up ?? 12000, 12000), ASP_COL[s.cls] || '#9e9e9e');
     }
     for (const x of zones) {
       if (!x.crossed) continue;
@@ -1310,23 +1313,96 @@
     });
     return { profile, segs, maxTer, total: profile[profile.length - 1].along, conflicts };
   }
-  function profileSvg(v, b, w = 430, h = 170) {
-    if (!v) return '';
-    const top = Math.max(b.f.ft + 2000, v.maxTer + 1500, 3000), X = (nm) => 30 + nm / v.total * (w - 36), Y = (ft) => h - 18 - ft / top * (h - 26);
-    const ter = `M${X(0)},${Y(0)} ` + v.profile.map((p) => `L${X(p.along).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(' ') + ` L${X(v.total)},${Y(0)} Z`;
-    const rects = v.segs.filter((s) => s.lower < top).map((s) => ({ ...s, upper: Math.min(s.upper, top) })).map((s) => `<rect x="${X(s.from).toFixed(1)}" y="${Y(s.upper).toFixed(1)}" width="${Math.max(1, X(s.to) - X(s.from)).toFixed(1)}" height="${Math.max(1, Y(s.lower) - Y(s.upper)).toFixed(1)}" fill="${s.color}" fill-opacity=".18" stroke="${s.color}" stroke-width=".8"><title>${esc(s.name)} ${s.lower}-${s.upper} ft</title></rect>`).join('');
-    const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${h - 6}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
-    const ci = cruiseIcing(b), g0 = b.gramet && !b.gramet.err ? b.gramet.cols.filter((c) => c.iso0 != null) : [];
-    const ice = ci.map((p, i) => { if (!p.cloud) return ''; const a = i ? (ci[i - 1].along + p.along) / 2 : p.along, z = i < ci.length - 1 ? (p.along + ci[i + 1].along) / 2 : p.along;
-      return `<rect x="${X(a).toFixed(1)}" y="${(Y(b.f.ft) - 5).toFixed(1)}" width="${Math.max(2, X(z) - X(a)).toFixed(1)}" height="10" fill="${p.icing ? '#ff3b30' : '#cfd8dc'}" fill-opacity=".55"><title>${p.icing ? 'givrage probable' : 'nuage'} ${Math.round(p.cc)} %, ${Math.round(p.T)} °C</title></rect>`; }).join('')
-      + (g0.length > 1 ? `<polyline points="${g0.map((c) => `${X(c.along).toFixed(1)},${Y(Math.min(c.iso0, top)).toFixed(1)}`).join(' ')}" fill="none" stroke="#4fc3f7" stroke-dasharray="4 3"><title>isotherme 0 °C</title></polyline>` : '');
-    const grid = [0, 0.25, 0.5, 0.75, 1].map((k) => `<text x="2" y="${(Y(top * k) + 3).toFixed(1)}" font-size="8" fill="#9bd">${Math.round(top * k / 100) * 100}</text>`).join('');
-    const marks = [];
-    let acc = 0; b.legs.forEach((lg, i) => { if (i) marks.push([acc, lg.from]); acc += lg.dist; });
-    const mk = marks.map(([a, n]) => `<line x1="${X(a)}" x2="${X(a)}" y1="8" y2="${h - 18}" stroke="#fff" stroke-opacity=".25"/><text x="${X(a) + 2}" y="16" font-size="8" fill="#fff">${esc(n)}</text>`).join('');
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="background:rgba(0,0,0,.25);border-radius:5px">${grid}${rects}<path d="${ter}" fill="#8d6e63" fill-opacity=".85"/>${ice}<line x1="${X(0)}" x2="${X(v.total)}" y1="${Y(b.f.ft)}" y2="${Y(b.f.ft)}" stroke="#ff2bd6" stroke-width="2"/>${mk}${wx}
-      <text x="${X(0)}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[0])}</text><text x="${X(v.total) - 26}" y="${h - 9}" font-size="8" fill="#fff">${esc(b.ids[b.ids.length - 1])}</text></svg>`;
+  // profil de vol : altitude par branche avec montée (~400 ft/NM) et descente (~300 ft/NM) jusqu'au tour de piste d'arrivée
+  function flightPath(b, alts) {
+    const arr = (b.arrInfo ? b.arrInfo.elev : 0) + 1000, out = [[0, b.depElev || 0]];
+    let cur = b.depElev || 0, acc = 0;
+    b.legs.forEach((lg, i) => {
+      const a = alts[i], x1 = acc + lg.dist, next = i < b.legs.length - 1 ? alts[i + 1] : arr;
+      if (a > cur) out.push([Math.min(x1, acc + (a - cur) / 400), a]);
+      if (next < a) { out.push([Math.max(out[out.length - 1][0], x1 - (a - next) / 300), a]); out.push([x1, next]); cur = next; } else { out.push([x1, a]); cur = a; }
+      acc = x1;
+    });
+    return out;
   }
+  console.assert(flightPath({ depElev: 0, arrInfo: { elev: 0 }, legs: [{ dist: 30 }] }, [2000]).map(([x, f]) => `${Math.round(x)}/${f}`).join(' ') === '0/0 5/2000 27/2000 30/1000', 'flightPath');
+  function profileSvg(v, b, sfx = '') {
+    if (!v) return '';
+    const W = 1000, H = 330, L = 44, R = 10, T = 14, B = 34, o = b.optAlt;
+    const opt = o && !o.plan.some((c) => c.hard.length) ? o.plan.map((c) => c.alt) : null;
+    const top = Math.min(12500, Math.max(4000, b.f.ft + 2500, v.maxTer + 2500, ...(opt || []).map((a) => a + 2000)));
+    const X = (nm) => L + nm / v.total * (W - L - R), Y = (ft) => H - B - Math.max(0, Math.min(ft, top)) / top * (H - B - T);
+    const pad = v.total / Math.max(1, v.profile.length - 1) / 2;
+    // espaces : polygone qui suit le relief quand la limite est en ASFC
+    const conf = new Set(v.conflicts);
+    const asp = v.segs.filter((sg) => sg.lower < top).map((sg) => {
+      const pts = sg.pts.length > 1 ? sg.pts : [[sg.from - pad, sg.pts[0][1]], [sg.from + pad, sg.pts[0][1]]];
+      const xs = pts.map(([a], k) => (k === 0 ? Math.max(0, a - pad) : k === pts.length - 1 ? Math.min(v.total, a + pad) : a));
+      const up = pts.map(([, g], k) => `${X(xs[k]).toFixed(1)},${Y(sg.upper + (sg.aglU ? g : 0)).toFixed(1)}`), lo = pts.map(([, g], k) => `${X(xs[k]).toFixed(1)},${Y(sg.lower + (sg.aglL ? g : 0)).toFixed(1)}`).reverse();
+      const x0 = X(xs[0]), x1 = X(xs[xs.length - 1]), lim = `${sg.lowerS || sg.lower} – ${sg.upperS || sg.upper}`;
+      const lbl = x1 - x0 > 60 ? `<text x="${(x0 + 3).toFixed(1)}" y="${(Y(Math.min(sg.upper + (sg.aglU ? Math.max(...sg.ter) : 0), top)) + 10).toFixed(1)}" font-size="9" fill="${sg.color}" font-weight="bold">${esc(sg.name.slice(0, Math.floor((x1 - x0) / 5.5)))}</text>`
+        + (x1 - x0 > 90 ? `<text x="${(x0 + 3).toFixed(1)}" y="${(Y(Math.min(sg.upper + (sg.aglU ? Math.max(...sg.ter) : 0), top)) + 20).toFixed(1)}" font-size="8" fill="${sg.color}">${esc(lim)}</text>` : '') : '';
+      return `<polygon points="${[...up, ...lo].join(' ')}" fill="${sg.color}" fill-opacity="${conf.has(sg) ? .3 : .14}" stroke="${conf.has(sg) ? '#ff3b30' : sg.color}" stroke-width="${conf.has(sg) ? 2 : 1}"><title>${esc(sg.name)} : ${esc(lim)}${sg.freq ? ' · ' + esc(sg.freq) : ''}</title></polygon>${lbl}`;
+    }).join('');
+    // nuages (GRAMET : couches à plus de 50 %, en rouge clair si entre 0 et -15 °C) et isotherme 0 °C
+    const g = b.gramet && !b.gramet.err ? b.gramet.cols : [];
+    const cw = g.length > 1 ? (g[1].along - g[0].along) / 2 : 4;
+    const clouds = g.map((c) => c.lv.slice(0, -1).map((x, k) => { const y2 = c.lv[k + 1], cc = (x.cc + y2.cc) / 2, t = (x.T + y2.T) / 2; if (cc < 50 || x.z > top) return '';
+      return `<rect x="${X(Math.max(0, c.along - cw)).toFixed(1)}" y="${Y(y2.z).toFixed(1)}" width="${(X(Math.min(v.total, c.along + cw)) - X(Math.max(0, c.along - cw))).toFixed(1)}" height="${Math.max(1, Y(x.z) - Y(y2.z)).toFixed(1)}" fill="${t <= 0 && t >= -15 ? '#ffb4b4' : '#eceff1'}" fill-opacity="${(cc / 100 * .55).toFixed(2)}"><title>nuages ${Math.round(cc)} %, ${Math.round(t)} °C${t <= 0 && t >= -15 ? ' — givrage possible' : ''}</title></rect>`; }).join('')).join('');
+    const g0 = g.filter((c) => c.iso0 != null);
+    const iso = g0.length > 1 ? `<polyline points="${g0.map((c) => `${X(c.along).toFixed(1)},${Y(c.iso0).toFixed(1)}`).join(' ')}" fill="none" stroke="#4fc3f7" stroke-dasharray="5 4"><title>isotherme 0 °C</title></polyline>` : '';
+    const ter = `M${X(0)},${Y(0)} ` + v.profile.map((p) => `L${X(p.along).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(' ') + ` L${X(v.total)},${Y(0)} Z`;
+    const line = (pts) => pts.map(([a, f]) => `${X(a).toFixed(1)},${Y(f).toFixed(1)}`).join(' ');
+    const cruise = `<polyline points="${line(flightPath(b, b.legs.map(() => b.f.ft)))}" fill="none" stroke="#ff2bd6" stroke-width="2.5"><title>profil prévu à ${b.f.ft} ft</title></polyline>`;
+    const best = opt && opt.some((a) => a !== b.f.ft) ? `<polyline points="${line(flightPath(b, opt))}" fill="none" stroke="#2ecc40" stroke-width="2" stroke-dasharray="6 4"><title>profil conseillé ${opt.join(' → ')} ft</title></polyline>` : '';
+    const step = top > 8000 ? 2000 : 1000, grid = [];
+    for (let f = 0; f <= top; f += step) grid.push(`<line x1="${L}" x2="${W - R}" y1="${Y(f)}" y2="${Y(f)}" stroke="#fff" stroke-opacity=".08"/><text x="${L - 4}" y="${Y(f) + 3}" font-size="9" fill="#9bd" text-anchor="end">${f}</text>`);
+    const nmStep = v.total > 120 ? 20 : v.total > 50 ? 10 : 5;
+    for (let n = 0; n <= v.total; n += nmStep) grid.push(`<text x="${X(n)}" y="${H - B + 11}" font-size="8" fill="#9bd" text-anchor="middle">${n}</text>`);
+    let acc = 0, lastX = -99; const mk = [];
+    // nom des points : sauté s'il chevauche le précédent ou l'arrivée (branches très courtes)
+    b.legs.forEach((lg, i) => { const x = X(acc), show = x - lastX > 45 && X(v.total) - x > 45; if (show) lastX = x;
+      mk.push(`<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="#fff" stroke-opacity="${i ? .3 : 0}"/>${show ? `<text x="${x + (i ? 0 : 2)}" y="${H - 6}" font-size="9" fill="#fff" text-anchor="${i ? 'middle' : 'start'}">${esc(lg.from)}</text>` : ''}`); acc += lg.dist; });
+    mk.push(`<text x="${X(v.total) - 2}" y="${H - 6}" font-size="9" fill="#fff" text-anchor="end">${esc(b.ids[b.ids.length - 1])}</text>`);
+    const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${H - B + 20}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
+    return `<div class="vp-wrap"><svg id="pf-vp${sfx}" viewBox="0 0 ${W} ${H}" width="100%" style="background:#0d1b2a;border-radius:6px;display:block;touch-action:pan-y">
+      ${grid.join('')}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${mk.join('')}${wx}
+      <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>
+      <div class="meta" id="pf-vpinfo${sfx}" style="min-height:2.6em">Survole ou touche la coupe pour voir le relief et les espaces à cet endroit. <button class="btn" id="pf-vp-big${sfx}">🔍 Agrandir</button></div>
+      <p class="meta"><span style="color:#ff2bd6">━</span> profil prévu (${b.f.ft} ft)${best ? ` · <span style="color:#2ecc40">╌</span> profil conseillé` : ''} · <span style="color:#4fc3f7">╌</span> isotherme 0 °C · nuages en gris (rouge clair : givrage possible) ·
+        espaces : <span style="color:${ASP_COL.A}">A</span> <span style="color:${ASP_COL.C}">C</span> <span style="color:${ASP_COL.D}">D</span> <span style="color:${ASP_COL.E}">E</span>, zones <span style="color:#ff3b30">AZBA</span> <span style="color:#d81b60">P</span> <span style="color:#8e24aa">R</span> <span style="color:#fb8c00">D</span> · contour rouge = traversé à l'altitude prévue.</p></div>
+      ${v.segs.length ? `<details><summary><b>Espaces et zones traversés</b> (${v.segs.length})</summary><table class="legs"><tr><th>Espace</th><th>De – à (NM)</th><th>Limites</th><th>Fréquence</th></tr>
+        ${[...v.segs].sort((x, y) => x.from - y.from).map((sg) => `<tr${conf.has(sg) ? ' style="color:#ff6b6b;font-weight:bold"' : ''}><td style="text-align:left">${esc(sg.name)}</td><td>${Math.max(0, sg.from - pad).toFixed(0)} – ${Math.min(v.total, sg.to + pad).toFixed(0)}</td><td>${esc(sg.lowerS || sg.lower)} – ${esc(sg.upperS || sg.upper)}</td><td>${esc(sg.freq || '–')}</td></tr>`).join('')}</table></details>` : ''}`;
+  }
+  // curseur sur la coupe : relief et espaces à la position survolée
+  function bindProfile(b, sfx) {
+    const sv0 = $('#pf-vp' + sfx); if (!sv0 || !b.vprofile) return;
+    cursorOn(b, sv0, $('#pf-vpinfo' + sfx));
+    // en grand : bandeau en bas de l'écran, sur toute la largeur (comme les applications de navigation)
+    $('#pf-vp-big' + sfx).addEventListener('click', () => {
+      document.getElementById('vp-big')?.remove();
+      const d = document.createElement('div'); d.id = 'vp-big';
+      d.innerHTML = `<button class="btn" style="float:right">✕ Fermer</button><b>✈️ Coupe ${esc(b.ids.join(' → '))}</b><div class="meta vp-info">Survole ou touche la coupe.</div>`;
+      const c = sv0.cloneNode(true); c.removeAttribute('id'); d.insertBefore(c, d.querySelector('.vp-info'));
+      d.querySelector('button').addEventListener('click', () => d.remove());
+      document.body.appendChild(d); cursorOn(b, c, d.querySelector('.vp-info'));
+    });
+  }
+  function cursorOn(b, sv, info) {
+    const v = b.vprofile;
+    const cur = sv.querySelector('.vp-cur'), W = 1000, L = 44, R = 10;
+    const show = (e) => {
+      const pt = sv.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const x = pt.matrixTransform(sv.getScreenCTM().inverse()).x;
+      const nm = Math.max(0, Math.min(v.total, (x - L) / (W - L - R) * v.total));
+      const p = v.profile.reduce((m, q) => (Math.abs(q.along - nm) < Math.abs(m.along - nm) ? q : m), v.profile[0]);
+      const sp = v.segs.filter((sg) => nm >= sg.from - 1.5 && nm <= sg.to + 1.5).map((sg) => `${sg.name} ${sg.lower + (sg.aglL ? p.ft : 0)}–${sg.upper + (sg.aglU ? p.ft : 0)} ft`);
+      let acc = 0; const lg = b.legs.find((l) => (acc += l.dist) >= nm) || b.legs[b.legs.length - 1];
+      cur.setAttribute('x1', x); cur.setAttribute('x2', x); cur.setAttribute('visibility', 'visible');
+      info.innerHTML = `<b>${nm.toFixed(0)} NM</b> (${esc(lg.from)}→${esc(lg.to)}) · relief ${p.ft} ft · ${sp.length ? esc(sp.join(' · ')) : 'classe G (hors espaces et zones)'}`;
+    };
+    sv.addEventListener('pointermove', show); sv.addEventListener('pointerdown', show);
+  }
+
 
 
   // ================================================================== GRAMET (coupe météo le long de la route)
@@ -2220,8 +2296,8 @@
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
       ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
         <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
-      <h4>Coupe verticale</h4>
-      ${profileSvg(b.vprofile, b)}
+      <h4>✈️ Coupe verticale de la route</h4>
+      ${profileSvg(b.vprofile, b, sfx)}
       ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
       <h4>GRAMET — coupe météo de la route</h4>
       ${b.gramet && !b.gramet.err ? `<canvas id="pf-gramet${sfx}" class="gramet-cv" width="1000" height="470"></canvas>` : ''}

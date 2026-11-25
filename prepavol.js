@@ -197,6 +197,32 @@
   const icaoRoute = (b) => [`N${String(Math.round(b.f.tas)).padStart(4, '0')}VFR`, ...b.pts.slice(1, -1).map((p) => 'DCT ' + icaoCoord(p))].join(' ') + (b.pts.length > 2 ? '' : ' DCT');
   console.assert(icaoCoord([43.3833, -0.4167]) === '4323N00025W', 'icaoCoord');
 
+  // plan de vol OACI pré-rempli (9) : cases à recopier dans SOFIA ; ce qui ne se déduit pas des données reste « à compléter »
+  function fplFields(b) {
+    const f = b.f, hm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}${String(Math.round(min % 60)).padStart(2, '0')}`;
+    const endu = Math.floor((b.loaded - TAXI_L) / f.ff * 60), pob = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? Math.max(1, Math.round(f.m3 / 75)) : 0);
+    const des = f.T.icao || null, z = new Date(b.depT), dof = z.toISOString().slice(2, 10).replace(/-/g, '');
+    const lvl = `A${String(Math.round((b.legs[0].ft || f.ft) / 100)).padStart(3, '0')}`;
+    const rte = icaoRoute(b).replace(/^N\d{4}VFR/, '').trim();
+    return [
+      ['7 Identification', f.ac.reg.replace(/-/g, '')], ['8 Règles / type de vol', 'V / G'],
+      ['9 Nombre / type / turbulence', `1 / ${des || 'ZZZZ'} / L`], ['10 Équipement', 'à compléter selon l\'avion (ex. radio VHF, transpondeur : voir le carnet de route)'],
+      ['13 Départ / heure (EOBT UTC)', `${f.dep} / ${hm(z.getUTCHours() * 60 + z.getUTCMinutes())}`],
+      ['15 Vitesse / niveau / route', `N${String(Math.round(f.tas)).padStart(4, '0')} / ${lvl} / ${rte || 'DCT'}`],
+      ['16 Destination / durée / dégagement', `${f.arr} / ${hm(b.totMin)}${f.alt ? ' / ' + f.alt : ''}`],
+      ['18 Renseignements divers', [`DOF/${dof}`, des ? '' : `TYP/${f.T.label.replace(/[^A-Za-z0-9 /-]/g, '').toUpperCase()}`, 'RMK/VFR'].filter(Boolean).join(' ')],
+      ['19 Autonomie / personnes', `E/${hm(endu)} · P/${pob}${f.m3 > 0 ? ' (passagers arrière estimés à 75 kg chacun : à corriger)' : ''}`],
+      ['19 Équipement de survie, gilets, couleur', 'à compléter'], ['19 Pilote', f.pil || 'à compléter'],
+    ];
+  }
+  console.assert((() => { const r = fplFields({ f: { ac: { reg: 'F-HAFF' }, T: { label: 'DR400 Rotax 912iS' }, dep: 'LFBP', arr: 'LFCH', alt: '', tas: 100, ff: 20, ft: 3500, m2: 0, m3: 0, pil: 'X' }, depT: new Date(Date.UTC(2026, 10, 26, 9, 5)), legs: [{ ft: 3500 }], loaded: 62, totMin: 65, pts: [[43, 0], [44, 0]] });
+    return r[0][1] === 'FHAFF' && /1 \/ ZZZZ \/ L/.test(r[2][1]) && /LFBP \/ 0905/.test(r[4][1]) && /N0100 \/ A035/.test(r[5][1]) && /0105/.test(r[6][1]) && /E\/0300 · P\/1/.test(r[8][1]) && /TYP\/DR400 ROTAX 912IS/.test(r[7][1]); })(), 'fplFields');
+  function fplHtml(b, sfx) {
+    const F = fplFields(b);
+    return `<details><summary><b>🗂️ Plan de vol pré-rempli</b> (cases OACI à recopier dans SOFIA)</summary><table class="legs">${F.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left"><code>${esc(r[1])}</code></td></tr>`).join('')}</table>
+      <p class="meta">Type d'avion : code OACI non saisi dans la fiche avion, d'où ZZZZ + TYP/ (accepté). Heure : décollage prévu, à ajuster en heure de départ du parking. Vérifier chaque case avant le dépôt.</p></details>`;
+  }
+
   // carburant au départ de l'étape suivante : plein du réservoir principal (limité par la masse max) ou carburant restant
   function nextFuel({ rem, cap, aux, refuel, dry, mtow, density }) {
     if (!refuel) { const fuel = Math.round(Math.min(rem, cap)); return { fuel, aux: Math.round(rem - fuel), add: 0, limited: false }; }
@@ -550,6 +576,7 @@
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
         <label><input id="pf-rt" type="checkbox" ${f.rt ? 'checked' : ''}> Aller-retour (retour au départ ajouté)</label>
+        <label>Prix du carburant aux escales (€/L, option)<input id="pf-fuelprice" type="number" min="0" max="10" step="0.01" value="${esc(f.fuelPrice || '')}"></label>
         <label class="full" title="Pour chaque escale : passager avant / passagers arrière / bagages (kg) au départ de cette escale. Ex. « LFCH:0/0/15 » = on dépose le passager à Arcachon">Charges différentes au départ des escales (option)<input id="pf-stload" value="${esc(f.stload || '')}" placeholder="ex. LFCH:0/0/15 LFBP:75/0/10"></label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
@@ -748,7 +775,7 @@
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
       exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
       stages: v('#pf-stages').toUpperCase(), turn: +v('#pf-turn') || 0, refuel: v('#pf-refuel') === '1',
-      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), stload: v('#pf-stload').toUpperCase(), rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
+      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), stload: v('#pf-stload').toUpperCase(), fuelPrice: +v('#pf-fuelprice') || 0, rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
     if (f.pil) { const all = store.get('pilots', {}); all[f.pil] = { ...(all[f.pil] || {}), m: f.m1, lic: f.lic, med: f.med, nuit: $('#pf-nuit').checked }; store.set('pilots', all); }
@@ -875,6 +902,7 @@
       const can = f.refuel && k < legsDef.length - 1 ? fuelAvail(b.arrInfo.v && b.arrInfo.v.escale, f.T) : null;
       const nx = nextFuel({ rem, cap: cap0 || f.fuel, aux: f.aux, refuel: f.refuel && can !== false, dry: b.mb.mass - b.loaded * d, mtow: f.T.mtow, density: d });
       fuel = nx.fuel; aux = nx.aux;
+      b.refuelL = f.refuel && can !== false && k < legsDef.length - 1 ? nx.add : 0;
       if (f.refuel && can !== false && k < legsDef.length - 1) b.fuelNote = { ok: can !== null, txt: `À ${b.f.arr} : mettre ${nx.add} L (${fuel + aux} L à bord au départ)${nx.limited ? ` — plein limité par la masse max ${f.T.mtow} kg` : ''}${can === null ? ` — carburant ${f.T.fuel.name.split(' (')[0]} non confirmé par la VAC, appeler le terrain` : ''}.` };
       if (can === false) b.fuelNote = { ok: false, txt: `Pas de ${f.T.fuel.name.split(' (')[0]} à ${b.f.arr} (VAC) : pas de plein possible, l'étape suivante part avec ${Math.round(rem)} L.` };
     }
@@ -907,6 +935,7 @@
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
+      const csv = $('#pf-cost-csv'); if (csv) csv.addEventListener('click', () => download(new Blob(['\ufeff' + costCsv(trip)], { type: 'text/csv;charset=utf-8' }), `cout_${trip[0].f.dep}-${trip[trip.length - 1].f.arr}_${trip[0].depT.toISOString().slice(0, 10)}.csv`));
       const ck = $('#pf-check'); if (ck) ck.addEventListener('change', (e) => { const st = store.get(checkKey(trip[0]), []); st[+e.target.dataset.i] = e.target.checked; store.set(checkKey(trip[0]), st); });
       lastBrief = trip[0]; lastTrip = trip; window.AWW_LASTTRIP = trip;
       prog.textContent = '';
@@ -2635,7 +2664,27 @@
       ${best ? `<div class="okk">💶 Avion le moins cher pour ce vol : <b>${esc(best.ac.reg)}</b> (${esc(best.T.label)}) — ${hhmm(best.min)}, ${best.cost} €${c.cost != null && best.ac.reg !== trip[0].f.ac.baseReg ? `, soit ${c.cost - best.cost} € de moins` : ''}.</div>` : ''}
       <table class="legs"><tr><th>Avion</th><th>Temps</th><th>Coût</th><th>Possible ?</th></tr>
       ${c.cmp.map((x) => `<tr><td>${esc(x.ac.reg)} ${esc(x.T.label)}</td><td>${hhmm(x.min)}</td><td>${x.cost} €</td><td>${x.why.length ? '❌ ' + esc(x.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
-      <p class="meta">Comparaison au régime le plus proche de ${trip[0].f.ft} ft, avec le vent prévu ; centrage et carburant disponible aux escales non vérifiés pour les autres avions.</p>`;
+      <p class="meta">Comparaison au régime le plus proche de ${trip[0].f.ft} ft, avec le vent prévu ; centrage et carburant disponible aux escales non vérifiés pour les autres avions.</p>
+      ${costDetailHtml(trip)}`;
+  }
+  // coût détaillé par étape (8) : heures de vol, taxes relevées, carburant acheté aux escales, partage ; export pour le club
+  function costRows(trip) {
+    const f = trip[0].f, c = tripCost(trip), lp = +(f.fuelPrice || 0);
+    return trip.map((b) => { const fee = A.feeFor ? A.feeFor(b.f.arr) : null, fn = feeNum(b.f.arr), fl = b.refuelL || 0;
+      return { b, min: b.totMin, fly: c.price ? Math.round(b.totMin / 60 * c.price) : null, fee: fn, feeTxt: fee ? fee.tarif : 'non renseignée', fuelL: fl, fuelEur: lp && fl ? Math.round(fl * lp) : null }; });
+  }
+  function costDetailHtml(trip) {
+    const R = costRows(trip), n = Math.max(1, trip[0].f.share || 1), tot = R.reduce((s, r) => s + (r.fly || 0) + r.fee + (r.fuelEur || 0), 0);
+    return `<details><summary><b>💶 Coût détaillé par étape</b> — total ${tot} €${n > 1 ? `, ${Math.round(tot / n)} € par personne (${n})` : ''}</summary>
+      <table class="legs"><tr><th>Étape</th><th>Temps</th><th>Heures de vol</th><th>Taxe à l'arrivée</th><th>Carburant pris</th></tr>
+      ${R.map((r) => `<tr><td>${esc(r.b.f.dep)}→${esc(r.b.f.arr)}</td><td>${hhmm(r.min)}</td><td>${r.fly != null ? r.fly + ' €' : '?'}</td><td>${r.fee ? r.fee + ' €' : esc(r.feeTxt)}</td><td>${r.fuelL ? `${r.fuelL} L${r.fuelEur != null ? ` · ${r.fuelEur} €` : ''}` : '–'}</td></tr>`).join('')}</table>
+      <p class="meta">Carburant acheté aux escales : avancé par le pilote, remboursement selon les règles du club (tarif horaire « carburant compris »). Prix au litre : champ « Prix du carburant aux escales ». Taxes : tableau du club ou relevé sur le site, sinon à demander au terrain.
+        <button class="btn" id="pf-cost-csv">📤 Export pour le club (CSV)</button></p></details>`;
+  }
+  function costCsv(trip) {
+    const f = trip[0].f, rows = [['Date', 'Avion', 'Pilote', 'Étape', 'Départ UTC', 'Arrivée UTC', 'Temps (min)', 'Heures de vol (€)', "Taxe d'atterrissage (€)", 'Carburant pris (L)', 'Carburant (€)']];
+    costRows(trip).forEach((r) => rows.push([r.b.depT.toISOString().slice(0, 10), f.ac.reg, f.pil || '', `${r.b.f.dep}-${r.b.f.arr}`, utc(r.b.depT), utc(r.b.eta), r.min, r.fly ?? '', r.fee || '', r.fuelL || '', r.fuelEur ?? '']));
+    return rows.map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   }
 
   // ---------- fiche radio par étape (messages types, à adapter)
@@ -2891,6 +2940,7 @@
       ${altHtml(b, sfx)}
       ${arrivalHtml(b)}
       ${escaleCardHtml(b)}
+      ${fplHtml(b, sfx)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
       ${landmarksHtml(b)}
@@ -3396,6 +3446,21 @@
         doc.setTextColor(0);
       }
     } catch (e) { console.warn('carte OACI', e); }
+    // bande de carte (strip-map) : une image OACI par branche, deux par page
+    try {
+      const legs = b.legs.filter((lg) => lg.dist >= 6);
+      for (let i = 0; i < legs.length; i++) {
+        const lg = legs[i], k = b.legs.indexOf(lg);
+        const st = await renderNavMap({ ...b, pts: [lg.a, lg.b], ids: [lg.from, lg.to], legs: [lg], altLeg: null }, (t) => progress && progress(t.replace('carte OACI', `bande de carte ${i + 1}/${legs.length}`)), { ratio: 277 / 82 });
+        if (!st) break;
+        if (i % 2 === 0) newPage('landscape', 'BANDE DE CARTE PAR BRANCHE - OACI-VFR 1/500 000');
+        const y0 = i % 2 === 0 ? 19 : 19 + (H - 26) / 2, maxW = W - 2 * M, maxH = (H - 26) / 2 - 8, sc = Math.min(maxW / st.w, maxH / st.h);
+        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
+        doc.text(latin(`${k + 1}. ${lg.from} -> ${lg.to} : Rm ${r3(lg.tm)}°, Cm ${r3(lg.hm)}°, ${lg.dist.toFixed(0)} NM, ${lg.min} min, alti sécu ${lg.safe ? lg.safe.alt + ' ft' : '?'}, croisière ${lg.ft || b.f.ft} ft`), M, y0 + 3);
+        doc.setFont('helvetica', 'normal');
+        doc.addImage(st.url, 'JPEG', M + (maxW - st.w * sc) / 2, y0 + 5, st.w * sc, st.h * sc);
+      }
+    } catch (e) { console.warn('bande de carte', e); }
     if (b.gramet && !b.gramet.err) {
       try {
         const cv = document.createElement('canvas'); cv.width = 2000; cv.height = 1000; drawGramet(cv, b.gramet, b);
@@ -3731,7 +3796,7 @@
 
   // ================================================================== historique des préparations (12)
   const HIST_CACHE = 'aww-history';
-  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt', 'stload'];
+  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt', 'stload', 'fuelPrice'];
   function histStart(id, trip) {
     const b = trip[0], f = lastForm || b.f;
     const list = store.get('hist', []);
@@ -3823,7 +3888,7 @@
   setTimeout(openShared, 300);
 
   // Carte de navigation sur fond OACI-VFR 1/500 000 (tuiles IGN dessinées dans un canvas)
-  async function renderNavMap(b, progress) {
+  async function renderNavMap(b, progress, opt = {}) {   // opt.ratio : format de l'image (bande de carte par branche)
     const tpl = (window.AWW_GEOPF || {}).oaci; if (!tpl) return null;
     const all = b.pts.concat(b.altLeg ? [[A.aptByIcao[b.altLeg.to].la, A.aptByIcao[b.altLeg.to].lo]] : []);
     let s = Math.min(...all.map((p) => p[0])), n = Math.max(...all.map((p) => p[0])), w = Math.min(...all.map((p) => p[1])), e = Math.max(...all.map((p) => p[1]));
@@ -3834,7 +3899,7 @@
     while (z > 6 && (Math.ceil(X(e, z) / 256) - Math.floor(X(w, z) / 256) + 1) * (Math.ceil(Y(s, z) / 256) - Math.floor(Y(n, z) / 256) + 1) > 70) z--;
     // élargit au format paysage A4
     let x0 = X(w, z), x1 = X(e, z), y0 = Y(n, z), y1 = Y(s, z);
-    const ratio = 277 / 172;
+    const ratio = opt.ratio || 277 / 172;
     if ((x1 - x0) / (y1 - y0) < ratio) { const d = ((y1 - y0) * ratio - (x1 - x0)) / 2; x0 -= d; x1 += d; } else { const d = ((x1 - x0) / ratio - (y1 - y0)) / 2; y0 -= d; y1 += d; }
     const W = Math.round(x1 - x0), H = Math.round(y1 - y0);
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
@@ -3938,22 +4003,20 @@
     });
   }
   const xmlEsc = (t) => String(t).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
-  function download(name, text, type) {
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-  }
+  // fichier texte (GPX, FPL) ; ne pas l'appeler « download » : la fonction du même nom (blob, nom) serait écrasée
+  const downloadText = (name, text, type) => download(new Blob([text], { type }), name);
   function exportGpx(b) {
     const P = routePoints(b), nm = `${b.userIds[0]}-${b.userIds[b.userIds.length - 1]}`;
     const wpt = P.map((p) => `  <wpt lat="${p.la.toFixed(6)}" lon="${p.lo.toFixed(6)}"><name>${xmlEsc(p.id)}</name><desc>${xmlEsc(p.name)}</desc></wpt>`).join('\n');
     const rte = P.map((p) => `    <rtept lat="${p.la.toFixed(6)}" lon="${p.lo.toFixed(6)}"><name>${xmlEsc(p.id)}</name><desc>${xmlEsc(p.name)}</desc></rtept>`).join('\n');
-    download(`route_${nm}.gpx`, `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Aero Meteo Webcams Ouest" xmlns="http://www.topografix.com/GPX/1/1">\n${wpt}\n  <rte><name>${xmlEsc(nm)}</name>\n${rte}\n  </rte>\n</gpx>\n`, 'application/gpx+xml');
+    downloadText(`route_${nm}.gpx`, `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Aero Meteo Webcams Ouest" xmlns="http://www.topografix.com/GPX/1/1">\n${wpt}\n  <rte><name>${xmlEsc(nm)}</name>\n${rte}\n  </rte>\n</gpx>\n`, 'application/gpx+xml');
   }
   function exportFpl(b) {
     const P = routePoints(b), nm = `${b.userIds[0]}-${b.userIds[b.userIds.length - 1]}`;
     const ident = (p, i) => (p.type === 'AIRPORT' ? p.id : (p.id.replace(/-/g, '') || `WP${i}`)).slice(0, 12);
     const wps = P.map((p, i) => `    <waypoint>\n      <identifier>${xmlEsc(ident(p, i))}</identifier>\n      <type>${p.type}</type>\n      <country-code>${p.type === 'AIRPORT' ? 'LF' : ''}</country-code>\n      <lat>${p.la.toFixed(6)}</lat>\n      <lon>${p.lo.toFixed(6)}</lon>\n      <comment>${xmlEsc(p.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9 /]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 25))}</comment>\n      <elevation>${p.alt}</elevation>\n    </waypoint>`).join('\n');
     const rp = P.map((p, i) => `    <route-point>\n      <waypoint-identifier>${xmlEsc(ident(p, i))}</waypoint-identifier>\n      <waypoint-type>${p.type}</waypoint-type>\n      <waypoint-country-code>${p.type === 'AIRPORT' ? 'LF' : ''}</waypoint-country-code>\n    </route-point>`).join('\n');
-    download(`route_${nm}.fpl`, `<?xml version="1.0" encoding="utf-8"?>\n<flight-plan xmlns="http://www8.garmin.com/xmlschemas/FlightPlan/v1">\n  <created>${new Date().toISOString().slice(0, 19)}Z</created>\n  <waypoint-table>\n${wps}\n  </waypoint-table>\n  <route>\n    <route-name>${xmlEsc(nm)}</route-name>\n    <flight-plan-index>1</flight-plan-index>\n${rp}\n  </route>\n</flight-plan>\n`, 'application/xml');
+    downloadText(`route_${nm}.fpl`, `<?xml version="1.0" encoding="utf-8"?>\n<flight-plan xmlns="http://www8.garmin.com/xmlschemas/FlightPlan/v1">\n  <created>${new Date().toISOString().slice(0, 19)}Z</created>\n  <waypoint-table>\n${wps}\n  </waypoint-table>\n  <route>\n    <route-name>${xmlEsc(nm)}</route-name>\n    <flight-plan-index>1</flight-plan-index>\n${rp}\n  </route>\n</flight-plan>\n`, 'application/xml');
   }
 
   // Croquis vectoriel

@@ -40,9 +40,9 @@ Règles du projet (à respecter) :
 - [x] 24. Point de début de descente (TOD), vario conseillé, heure de passage.
 
 ## Documents
-- [ ] 5. Bande de carte le long de la route dans le PDF (strip-map par branche).
-- [ ] 8. Coût réel du voyage (taxes, carburant aux escales, partage, export club).
-- [ ] 9. Plan de vol OACI pré-rempli complet à copier dans SOFIA.
+- [ ] 5. Bande de carte le long de la route dans le PDF (strip-map par branche). — Code écrit (buildPdf, renderNavMap opt.ratio) mais PDF non vérifié : générer un PDF et contrôler les pages « BANDE DE CARTE ».
+- [x] 8. Coût réel du voyage (taxes, carburant aux escales, partage, export club).
+- [x] 9. Plan de vol OACI pré-rempli complet à copier dans SOFIA.
 
 ## Ensuite (session automatique, demandé le 25/11/2026)
 Une fois les points ci-dessus faits : choisir et réaliser d'autres améliorations utiles à la préparation du vol et à la fiabilité du site. Les ajouter ici avant de commencer (une ligne chacune, `- [ ]`), puis les cocher une fois faites.

@@ -43,3 +43,7 @@ Règles du projet (à respecter) :
 - [ ] 5. Bande de carte le long de la route dans le PDF (strip-map par branche).
 - [ ] 8. Coût réel du voyage (taxes, carburant aux escales, partage, export club).
 - [ ] 9. Plan de vol OACI pré-rempli complet à copier dans SOFIA.
+
+## Ensuite (session automatique, demandé le 25/11/2026)
+Une fois les points ci-dessus faits : choisir et réaliser d'autres améliorations utiles à la préparation du vol et à la fiabilité du site. Les ajouter ici avant de commencer (une ligne chacune, `- [ ]`), puis les cocher une fois faites.
+Idées de fiabilité à étudier en priorité : test automatique de chargement de `prepavol.js` dans un faux DOM (Node) lancé par le workflow avant publication (bloque si un `console.assert` échoue ou si le module ne se charge pas) ; contrôle des fichiers `data/live/*.json` (taille, champs) avec repli sur la version publiée ; signalement clair dans l'interface quand une source est en échec ou trop ancienne ; nettoyage des caches et du stockage local qui grossissent.

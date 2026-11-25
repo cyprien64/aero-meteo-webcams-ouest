@@ -257,12 +257,13 @@
   A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
 
   // ================================================================== données
-  let ZONES = null, VAC = null, ASP = null, SPECIAL = null;
+  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null;
   async function loadAip() {
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
     if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
     if (!SPECIAL) SPECIAL = await A.getLive('special.json').catch(() => ({ act: [], zsm: [] }));
+    if (!LANDM) LANDM = await A.getJSON('data/landmarks.json', 'default').catch(() => ({ towns: [], mw: {}, rv: {}, lk: [] }));
     await loadVfr();
   }
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
@@ -384,6 +385,32 @@
     const a = dayStartMs + s * 6e4, b = dayStartMs + (e <= s ? e + 1440 : e) * 6e4;
     return a < t1 && b > t0;
   }
+
+  // ---------- activité d'une zone R / D à l'heure du vol, d'après sa remarque AIP et les NOTAM
+  // 'active' (H24, horaire publié couvrant le vol ou NOTAM d'activation), 'inactive' (horaire publié hors du vol), 'activable' (sur NOTAM / AUP, inconnu)
+  const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  function zoneStatus(z, t0, t1, notams = []) {
+    const r = (z.rmk || '').replace(/\s+/g, ' '), key = z.id.replace(/\s/g, '');
+    const nt = notams.find((n) => (n.q || '')[0] === 'R' && new RegExp(`\\b${key.replace(/(\D)(\d)/g, '$1 ?$2').replace(/(\d)([A-Z])/g, '$1 ?$2')}\\b`).test(n.e || '') && Date.parse(n.from) < t1 && !(Date.parse(n.to) < t0));
+    if (nt) return { st: 'active', why: `NOTAM ${nt.ref}` };
+    if (/^(?:Activity\s*:?\s*)?H24\b/i.test(r)) return { st: 'active', why: 'H24' };
+    const m = /^Activity\s*:?\s*(.*?)(?:Other times|Activités|$)/i.exec(r);
+    if (m && !/possible|NOTAM\b.*announced|announced/i.test(m[1].slice(0, 30))) {
+      const sum = /SUM\s*:?\s*-\s*1\s*H/i.test(r) && isSummer(new Date(t0)) ? 60 : 0;
+      const slots = [...m[1].matchAll(/((?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*-\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))?)[^:]*:\s*(\d{4})\s*-\s*(\d{4})/g)];
+      if (slots.length) {
+        const on = (t) => { const d = new Date(t), dow = d.getUTCDay(), mn = d.getUTCHours() * 60 + d.getUTCMinutes() + sum;
+          return slots.some(([, days, a, b]) => { const [d0, d1 = d0] = days.split(/\s*-\s*/).map((x) => DAYS.indexOf(x)), inDay = d0 <= d1 ? dow >= d0 && dow <= d1 : dow >= d0 || dow <= d1;
+            return inDay && mn >= +a.slice(0, 2) * 60 + +a.slice(2) && mn <= +b.slice(0, 2) * 60 + +b.slice(2); }); };
+        const act = [t0, (t0 + t1) / 2, t1].some(on);
+        return { st: act ? 'active' : 'inactive', why: `horaire AIP ${m[1].slice(0, 70).trim()}${act ? '' : ' (hors horaire, sauf NOTAM)'}` };
+      }
+    }
+    return { st: 'activable', why: /NOTAM/i.test(r) ? 'activation par NOTAM' : /AUP|UUP/.test(r) ? 'activation AUP/UUP' : 'activation possible' };
+  }
+  console.assert((() => { const wed10 = Date.UTC(2026, 10, 25, 10), sun10 = Date.UTC(2026, 10, 29, 10), z = { id: 'R 13 A1', rmk: 'Activity: MON-THU except HOL: 0700- 2359. FRI: 0700- 1600.Other times, possible activation by NOTAM. SUM:-1HR.' };
+    return zoneStatus(z, wed10, wed10 + 36e5).st === 'active' && zoneStatus(z, sun10, sun10 + 36e5).st === 'inactive' && zoneStatus({ id: 'R 9 A', rmk: 'H24 Activités' }, wed10, wed10).st === 'active'
+      && zoneStatus({ id: 'R 2', rmk: 'Possible activation H24' }, wed10, wed10).st === 'activable' && zoneStatus({ id: 'R 46 G', rmk: 'Possible activation' }, wed10, wed10 + 36e5, [{ q: 'RRCA', e: 'R46 G ACTIVE', ref: 'X', from: '2026-11-25T08:00Z', to: '2026-11-25T12:00Z' }]).st === 'active'; })(), 'zoneStatus');
 
   // ================================================================== évitement des zones interdites
   // Graphe de visibilité autour des enveloppes convexes (marge 2 NM) des zones à éviter, puis plus court chemin.
@@ -508,6 +535,7 @@
     A.showPanel('Préparation de vol', `
       <p class="meta">Route directe entre les terrains (codes OACI), contournement automatique des zones interdites et des RTBA actives.</p>
       <datalist id="apt-list">${aptOptions()}</datalist>
+      ${store.get('favs', []).length ? `<div class="row" style="margin:4px 0"><label>⭐ Mes navs <select id="pf-fav"><option value="">— choisir —</option>${store.get('favs', []).map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join('')}</select></label><button type="button" class="btn" id="pf-fav-del">🗑️</button></div>` : ''}
       <div class="prep-form">
         <label>Départ <button type="button" class="pick-btn" data-pick="pf-dep" title="Choisir sur la carte">📍</button><input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
         <label>Arrivée <button type="button" class="pick-btn" data-pick="pf-arr" title="Choisir sur la carte">📍</button><input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
@@ -515,6 +543,7 @@
         <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
+        <label><input id="pf-rt" type="checkbox" ${f.rt ? 'checked' : ''}> Aller-retour (retour au départ ajouté)</label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
         <label>Dégagement (destination finale) <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
@@ -526,6 +555,7 @@
         <label>Masse à vide (kg)<input id="pf-empty" type="number" min="100" max="2000" value="${(FLEET.find((x) => x.reg === reg) || {}).empty || ''}"></label>
         <p class="meta full" id="pf-acnote" style="grid-column:1/-1;margin:0"></p>
         <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${esc(f.ft || 2500)}"></label>
+        <label title="Une altitude par branche de la 1re étape (ex. 3000 5500 2000) ; vide = altitude de croisière partout">Altitudes par branche (ft, option)<input id="pf-legft" placeholder="ex. 3000 5500 2000" value="${esc(f.legft || '')}"></label>
         <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${esc(f.res ?? 30)}"></label>
         <label>Réserve météo (% si vent de face > 15 kt ou météo marginale)<input id="pf-wxres" type="number" min="0" max="50" step="5" value="${esc(f.wxres ?? 10)}"></label>
         <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${esc(f.m1 ?? 80)}"></label>
@@ -536,7 +566,8 @@
         <label id="pf-aux-l">Réservoir supp. (L)<input id="pf-aux" type="number" min="0" max="50" value="${esc(f.aux ?? 0)}"></label>
         <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${esc(f.cor || 10)}"></label>
         <label>Éviter<select id="pf-avoid">
-          <option value="p+rtba" ${f.avoid !== 'p' && f.avoid !== 'none' ? 'selected' : ''}>Zones P + RTBA actives</option>
+          <option value="p+rtba" ${!['p', 'none', 'easy'].includes(f.avoid) ? 'selected' : ''}>Zones P + RTBA actives</option>
+          <option value="easy" ${f.avoid === 'easy' ? 'selected' : ''}>Route « VFR facile » : P, RTBA, ZRT, R / D actives et espaces C / D</option>
           <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
           <option value="none" ${f.avoid === 'none' ? 'selected' : ''}>Ne rien contourner</option></select></label>
         <datalist id="pil-list">${Object.keys(store.get('pilots', {})).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
@@ -560,7 +591,9 @@
         <button class="btn" id="pf-pdf">📄 Briefing PDF + log Excel</button>
         <button class="btn" id="pf-xlsx">📊 Log Excel seul</button>
         <button class="btn" id="pf-train">🎲 Nav d'entraînement</button>
+        <button class="btn" id="pf-fav-save">⭐ Enregistrer cette nav</button>
       </div>
+      <div class="row" style="margin:4px 0"><label>⚖️ Comparer avec un autre départ <input id="pf-cmp-time" type="datetime-local"></label><button class="btn" id="pf-cmp">Comparer</button></div>
       <div class="prep-progress" id="pf-prog"></div>
       <div id="pf-out"></div>`);
     const ARM_FIELDS = [['empty', 'Avion vide'], ['pilot', 'Pilote'], ['copilot', 'Passager avant'], ['pax', 'Passagers arrière'], ['bag', 'Bagages'], ['tank0', 'Réservoir principal'], ['tank1', 'Réservoir supp.']];
@@ -618,6 +651,19 @@
     $('#pf-pdf').addEventListener('click', () => run('pdf'));
     $('#pf-xlsx').addEventListener('click', () => run('xlsx'));
     $('#pf-train').addEventListener('click', trainingStart);
+    // navs enregistrées (sur cet appareil) : tout le formulaire sauf l'heure
+    $('#pf-fav-save').addEventListener('click', () => {
+      const f = readForm(), name = prompt('Nom de la nav :', [f.dep, f.arr, ...(f.stages || '').split(/\s+/).filter(Boolean)].join(' → ') + (f.rt ? ' (A/R)' : ''));
+      if (!name) return;
+      const favs = store.get('favs', []).filter((x) => x.name !== name);
+      favs.unshift({ name, form: Object.fromEntries(FORM_KEYS.filter((k) => k !== 'time').map((k) => [k, f[k]])) });
+      store.set('favs', favs.slice(0, 40)); $('#pf-prog').textContent = `⭐ « ${name} » enregistrée.`;
+    });
+    if ($('#pf-fav')) {
+      $('#pf-fav').addEventListener('change', (e) => { const x = store.get('favs', [])[+e.target.value]; if (!x) return; const t = $('#pf-time').value; store.set('form', { ...store.get('form', {}), ...x.form }); openForm(); $('#pf-time').value = t; });
+      $('#pf-fav-del').addEventListener('click', () => { const i = $('#pf-fav').value; if (i === '') return; const favs = store.get('favs', []); if (!confirm(`Supprimer « ${favs[+i].name} » ?`)) return; favs.splice(+i, 1); store.set('favs', favs); openForm(); });
+    }
+    $('#pf-cmp').addEventListener('click', compareTimes);
     ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-wps', '#pf-stages', '#pf-stalts'].forEach((s) => $(s).addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase(); }));
     const fillVfr = (sel, ad, keep) => {
       const pts = vfrOf(ad);
@@ -695,7 +741,7 @@
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
       exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
       stages: v('#pf-stages').toUpperCase(), turn: +v('#pf-turn') || 0, refuel: v('#pf-refuel') === '1',
-      stalts: v('#pf-stalts').toUpperCase(), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
+      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
     if (f.pil) { const all = store.get('pilots', {}); all[f.pil] = { ...(all[f.pil] || {}), m: f.m1, lic: f.lic, med: f.med, nuit: $('#pf-nuit').checked }; store.set('pilots', all); }
@@ -743,6 +789,84 @@
     return libsP;
   }
 
+  // ---------- comparaison de deux départs (même nav, autre date / heure) : vent, météo, AZBA, carburant, alertes
+  function tripSummary(trip) {
+    const b0 = trip[0], bN = trip[trip.length - 1], al = trip.flatMap((b) => alertsOf(b));
+    const head = trip.reduce((s, b) => s + b.legs.reduce((t, lg) => t + (lg.wind ? lg.wind.spd * Math.cos(rad(lg.wind.dir - lg.tc)) : 0) * lg.dist, 0), 0) / Math.max(1, trip.reduce((s, b) => s + b.totDist, 0));
+    return { dep: b0.depT, eta: bN.eta, min: trip.reduce((s, b) => s + b.totMin, 0), fuel: trip.reduce((s, b) => s + b.totFuel, 0), head: Math.round(head),
+      wx: Math.max(...trip.map((b) => (b.wxRoute && b.wxRoute.worst) || 0)), azba: trip.some((b) => b.rtba.some((r) => r.conflict && r.crossed && r.below)),
+      imp: trip.reduce((s, b) => s + (b.optAlt ? b.optAlt.plan.filter((c) => c.hard.length).length : 0), 0), stop: al.filter((x) => /^⛔/.test(x)).length, al: al.length,
+      night: trip.some((b) => b.night && (b.night.late || b.night.firstDark)), gust: Math.max(0, ...trip.flatMap((b) => ((b.wxRoute && b.wxRoute.pts) || []).map((p) => p.gust || 0))) };
+  }
+  async function compareTimes() {
+    const t2 = $('#pf-cmp-time').value, prog = $('#pf-prog');
+    if (!t2) { prog.textContent = 'Choisis la date et l\'heure à comparer.'; return; }
+    try {
+      const f = readForm(); if (!f.dep || !f.arr) throw new Error('Indique un départ et une arrivée.');
+      prog.textContent = 'Comparaison : calcul des deux départs…';
+      const a = await buildTrip(f, (t) => { prog.textContent = 'Départ 1 : ' + t; }), b = await buildTrip({ ...f, time: t2 }, (t) => { prog.textContent = 'Départ 2 : ' + t; });
+      const A1 = tripSummary(a), B1 = tripSummary(b), row = (l, x, y, better) => `<tr><td style="text-align:left">${l}</td><td${better === 1 ? ' style="color:#2ecc40;font-weight:bold"' : ''}>${x}</td><td${better === 2 ? ' style="color:#2ecc40;font-weight:bold"' : ''}>${y}</td></tr>`;
+      const cmp = (x, y) => (x < y ? 1 : y < x ? 2 : 0);
+      const score = (s) => s.stop * 100 + s.imp * 50 + s.wx * 20 + (s.azba ? 30 : 0) + (s.night ? 20 : 0) + s.fuel + Math.max(0, s.head);
+      const best = cmp(score(A1), score(B1));
+      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>⚖️ Comparaison de deux départs</h4><table class="legs"><tr><th></th><th>Départ 1</th><th>Départ 2</th></tr>
+        ${row('Départ → arrivée (UTC)', `${utc(A1.dep)} → ${utc(A1.eta)}`, `${utc(B1.dep)} → ${utc(B1.eta)}`)}
+        ${row('Temps de vol', hhmm(A1.min), hhmm(B1.min), cmp(A1.min, B1.min))}${row('Carburant', A1.fuel + ' L', B1.fuel + ' L', cmp(A1.fuel, B1.fuel))}
+        ${row('Vent de face moyen', A1.head + ' kt', B1.head + ' kt', cmp(A1.head, B1.head))}${row('Météo en route', WXTXT[A1.wx], WXTXT[B1.wx], cmp(A1.wx, B1.wx))}
+        ${row('Rafales max', Math.round(A1.gust) + ' kt', Math.round(B1.gust) + ' kt', cmp(A1.gust, B1.gust))}${row('AZBA active traversée', A1.azba ? 'oui' : 'non', B1.azba ? 'oui' : 'non', cmp(+A1.azba, +B1.azba))}
+        ${row('Branches sans altitude possible', A1.imp, B1.imp, cmp(A1.imp, B1.imp))}${row('Alertes bloquantes (⛔) / total', `${A1.stop} / ${A1.al}`, `${B1.stop} / ${B1.al}`, cmp(A1.stop * 100 + A1.al, B1.stop * 100 + B1.al))}
+        ${row('Nuit aéronautique', A1.night ? 'oui' : 'non', B1.night ? 'oui' : 'non', cmp(+A1.night, +B1.night))}</table>
+        <p class="meta">${best ? `<b>Plutôt le départ ${best}</b> (moins d'alertes, meilleure météo, moins de carburant).` : 'Les deux départs se valent.'} Prévisions modèle : confirmer avec TAF, TEMSI et AZBA du jour.</p>`);
+      prog.textContent = '';
+    } catch (e) { console.error(e); prog.textContent = e.message || String(e); }
+  }
+  // construction du voyage (toutes les étapes) sans affichage : sert au calcul, à la comparaison de deux horaires et à la surveillance
+  async function buildTrip(f, say = () => {}) {
+    const stops = f.stages.split(/[\s,;]+/).filter(Boolean);
+    if (f.rt && (stops[stops.length - 1] || f.arr) !== f.dep) stops.push(f.dep);   // aller-retour : retour au terrain de départ
+    const stAlts = (f.stalts || '').split(/[\s,;]+/).filter(Boolean);
+    const unknown = [f.dep, f.arr, f.alt, ...stops, ...stAlts].filter((x) => x && !A.aptByIcao[x]);
+    if (unknown.length) throw new Error(`Terrain inconnu : ${unknown.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
+    say('Chargement des données AIP, espaces aériens…');
+    await loadAip();
+    CUSTOM = {}; customN = 0;
+    // Étapes : départ → arrivée (points tournants du formulaire), puis escales suivantes en direct (points VFR auto)
+    const legsDef = [{ dep: f.dep, arr: f.arr, wps: f.wps, exit: f.exit, entry: f.entry }];
+    stops.forEach((s) => legsDef.push({ dep: legsDef[legsDef.length - 1].arr, arr: s, wps: '', exit: 'auto', entry: 'auto' }));
+    // dégagement : celui du formulaire pour la dernière étape ; escales : saisi dans « Dégagements des escales » ou terrain à METAR le plus proche
+    legsDef.forEach((L, k) => { L.alt = k === legsDef.length - 1 ? f.alt : (stAlts[k] || nearestMetarAd(L.arr) || ''); });
+    const trip = [];
+    let time = new Date(f.time), fuel = f.fuel, aux = f.aux;
+    const cap0 = f.T.fuel.tanks[0].cap;
+    for (let k = 0; k < legsDef.length; k++) {
+      const fk = { ...f, ...legsDef[k], legft: k ? "" : f.legft, time: time.toISOString(), fuel, aux };
+      const userIds = buildUserIds(fk);
+      say(`${legsDef.length > 1 ? `Étape ${k + 1}/${legsDef.length} : ` : ''}calcul de la route, du vent et du relief…`);
+      const b = await compute(fk, userIds);
+      say(`${legsDef.length > 1 ? `Étape ${k + 1}/${legsDef.length} : ` : ''}GRAMET, coupe météo de la route…`);
+      b.gramet = await gramet(b).catch((e) => ({ err: e.message }));
+      b.stage = k + 1; b.nStages = legsDef.length;
+      b.night = nightInfo(b);
+      try {   // échantillonne la route tous les ~5 NM pour trouver les départements traversés
+        const sp = []; b.legs.forEach((lg) => { const n = Math.max(1, Math.ceil(lg.dist / 5)); for (let i = 0; i <= n; i++) sp.push(destPt(lg.a, lg.tc, lg.dist * i / n)); });
+        b.vigil = A.vigOnRoute(sp, b.depT.getTime(), b.eta.getTime());
+      } catch (e) { console.warn('vigilance', e); }
+      b.mountain = mountainOf(b);
+      b.altCmp = await altitudeCompare(b, b.mids, b.depElev).catch((e) => { console.warn('altitudes', e); return null; });
+      b.optAlt = await optimalAltitudes(b).catch((e) => { console.warn('altitude optimale', e); return null; });
+      b.changes = snapshotDiff(b);
+      trip.push(b);
+      time = new Date(b.eta.getTime() + f.turn * 6e4);
+      const rem = Math.max(0, b.loaded - b.totFuel), d = f.T.fuel.density;
+      const can = f.refuel && k < legsDef.length - 1 ? fuelAvail(b.arrInfo.v && b.arrInfo.v.escale, f.T) : null;
+      const nx = nextFuel({ rem, cap: cap0 || f.fuel, aux: f.aux, refuel: f.refuel && can !== false, dry: b.mb.mass - b.loaded * d, mtow: f.T.mtow, density: d });
+      fuel = nx.fuel; aux = nx.aux;
+      if (f.refuel && can !== false && k < legsDef.length - 1) b.fuelNote = { ok: can !== null, txt: `À ${b.f.arr} : mettre ${nx.add} L (${fuel + aux} L à bord au départ)${nx.limited ? ` — plein limité par la masse max ${f.T.mtow} kg` : ''}${can === null ? ` — carburant ${f.T.fuel.name.split(' (')[0]} non confirmé par la VAC, appeler le terrain` : ''}.` };
+      if (can === false) b.fuelNote = { ok: false, txt: `Pas de ${f.T.fuel.name.split(' (')[0]} à ${b.f.arr} (VAC) : pas de plein possible, l'étape suivante part avec ${Math.round(rem)} L.` };
+    }
+    trip.forEach((b) => { b.trip = trip; });
+    return trip;
+  }
   async function run(makePdf) {
     const prog = $('#pf-prog'), out = $('#pf-out');
     stopPick();
@@ -751,48 +875,7 @@
       const f = readForm();
       lastForm = f;
       if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
-      const stops = f.stages.split(/[\s,;]+/).filter(Boolean);
-      const stAlts = (f.stalts || '').split(/[\s,;]+/).filter(Boolean);
-      const unknown = [f.dep, f.arr, f.alt, ...stops, ...stAlts].filter((x) => x && !A.aptByIcao[x]);
-      if (unknown.length) throw new Error(`Terrain inconnu : ${unknown.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
-      prog.textContent = 'Chargement des données AIP, espaces aériens…';
-      await loadAip();
-      CUSTOM = {}; customN = 0;
-      // Étapes : départ → arrivée (points tournants du formulaire), puis escales suivantes en direct (points VFR auto)
-      const legsDef = [{ dep: f.dep, arr: f.arr, wps: f.wps, exit: f.exit, entry: f.entry }];
-      stops.forEach((s) => legsDef.push({ dep: legsDef[legsDef.length - 1].arr, arr: s, wps: '', exit: 'auto', entry: 'auto' }));
-      // dégagement : celui du formulaire pour la dernière étape ; escales : saisi dans « Dégagements des escales » ou terrain à METAR le plus proche
-      legsDef.forEach((L, k) => { L.alt = k === legsDef.length - 1 ? f.alt : (stAlts[k] || nearestMetarAd(L.arr) || ''); });
-      const trip = [];
-      let time = new Date(f.time), fuel = f.fuel, aux = f.aux;
-      const cap0 = f.T.fuel.tanks[0].cap;
-      for (let k = 0; k < legsDef.length; k++) {
-        const fk = { ...f, ...legsDef[k], time: time.toISOString(), fuel, aux };
-        const userIds = buildUserIds(fk);
-        prog.textContent = `${legsDef.length > 1 ? `Étape ${k + 1}/${legsDef.length} : ` : ''}calcul de la route, du vent et du relief…`;
-        const b = await compute(fk, userIds);
-        prog.textContent = `${legsDef.length > 1 ? `Étape ${k + 1}/${legsDef.length} : ` : ''}GRAMET, coupe météo de la route…`;
-        b.gramet = await gramet(b).catch((e) => ({ err: e.message }));
-        b.stage = k + 1; b.nStages = legsDef.length;
-        b.night = nightInfo(b);
-        try {   // échantillonne la route tous les ~5 NM pour trouver les départements traversés
-          const sp = []; b.legs.forEach((lg) => { const n = Math.max(1, Math.ceil(lg.dist / 5)); for (let i = 0; i <= n; i++) sp.push(destPt(lg.a, lg.tc, lg.dist * i / n)); });
-          b.vigil = A.vigOnRoute(sp, b.depT.getTime(), b.eta.getTime());
-        } catch (e) { console.warn('vigilance', e); }
-        b.mountain = mountainOf(b);
-        b.altCmp = await altitudeCompare(b, b.mids, b.depElev).catch((e) => { console.warn('altitudes', e); return null; });
-        b.optAlt = await optimalAltitudes(b).catch((e) => { console.warn('altitude optimale', e); return null; });
-        b.changes = snapshotDiff(b);
-        trip.push(b);
-        time = new Date(b.eta.getTime() + f.turn * 6e4);
-        const rem = Math.max(0, b.loaded - b.totFuel), d = f.T.fuel.density;
-        const can = f.refuel && k < legsDef.length - 1 ? fuelAvail(b.arrInfo.v && b.arrInfo.v.escale, f.T) : null;
-        const nx = nextFuel({ rem, cap: cap0 || f.fuel, aux: f.aux, refuel: f.refuel && can !== false, dry: b.mb.mass - b.loaded * d, mtow: f.T.mtow, density: d });
-        fuel = nx.fuel; aux = nx.aux;
-        if (f.refuel && can !== false && k < legsDef.length - 1) b.fuelNote = { ok: can !== null, txt: `À ${b.f.arr} : mettre ${nx.add} L (${fuel + aux} L à bord au départ)${nx.limited ? ` — plein limité par la masse max ${f.T.mtow} kg` : ''}${can === null ? ` — carburant ${f.T.fuel.name.split(' (')[0]} non confirmé par la VAC, appeler le terrain` : ''}.` };
-        if (can === false) b.fuelNote = { ok: false, txt: `Pas de ${f.T.fuel.name.split(' (')[0]} à ${b.f.arr} (VAC) : pas de plein possible, l'étape suivante part avec ${Math.round(rem)} L.` };
-      }
-      trip.forEach((b) => { b.trip = trip; });
+      const trip = await buildTrip(f, (t) => { prog.textContent = t; });
       prog.textContent = 'Créneaux de départ…';
       trip[0].slots = await departureSlots(trip).catch((e) => { console.warn('créneaux', e); return null; });
       // VAC des terrains de la route : mises en cache pour être consultables hors ligne
@@ -834,7 +917,13 @@
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
-    on('pf-optalt', (e) => { $('#pf-ft').value = e.target.dataset.ft; $('#pf-ft').dispatchEvent(new Event('change')); run(false); });
+    on('pf-watch', (e) => watchToggle(b.trip || [b], e.target));
+    document.querySelectorAll('#pf-out [data-esc-mail]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', (e) => {
+      e.preventDefault(); const id = el.dataset.escMail, m = A.escaleOf(id).mail_escale, t = A.pprText(id);
+      location.href = `mailto:${m}?subject=${encodeURIComponent(t.subject)}&body=${encodeURIComponent(t.body)}`;
+    }));
+    on('pf-optleg', (e) => { $('#pf-legft').value = e.target.dataset.legft; run(false); });
+    on('pf-optalt', (e) => { $('#pf-legft').value = ''; $('#pf-ft').value = e.target.dataset.ft; $('#pf-ft').dispatchEvent(new Event('change')); run(false); });
     on('pf-ics', () => exportIcs(b));
     on('pf-gps', () => flightMode(b.trip || [b]));
     on('pf-share', () => shareFlight(sfx));
@@ -953,6 +1042,44 @@
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) try { new Notification('Aéro Météo Ouest', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notification hors service worker */ }
   }
   setTimeout(remindCheck, 15000);
+  // surveillance jusqu'au départ : nav recalculée en arrière-plan toutes les 30 min (page ouverte), alerte si la situation se dégrade
+  let watch = null;
+  function watchDiff(a, b) {
+    const d = [];
+    if (b.stop > a.stop) d.push(`${b.stop - a.stop} nouvelle(s) alerte(s) bloquante(s) ⛔`);
+    if (b.imp > a.imp) d.push(`${b.imp - a.imp} branche(s) devenue(s) impossible(s) (aucune altitude)`);
+    if (b.wx > a.wx) d.push(`météo en route : ${WXTXT[a.wx]} → ${WXTXT[b.wx]}`);
+    if (b.azba && !a.azba) d.push('AZBA active sur la route');
+    if (b.gust >= 25 && b.gust > a.gust + 5) d.push(`rafales ${Math.round(b.gust)} kt`);
+    if (b.fuel > a.fuel + 3) d.push(`carburant +${b.fuel - a.fuel} L (vent)`);
+    return d;
+  }
+  console.assert(watchDiff({ stop: 0, imp: 0, wx: 0, azba: false, gust: 10, fuel: 20 }, { stop: 1, imp: 0, wx: 0, azba: true, gust: 12, fuel: 21 }).length === 2, 'watchDiff');   // sans WXTXT (défini plus bas)
+  async function watchTick() {
+    if (!watch) return;
+    if (Date.now() > watch.dep) { watch = null; return; }
+    try {
+      const t = await buildTrip(watch.f), s2 = tripSummary(t), d = watchDiff(watch.base, s2);
+      watch.base = s2; watch.last = new Date();
+      if (d.length) {
+        const txt = `Ta nav ${watch.title} : ${d.join(', ')}.`;
+        document.getElementById('remind-bar')?.remove();
+        document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">⚠️ ${esc(txt)} <button id="rm-go">🔄 Voir</button><button class="x" id="rm-x" title="Vu">✕</button></div>`);
+        $('#rm-x').onclick = () => document.getElementById('remind-bar')?.remove();
+        $('#rm-go').onclick = () => { document.getElementById('remind-bar')?.remove(); store.set('form', { ...store.get('form', {}), ...watch.form }); openForm(); $('#pf-time').value = localInput(new Date(watch.dep)); run(false); };
+        if ('Notification' in window && Notification.permission === 'granted') try { new Notification('Aéro Météo Ouest — météo dégradée', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notifications */ }
+      }
+    } catch (e) { console.warn('surveillance', e); }
+    if (watch) watch.timer = setTimeout(watchTick, 30 * 6e4);
+  }
+  function watchToggle(trip, btn) {
+    if (watch) { clearTimeout(watch.timer); watch = null; btn.textContent = '🔔 Surveiller jusqu\'au départ'; return; }
+    const f = lastForm, b0 = trip[0];
+    watch = { f, form: Object.fromEntries(FORM_KEYS.filter((k) => k !== 'time').map((k) => [k, f[k]])), base: tripSummary(trip), dep: b0.depT.getTime(), title: [b0.f.dep, ...trip.map((x) => x.f.arr)].join(' → ') };
+    watch.timer = setTimeout(watchTick, 30 * 6e4);
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    btn.textContent = '🔕 Arrêter la surveillance';
+  }
   function snapshotDiff(b) {
     const list = store.get('snaps', {})[snapKey(b)] || [];
     const old = [...list].reverse().find((x) => Date.now() - x.at > 45 * 6e4);
@@ -1040,16 +1167,35 @@
       const key = z.id.replace(/\s/g, '');
       return [...new Set(acts.filter((a) => a.zone === key && (!a.from || Date.parse(a.from) <= dayStart + 864e5) && (isNaN(Date.parse(a.to)) || Date.parse(a.to) >= dayStart)).flatMap((a) => a.slots))];
     };
+    // zones temporaires des SUP AIP en vigueur le jour du vol (contour et limites lus dans le PDF) ; créneaux en UTC, réunis sur toute la période
+    const supDay = depT.toISOString().slice(0, 10);
+    const supZones = (A.SUP || []).filter((s) => s.zones && s.zones.length && (!s.from || s.from <= supDay) && (!s.to || s.to >= supDay)).flatMap((s) => s.zones.map((z) => ({
+      id: `SUP ${s.num}`, type: 'ZRT', name: z.name, lower: z.lower, upper: z.upper, poly: z.poly, rtba: false,
+      rmk: `${s.title} — ${z.hours.length ? 'activable ' + z.hours.map((h) => h.join('-')).join(', ') + ' UTC' : z.h24 ? 'activable H24' : 'horaires : voir le SUP'}`,
+      sup: { num: s.num, url: s.url, active: z.hours.length ? z.hours.some((h) => slotOverlap(h.join('-'), dayStart, t0, t1)) : null } })));
+    const allZones = [...((ZONES && ZONES.data) || []), ...supZones];
     const obstacles = [];
     if (f.avoid !== 'none') {
-      for (const z of (ZONES && ZONES.data) || []) {
+      for (const z of allZones) {
         if (!vOverlap(z)) continue;
         if (polyRouteDist(z.poly, userPts) > 40) continue;
         if (z.type === 'P') obstacles.push({ z, why: 'zone interdite' });
         else if (f.avoid === 'p+rtba' && z.rtba && rtbaSlots(z).some((s) => slotOverlap(s, dayStart, t0, t1))) obstacles.push({ z, why: 'RTBA active' });
+        else if (f.avoid === 'p+rtba' && z.sup && z.sup.active) obstacles.push({ z, why: `ZRT active (SUP ${z.sup.num})` });
+        else if (f.avoid === 'easy' && ((z.rtba && rtbaSlots(z).some((s) => slotOverlap(s, dayStart, t0, t1))) || (z.sup && z.sup.active !== false)
+          || (/^[RD]$/.test(z.type) && !z.rtba && zoneStatus(z, t0, t1, N.fir || []).st === 'active'))) obstacles.push({ z, why: z.sup ? 'ZRT' : z.rtba ? 'RTBA active' : 'zone active' });
+      }
+      // route « VFR facile » : contourne aussi les espaces de classe A / C / D à l'altitude prévue (sauf ceux du départ et de l'arrivée)
+      if (f.avoid === 'easy') {
+        const ends = [userPts[0], userPts[userPts.length - 1]];
+        for (const s of (ASP && ASP.data) || []) {
+          if (!/^[ACD]$/.test(s.cls || '') || ends.some((p) => inPoly(p, s.poly)) || !vOverlap(s) || polyRouteDist(s.poly, userPts) > 30) continue;
+          obstacles.push({ z: { ...s, id: s.name, name: `(classe ${s.cls})`, type: s.kind || 'TMA' }, why: `classe ${s.cls}` });
+        }
       }
     }
     const routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
+    const directNm = userPts.slice(1).reduce((t, p, i) => t + distNm(userPts[i], p), 0);
     const pts = routed.pts, ids = routed.ids;
     const adIds = [...new Set([...userIds, f.alt].filter((id) => id && A.aptByIcao[id]))];
     const varDeg = (() => {
@@ -1058,13 +1204,18 @@
     })();
 
     // --- Vent en altitude
+    // altitudes par branche (1re étape seulement, si leur nombre correspond aux branches de la route calculée)
+    const lf = (f.legft || '').split(/[\s,;→>-]+/).filter(Boolean).map(Number), legFt = lf.length === pts.length - 1 && lf.every((x) => x >= 500 && x <= 12500) ? lf : null;
     const mids = []; for (let i = 0; i < pts.length - 1; i++) mids.push([(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2]);
     let winds = null, windErr = null;
     if (horizon < -1 || horizon > 15) windErr = 'Vent non disponible pour cette date (prévisions à 16 jours).';
     else {
       const times = []; let accD = 0;
       for (let i = 0; i < pts.length - 1; i++) { const dd = distNm(pts[i], pts[i + 1]); times.push(new Date(depT.getTime() + (accD + dd / 2) / f.tas * 3600e3)); accD += dd; }
-      try { winds = await windsAloft(mids, f.ft, times); } catch (e) { windErr = 'Vent en altitude indisponible (' + e.message + ').'; } }
+      try {   // altitudes par branche : un tirage de vent par altitude (même requête Open-Meteo, en cache)
+        winds = await windsAloft(mids, f.ft, times);
+        for (const a of new Set(legFt || [])) if (a !== f.ft) { const w = await windsAloft(mids, a, times); legFt.forEach((x, i) => { if (x === a) winds[i] = w[i]; }); }
+      } catch (e) { windErr = 'Vent en altitude indisponible (' + e.message + ').'; } }
 
     // --- Relief : altitude de sécurité par branche (relief max ±5 NM + 1000 ft)
     let safe = null, elevErr = null, profile = [];
@@ -1089,7 +1240,7 @@
 
     // --- Branches (1re branche : surplus de montée + roulage)
     const elevOf = (id) => { const v = vacOf(id), a = A.aptByIcao[id]; return v && v.alt != null ? v.alt : (a && +a.elev) || 0; };
-    const climb = climbExtra(f.T, f.ft, elevOf(f.dep), f.tas, f.ff);
+    const climb = climbExtra(f.T, legFt ? legFt[0] : f.ft, elevOf(f.dep), f.tas, f.ff);
     const legs = [];
     let t = depT.getTime(), totDist = 0, totMin = 0, totFuel = 0;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -1100,7 +1251,9 @@
       let min = Math.round(dist / gs * 60);
       let fuel = Math.round(min * f.ff / 60);
       if (i === 0) { min += climb.min; fuel += climb.fuel; }
-      legs.push({ from: ids[i], to: ids[i + 1], a: pts[i], b: pts[i + 1], dist, tc, tm: (tc - varDeg + 360) % 360, th, hm: (th - varDeg + 360) % 360, wca, gs, min, fuel, wind: winds ? w : null, eto: new Date(t + min * 6e4), safe: safe && safe[i] });
+      const ft = legFt ? legFt[i] : f.ft;
+      if (i > 0 && legFt && ft > legFt[i - 1]) { const c = climbExtra(f.T, ft, legFt[i - 1], f.tas, f.ff); min += c.min; fuel += Math.max(0, c.fuel - TAXI_L); }   // remontée en route
+      legs.push({ from: ids[i], to: ids[i + 1], a: pts[i], b: pts[i + 1], dist, tc, tm: (tc - varDeg + 360) % 360, th, hm: (th - varDeg + 360) % 360, wca, gs, min, fuel, wind: winds ? w : null, eto: new Date(t + min * 6e4), safe: safe && safe[i], ft });
       t += min * 6e4; totDist += dist; totMin += min; totFuel += fuel;
     }
     const eta = new Date(t);
@@ -1170,10 +1323,10 @@
 
     // --- Zones P/R/D + AZBA sur la route finale
     const zones = [];
-    for (const z of (ZONES && ZONES.data) || []) {
+    for (const z of allZones) {
       const d = polyRouteDist(z.poly, pts);
       if (d > f.cor) continue;
-      zones.push({ z, d, crossed: d === 0, below: vOverlap(z) });
+      zones.push({ z, d, crossed: d === 0, below: vOverlap(z), act: /^[RD]$/.test(z.type) && !z.rtba ? zoneStatus(z, t0, t1, N.fir || []) : null });
     }
     zones.sort((a, b) => (a.z.type + a.z.id).localeCompare(b.z.type + b.z.id));
     const rtba = zones.filter((x) => x.z.rtba).map((x) => {
@@ -1231,7 +1384,7 @@
       f, userIds, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes,
+      profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))],
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -1301,7 +1454,7 @@
       if (!x.crossed) continue;
       const lo = parseAlt(x.z.lower), up = parseAlt(x.z.upper);
       if (lo === null || lo > 12000) continue;
-      add(`${x.z.id} ${x.z.name}`, { poly: x.z.poly, lowerS: x.z.lower, upperS: x.z.upper }, lo, Math.min(up ?? 12000, 12000), x.z.rtba ? '#ff3b30' : x.z.type === 'P' ? '#d81b60' : x.z.type === 'D' ? '#fb8c00' : '#8e24aa');
+      add(`${x.z.id} ${x.z.name}`, { poly: x.z.poly, lowerS: x.z.lower, upperS: x.z.upper }, lo, Math.min(up ?? 12000, 12000), x.z.rtba ? '#ff3b30' : x.z.type === 'P' ? '#d81b60' : x.z.type === 'D' ? '#fb8c00' : x.z.type === 'ZRT' ? '#e65100' : '#8e24aa');
     }
     const maxTer = Math.max(...profile.map((x) => x.ft));
     const total = profile[profile.length - 1].along;
@@ -1326,12 +1479,24 @@
     return out;
   }
   console.assert(flightPath({ depElev: 0, arrInfo: { elev: 0 }, legs: [{ dist: 30 }] }, [2000]).map(([x, f]) => `${Math.round(x)}/${f}`).join(' ') === '0/0 5/2000 27/2000 30/1000', 'flightPath');
-  function profileSvg(v, b, sfx = '') {
+  // dessin de la coupe ; opts : light (impression), pos { nm, ft } (avion en mode GPS), id
+  const CUT = { W: 1000, H: 330, L: 44, R: 10, T: 14, B: 34 };
+  function cutGeom(v, b) {
+    const o = b.optAlt, opt = o && !o.plan.some((c) => c.hard.length) ? o.plan.map((c) => c.alt) : null;
+    const top = Math.min(12500, Math.max(4000, b.f.ft + 2500, ...b.legs.map((l) => (l.ft || 0) + 2500), v.maxTer + 2500, ...(opt || []).map((a) => a + 2000)));
+    const { W, H, L, R, T, B } = CUT;
+    return { opt, top, X: (nm) => L + nm / v.total * (W - L - R), Y: (ft) => H - B - Math.max(0, Math.min(ft, top)) / top * (H - B - T) };
+  }
+  // début de la nuit aéronautique le long de la route (NM), ou null si tout le vol est de jour
+  function nightAlong(b) {
+    const v = b.vprofile; if (!v || !b.night) return null;
+    const q = v.profile.find((p) => { const r = routePosAt(b, p.along), st = sunTimes(r.at, r.p[0], r.p[1]); return st && r.at > new Date(st.set.getTime() + 30 * 6e4); });
+    return q ? q.along : null;
+  }
+  function cutSvg(v, b, opts = {}) {
     if (!v) return '';
-    const W = 1000, H = 330, L = 44, R = 10, T = 14, B = 34, o = b.optAlt;
-    const opt = o && !o.plan.some((c) => c.hard.length) ? o.plan.map((c) => c.alt) : null;
-    const top = Math.min(12500, Math.max(4000, b.f.ft + 2500, v.maxTer + 2500, ...(opt || []).map((a) => a + 2000)));
-    const X = (nm) => L + nm / v.total * (W - L - R), Y = (ft) => H - B - Math.max(0, Math.min(ft, top)) / top * (H - B - T);
+    const { W, H, L, R, T, B } = CUT, { opt, top, X, Y } = cutGeom(v, b), lt = opts.light;
+    const C = lt ? { bg: '#fff', txt: '#222', ax: '#456', grid: '#000' } : { bg: '#0d1b2a', txt: '#fff', ax: '#9bd', grid: '#fff' };
     const pad = v.total / Math.max(1, v.profile.length - 1) / 2;
     // espaces : polygone qui suit le relief quand la limite est en ASFC
     const conf = new Set(v.conflicts);
@@ -1348,29 +1513,41 @@
     const g = b.gramet && !b.gramet.err ? b.gramet.cols : [];
     const cw = g.length > 1 ? (g[1].along - g[0].along) / 2 : 4;
     const clouds = g.map((c) => c.lv.slice(0, -1).map((x, k) => { const y2 = c.lv[k + 1], cc = (x.cc + y2.cc) / 2, t = (x.T + y2.T) / 2; if (cc < 50 || x.z > top) return '';
-      return `<rect x="${X(Math.max(0, c.along - cw)).toFixed(1)}" y="${Y(y2.z).toFixed(1)}" width="${(X(Math.min(v.total, c.along + cw)) - X(Math.max(0, c.along - cw))).toFixed(1)}" height="${Math.max(1, Y(x.z) - Y(y2.z)).toFixed(1)}" fill="${t <= 0 && t >= -15 ? '#ffb4b4' : '#eceff1'}" fill-opacity="${(cc / 100 * .55).toFixed(2)}"><title>nuages ${Math.round(cc)} %, ${Math.round(t)} °C${t <= 0 && t >= -15 ? ' — givrage possible' : ''}</title></rect>`; }).join('')).join('');
+      return `<rect x="${X(Math.max(0, c.along - cw)).toFixed(1)}" y="${Y(y2.z).toFixed(1)}" width="${(X(Math.min(v.total, c.along + cw)) - X(Math.max(0, c.along - cw))).toFixed(1)}" height="${Math.max(1, Y(x.z) - Y(y2.z)).toFixed(1)}" fill="${t <= 0 && t >= -15 ? '#ffb4b4' : lt ? '#90a4ae' : '#eceff1'}" fill-opacity="${(cc / 100 * .55).toFixed(2)}"><title>nuages ${Math.round(cc)} %, ${Math.round(t)} °C${t <= 0 && t >= -15 ? ' — givrage possible' : ''}</title></rect>`; }).join('')).join('');
     const g0 = g.filter((c) => c.iso0 != null);
     const iso = g0.length > 1 ? `<polyline points="${g0.map((c) => `${X(c.along).toFixed(1)},${Y(c.iso0).toFixed(1)}`).join(' ')}" fill="none" stroke="#4fc3f7" stroke-dasharray="5 4"><title>isotherme 0 °C</title></polyline>` : '';
     const ter = `M${X(0)},${Y(0)} ` + v.profile.map((p) => `L${X(p.along).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(' ') + ` L${X(v.total)},${Y(0)} Z`;
     const line = (pts) => pts.map(([a, f]) => `${X(a).toFixed(1)},${Y(f).toFixed(1)}`).join(' ');
-    const cruise = `<polyline points="${line(flightPath(b, b.legs.map(() => b.f.ft)))}" fill="none" stroke="#ff2bd6" stroke-width="2.5"><title>profil prévu à ${b.f.ft} ft</title></polyline>`;
-    const best = opt && opt.some((a) => a !== b.f.ft) ? `<polyline points="${line(flightPath(b, opt))}" fill="none" stroke="#2ecc40" stroke-width="2" stroke-dasharray="6 4"><title>profil conseillé ${opt.join(' → ')} ft</title></polyline>` : '';
+    const planned = b.legs.map((l) => l.ft || b.f.ft);
+    const cruise = `<polyline points="${line(flightPath(b, planned))}" fill="none" stroke="#ff2bd6" stroke-width="2.5"><title>profil prévu ${[...new Set(planned)].join(' / ')} ft</title></polyline>`;
+    const best = opt && opt.some((a, i) => a !== planned[i]) ? `<polyline points="${line(flightPath(b, opt))}" fill="none" stroke="#2ecc40" stroke-width="2" stroke-dasharray="6 4"><title>profil conseillé ${opt.join(' → ')} ft</title></polyline>` : '';
     const step = top > 8000 ? 2000 : 1000, grid = [];
-    for (let f = 0; f <= top; f += step) grid.push(`<line x1="${L}" x2="${W - R}" y1="${Y(f)}" y2="${Y(f)}" stroke="#fff" stroke-opacity=".08"/><text x="${L - 4}" y="${Y(f) + 3}" font-size="9" fill="#9bd" text-anchor="end">${f}</text>`);
+    for (let f = 0; f <= top; f += step) grid.push(`<line x1="${L}" x2="${W - R}" y1="${Y(f)}" y2="${Y(f)}" stroke="${C.grid}" stroke-opacity=".08"/><text x="${L - 4}" y="${Y(f) + 3}" font-size="9" fill="${C.ax}" text-anchor="end">${f}</text>`);
     const nmStep = v.total > 120 ? 20 : v.total > 50 ? 10 : 5;
-    for (let n = 0; n <= v.total; n += nmStep) grid.push(`<text x="${X(n)}" y="${H - B + 11}" font-size="8" fill="#9bd" text-anchor="middle">${n}</text>`);
+    for (let n = 0; n <= v.total; n += nmStep) grid.push(`<text x="${X(n)}" y="${H - B + 11}" font-size="8" fill="${C.ax}" text-anchor="middle">${n}</text>`);
     let acc = 0, lastX = -99; const mk = [];
     // nom des points : sauté s'il chevauche le précédent ou l'arrivée (branches très courtes)
     b.legs.forEach((lg, i) => { const x = X(acc), show = x - lastX > 45 && X(v.total) - x > 45; if (show) lastX = x;
-      mk.push(`<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="#fff" stroke-opacity="${i ? .3 : 0}"/>${show ? `<text x="${x + (i ? 0 : 2)}" y="${H - 6}" font-size="9" fill="#fff" text-anchor="${i ? 'middle' : 'start'}">${esc(lg.from)}</text>` : ''}`); acc += lg.dist; });
-    mk.push(`<text x="${X(v.total) - 2}" y="${H - 6}" font-size="9" fill="#fff" text-anchor="end">${esc(b.ids[b.ids.length - 1])}</text>`);
+      mk.push(`<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="${C.grid}" stroke-opacity="${i ? .3 : 0}"/>${show ? `<text x="${x + (i ? 0 : 2)}" y="${H - 6}" font-size="9" fill="${C.txt}" text-anchor="${i ? 'middle' : 'start'}">${esc(lg.from)}</text>` : ''}`); acc += lg.dist; });
+    mk.push(`<text x="${X(v.total) - 2}" y="${H - 6}" font-size="9" fill="${C.txt}" text-anchor="end">${esc(b.ids[b.ids.length - 1])}</text>`);
     const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${H - B + 20}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
-    return `<div class="vp-wrap"><svg id="pf-vp${sfx}" viewBox="0 0 ${W} ${H}" width="100%" style="background:#0d1b2a;border-radius:6px;display:block;touch-action:pan-y">
-      ${grid.join('')}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${mk.join('')}${wx}
-      <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>
-      <div class="meta" id="pf-vpinfo${sfx}" style="min-height:2.6em">Survole ou touche la coupe pour voir le relief et les espaces à cet endroit. <button class="btn" id="pf-vp-big${sfx}">🔍 Agrandir</button></div>
-      <p class="meta"><span style="color:#ff2bd6">━</span> profil prévu (${b.f.ft} ft)${best ? ` · <span style="color:#2ecc40">╌</span> profil conseillé` : ''} · <span style="color:#4fc3f7">╌</span> isotherme 0 °C · nuages en gris (rouge clair : givrage possible) ·
-        espaces : <span style="color:${ASP_COL.A}">A</span> <span style="color:${ASP_COL.C}">C</span> <span style="color:${ASP_COL.D}">D</span> <span style="color:${ASP_COL.E}">E</span>, zones <span style="color:#ff3b30">AZBA</span> <span style="color:#d81b60">P</span> <span style="color:#8e24aa">R</span> <span style="color:#fb8c00">D</span> · contour rouge = traversé à l'altitude prévue.</p></div>
+    const calls = callPoints(b).map((c) => `<g><line x1="${X(c.nm).toFixed(1)}" x2="${X(c.nm).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-dasharray="2 3" stroke-opacity=".7"/><text x="${(X(c.nm) + 2).toFixed(1)}" y="${T + 22}" font-size="10">📞</text><title>Appeler ${esc(c.sg.name)}${c.sg.freq ? ' ' + esc(c.sg.freq) : ''} vers ${c.nm.toFixed(0)} NM (${utc(c.at)}) pour la clairance</title></g>`).join('');
+    // nuit aéronautique : zone sombre à partir du point où l'on passerait après coucher + 30 min
+    const nA = nightAlong(b), night = nA != null ? `<rect x="${X(nA)}" y="${T}" width="${X(v.total) - X(nA)}" height="${H - B - T}" fill="#1a237e" fill-opacity=".35"><title>nuit aéronautique à partir de ${nA.toFixed(0)} NM</title></rect><text x="${X(nA) + 3}" y="${T + 10}" font-size="9" fill="#9fa8da">🌙 nuit aéro</text>` : '';
+    const ac = opts.pos ? `<g transform="translate(${X(opts.pos.nm).toFixed(1)},${Y(opts.pos.ft).toFixed(1)})"><circle r="6" fill="#00e5ff" stroke="#000"/><line x1="0" x2="0" y1="6" y2="${(H - B - Y(opts.pos.ft)).toFixed(1)}" stroke="#00e5ff" stroke-dasharray="2 2"/></g>` : '';
+    return `<svg ${opts.id ? `id="${opts.id}"` : ''} viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:${C.bg};border-radius:6px;display:block;touch-action:pan-y" font-family="Helvetica, Arial, sans-serif">
+      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${mk.join('')}${wx}${ac}
+      <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>`;
+  }
+  function profileSvg(v, b, sfx = '') {
+    if (!v) return '';
+    const conf = new Set(v.conflicts), pad = v.total / Math.max(1, v.profile.length - 1) / 2, best = cutGeom(v, b).opt;
+    const nA = nightAlong(b), nt = b.night, marg = nt ? Math.round((nt.night - b.eta) / 6e4) : null;
+    return `<div class="vp-wrap">${cutSvg(v, b, { id: 'pf-vp' + sfx })}
+      <div class="meta" id="pf-vpinfo${sfx}" style="min-height:2.6em">Survole ou touche la coupe pour voir le relief et les espaces à cet endroit (le point s'affiche aussi sur la carte). <button class="btn" id="pf-vp-big${sfx}">🔍 Agrandir</button></div>
+      ${nt ? `<p class="meta">${nA != null ? `🌙 <b>Nuit aéronautique à partir de ${nA.toFixed(0)} NM</b>` : `☀️ Vol de jour : arrivée ${utc(b.eta)}, nuit aéro à ${esc(b.f.arr)} ${utc(nt.night)}`}${marg != null && marg > 0 ? ` — marge ${hhmm(marg)} : départ au plus tard ${utc(nt.latestDep)}` : ''}.</p>` : ''}
+      <p class="meta"><span style="color:#ff2bd6">━</span> profil prévu${best ? ` · <span style="color:#2ecc40">╌</span> profil conseillé` : ''} · <span style="color:#4fc3f7">╌</span> isotherme 0 °C · nuages en gris (rouge clair : givrage possible) ·
+        espaces : <span style="color:${ASP_COL.A}">A</span> <span style="color:${ASP_COL.C}">C</span> <span style="color:${ASP_COL.D}">D</span> <span style="color:${ASP_COL.E}">E</span>, zones <span style="color:#ff3b30">AZBA</span> <span style="color:#d81b60">P</span> <span style="color:#8e24aa">R</span> <span style="color:#fb8c00">D</span> · contour rouge = traversé à l'altitude prévue · 📞 = appeler pour la clairance (5 NM avant).</p></div>
       ${v.segs.length ? `<details><summary><b>Espaces et zones traversés</b> (${v.segs.length})</summary><table class="legs"><tr><th>Espace</th><th>De – à (NM)</th><th>Limites</th><th>Fréquence</th></tr>
         ${[...v.segs].sort((x, y) => x.from - y.from).map((sg) => `<tr${conf.has(sg) ? ' style="color:#ff6b6b;font-weight:bold"' : ''}><td style="text-align:left">${esc(sg.name)}</td><td>${Math.max(0, sg.from - pad).toFixed(0)} – ${Math.min(v.total, sg.to + pad).toFixed(0)}</td><td>${esc(sg.lowerS || sg.lower)} – ${esc(sg.upperS || sg.upper)}</td><td>${esc(sg.freq || '–')}</td></tr>`).join('')}</table></details>` : ''}`;
   }
@@ -1388,12 +1565,13 @@
       document.body.appendChild(d); cursorOn(b, c, d.querySelector('.vp-info'));
     });
   }
+  let cutMark = null;
   function cursorOn(b, sv, info) {
     const v = b.vprofile;
-    const cur = sv.querySelector('.vp-cur'), W = 1000, L = 44, R = 10;
+    const cur = sv.querySelector('.vp-cur'), { W, L: Lm, R } = CUT;
     const show = (e) => {
       const pt = sv.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const x = pt.matrixTransform(sv.getScreenCTM().inverse()).x;
-      const nm = Math.max(0, Math.min(v.total, (x - L) / (W - L - R) * v.total));
+      const nm = Math.max(0, Math.min(v.total, (x - Lm) / (W - Lm - R) * v.total));
       const p = v.profile.reduce((m, q) => (Math.abs(q.along - nm) < Math.abs(m.along - nm) ? q : m), v.profile[0]);
       const sp = v.segs.filter((sg) => nm >= sg.from - 1.5 && nm <= sg.to + 1.5).map((sg) => `${sg.name} ${sg.lower + (sg.aglL ? p.ft : 0)}–${sg.upper + (sg.aglU ? p.ft : 0)} ft`);
       let acc = 0; const lg = b.legs.find((l) => (acc += l.dist) >= nm) || b.legs[b.legs.length - 1];
@@ -1401,6 +1579,12 @@
       info.innerHTML = `<b>${nm.toFixed(0)} NM</b> (${esc(lg.from)}→${esc(lg.to)}) · relief ${p.ft} ft · ${sp.length ? esc(sp.join(' · ')) : 'classe G (hors espaces et zones)'}`;
     };
     sv.addEventListener('pointermove', show); sv.addEventListener('pointerdown', show);
+    // lien avec la carte : le point survolé s'affiche sur la route ; un clic centre la carte dessus
+    const mk = (nm) => { const p = routePosAt(b, nm).p; if (!cutMark) cutMark = L.circleMarker(p, { radius: 7, color: '#000', weight: 2, fillColor: '#ffd60a', fillOpacity: 1, interactive: false }).addTo(map); else cutMark.setLatLng(p); return p; };
+    const nmOf = (e) => { const pt = sv.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return Math.max(0, Math.min(v.total, (pt.matrixTransform(sv.getScreenCTM().inverse()).x - Lm) / (W - Lm - R) * v.total)); };
+    sv.addEventListener('pointermove', (e) => mk(nmOf(e)));
+    sv.addEventListener('click', (e) => map.panTo(mk(nmOf(e))));
+    sv.addEventListener('pointerleave', () => { if (cutMark) { map.removeLayer(cutMark); cutMark = null; } });
   }
 
 
@@ -1612,10 +1796,21 @@
       if (b.f.ft < m.minAlt) warn.push(`${n} : croisière ${b.f.ft} ft sous l'altitude de franchissement conseillée ${m.minAlt} ft (relief ${m.hi.ft} ft).`);
       if (m.wind && m.wind.spd >= 30) warn.push(`${n} : vent ${Math.round(m.wind.spd)} kt sur les crêtes — vol montagne déconseillé (turbulence, rotors, fortes descendances).`);
       else if (m.wind && m.wind.spd >= 20) warn.push(`${n} : vent ${Math.round(m.wind.spd)} kt sur les crêtes — turbulence et descendances sous le vent.`);
+      const wv = waveRisk(m);
+      if (wv) warn.push(`${n} : ${wv}`);
       if (m.iso0 != null && m.iso0 < m.minAlt + 1000) warn.push(`${n} : isotherme 0 °C (~${Math.round(m.iso0 / 100) * 100} ft) proche de l'altitude de franchissement — givrage en cas de nuages.`);
     });
     return { legs, warn };
   }
+  // onde de relief et rotors : composante du vent perpendiculaire à la chaîne (Pyrénées : axe ~110°/290°) à hauteur des crêtes
+  function waveRisk(m) {
+    if (!m.wind || m.wind.spd < 15 || m.hi.ft < 4000) return null;
+    const pyr = m.hi.p[0] < 43.4, perp = pyr ? Math.abs(m.wind.spd * Math.sin(rad(m.wind.dir - 110))) : m.wind.spd;
+    if (perp < 20) return null;
+    const lee = pyr ? (Math.cos(rad(m.wind.dir - 200)) > 0 ? 'côté français (nord, effet de foehn)' : 'côté espagnol (sud)') : 'sous le vent des crêtes';
+    return `${perp >= 30 ? 'onde de relief forte probable' : 'onde de relief possible'} — vent ${r3(m.wind.dir)}°/${Math.round(m.wind.spd)} kt, ${Math.round(perp)} kt perpendiculaire à la chaîne : rotors et descendances (jusqu'à 1000-2000 ft/min) ${lee}, turbulence sévère près du relief.${perp >= 30 ? ' Vol déconseillé à proximité des crêtes.' : ' Passer bien plus haut que les crêtes (≥ 3000 ft) ou éviter.'}`;
+  }
+  console.assert(/forte/.test(waveRisk({ wind: { dir: 200, spd: 35 }, hi: { ft: 8000, p: [42.8, 0] } }) || '') && /nord/.test(waveRisk({ wind: { dir: 200, spd: 35 }, hi: { ft: 8000, p: [42.8, 0] } })) && !waveRisk({ wind: { dir: 110, spd: 35 }, hi: { ft: 8000, p: [42.8, 0] } }), 'waveRisk');
   const MOUNTAIN_RULES = [
     'Franchir crêtes et cols avec au moins 1 000 ft de marge (1 500 ft par vent fort), en abordant la crête à 45° pour garder le demi-tour possible.',
     'Toujours garder une échappatoire vers la vallée ; ne pas s\'engager dans une vallée qui se rétrécit et monte plus vite que l\'avion.',
@@ -1748,14 +1943,20 @@
     if (b.f.ac.note) al.push(`${b.f.ac.reg} : ${b.f.ac.note}. Performances : ${b.f.T.source || 'log ACB'}.`);
     const tanks = b.f.T.fuel.tanks;
     if ((tanks[0].cap && b.f.fuel > tanks[0].cap) || (tanks[1] && b.f.aux > tanks[1].cap)) al.push('Quantité de carburant supérieure à la capacité des réservoirs.');
+    for (const x of crossWinds(b)) {
+      if (x.max && x.crossG > x.max) al.unshift(`⛔ ${x.t.id} : vent traversier ${Math.round(x.cross)} kt${x.gust ? `, ${Math.round(x.crossG)} kt en rafale` : ''} sur la piste ${x.qfu} > ${x.max} kt démontré (${x.t.wxSrc}) — choisir un autre terrain ou un autre horaire.`);
+      else if (x.max && x.crossG >= x.max * .8) al.push(`${x.t.id} : vent traversier ${Math.round(x.crossG)} kt${x.gust ? ' en rafale' : ''} sur la piste ${x.qfu}, proche de la limite démontrée (${x.max} kt).`);
+      if (x.head != null && x.head < -5) al.push(`${x.t.id} : vent arrière ${Math.round(-x.head)} kt même sur la meilleure piste (${x.qfu}).`);
+    }
     for (const t of [b.depInfo, b.arrInfo]) {
-      if (t.rw && t.rw.best.cross != null && b.f.T.speeds['Vw 90° max'] && t.rw.best.cross > b.f.T.speeds['Vw 90° max']) al.push(`${t.id} : vent traversier ${Math.round(t.rw.best.cross)} kt > ${b.f.T.speeds['Vw 90° max']} kt démontré.`);
       if (t.len && t.tod && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
     }
     for (const t of [b.arrInfo, b.altInfo].filter(Boolean)) if (t.len && t.ldg && t.ldg > t.len * 0.85) al.push(`${t.id} : distance d'atterrissage ${t.ldg} m pour une piste de ${t.len} m — vérifier les performances.`);
     b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
     b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
+    b.zones.filter((x) => x.crossed && x.below && x.act && x.act.st === 'active').forEach((x) => al.push(`⛔ Zone ${x.z.id} ${x.z.name} (${x.z.lower} – ${x.z.upper}) active pendant le vol (${x.act.why}) et traversée à ${b.f.ft} ft — contourner ou passer au-dessus / en dessous, ou obtenir l'accord du gestionnaire.`));
+    b.zones.filter((x) => x.crossed && x.below && x.z.sup && x.z.sup.active !== false).forEach((x) => al.push(`${x.z.sup.active ? '⛔ ZRT active pendant le vol' : 'ZRT activable'} : ${x.z.name} (${x.z.id}, ${x.z.lower} – ${x.z.upper}) traversée — ${x.z.sup.active ? 'contournement obligatoire sauf accord du gestionnaire' : 'vérifier son activation (NOTAM, SIV)'} ; ${x.z.rmk.split(' — ')[1] || ''}.`));
     if (b.wxRoute && b.wxRoute.worst) al.push(`Météo en route : ${WXTXT[b.wxRoute.worst]} (${[...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 4).join(', ')}).`);
     if (b.gramet && !b.gramet.err && b.gramet.icing) al.push(`GRAMET : givrage probable près de ${b.f.ft} ft (nuage entre 0 et -15 °C) — vol VFR hors nuages impératif, prévoir une altitude plus basse.`);
     if (b.gramet && !b.gramet.err && b.gramet.storm) al.push('GRAMET : instabilité / orages possibles sur le trajet (voir TEMSI).');
@@ -1815,10 +2016,11 @@
   // ---------- passage de frontière
   const inFrance = (p) => (window.FRANCE || []).some((ring) => inPolyXY(p[1], p[0], ring.map(([la, lo]) => [lo, la])));
   if (window.FRANCE) console.assert(inFrance([43.38, -0.42]) && !inFrance([43.36, -1.79]) && !inFrance([42.55, 1.6]), 'inFrance (Pau, Saint-Sébastien, Andorre)');
+  if (window.FRANCE) console.assert(!borderInfo({ f: { dep: 'LFBZ', arr: 'LFBZ' }, legs: [{ a: [43.47, -1.53], tc: 225, dist: 8 }] }), 'pas de frontière au large de Saint-Jean-de-Luz');
   function borderInfo(b) {
     if (!window.FRANCE) return null;
     const ids = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean), foreignAd = ids.filter((id) => !id.startsWith('LF'));
-    const out = routeSamples(b, 3).filter((x) => x.p[0] < 43.5 && !inFrance(x.p));   // seules frontières de la zone : Espagne et Andorre (la mer n'en est pas une)
+    const out = routeSamples(b, 3).filter((x) => x.p[0] < 43.5 && !inFrance(x.p) && !(x.p[0] > 43.35 && x.p[1] > -1.79));   // seules frontières : Espagne et Andorre ; la mer devant la côte basque (à l'est de la Bidassoa) reste française
     if (!out.length && !foreignAd.length) return null;
     const andorra = out.some((x) => x.p[0] > 42.42 && x.p[0] < 42.66 && x.p[1] > 1.4 && x.p[1] < 1.79);
     const customs = ids.filter((id) => id.startsWith('LF')).map((id) => { const t = (vacAt(id) || {}).infos || '', m = t.split(/MET :8 -/)[1]; return m ? [id, m.split(/Douanes, Police/)[0].replace(/\s+/g, ' ').trim().slice(0, 220)] : null; }).filter(Boolean);
@@ -1955,7 +2157,8 @@
       const seg = (b.profile || []).filter((p) => p.along >= acc - .5 && p.along <= acc + lg.dist + .5);
       const lowGround = seg.length ? Math.min(...seg.map((p) => p.ft)) : 0;
       acc += lg.dist;
-      if (b.f.ft - lowGround <= 3000 || semiOk(b.f.ft, lg.tm)) continue;
+      const ft = lg.ft || b.f.ft;
+      if (ft - lowGround <= 3000 || semiOk(ft, lg.tm)) continue;
       const floor = Math.max(lg.safe ? lg.safe.alt : 0, 3500);
       let sug = null; for (let a = 3500; a <= 12500; a += 1000) if (a >= floor && semiOk(a, lg.tm)) { sug = a; break; }
       out.push({ lg, sug, east: lg.tm < 180 });
@@ -2009,8 +2212,10 @@
     for (const x of b.zones || []) {
       if (polyRouteDist(x.z.poly, [lg.a, lg.b]) > 0) continue;
       const r = x.z.rtba && (b.rtba || []).find((y) => y.z === x.z); if (x.z.rtba && !(r && r.conflict)) continue;
+      if (x.z.sup && x.z.sup.active === false) continue;   // ZRT hors de ses créneaux
+      if (x.act && x.act.st === 'inactive') continue;   // R / D hors de son horaire publié
       const g = isAgl(x.z.upper) ? groundIn(x.z.poly) : 0;
-      band(parseAlt(x.z.lower) ?? 0, (parseAlt(x.z.upper) ?? 99999) + g, `${x.z.id} ${x.z.name}${x.z.rtba ? ' (AZBA active)' : x.z.type === 'P' ? ' (interdite)' : ' (vérifier l\'activité)'}`, x.z.type === 'P' || !!x.z.rtba);
+      band(parseAlt(x.z.lower) ?? 0, (parseAlt(x.z.upper) ?? 99999) + g, `${x.z.id} ${x.z.name}${x.z.rtba ? ' (AZBA active)' : x.z.type === 'P' ? ' (interdite)' : x.z.sup && x.z.sup.active ? ' (ZRT active)' : x.act && x.act.st === 'active' ? ` (active : ${x.act.why})` : ` (${x.act ? x.act.why : 'vérifier l\'activité'})`}`, x.z.type === 'P' || !!x.z.rtba || !!(x.z.sup && x.z.sup.active) || !!(x.act && x.act.st === 'active'));
     }
     // NOTAM qui touchent la branche : zones réglementées / ZRT (code Q « R… ») interdites, activités (« W… » : parachutage, drones, voltige…) et obstacles à noter ;
     // les autres (fréquences, services) n'ont rien à voir avec l'altitude, et ceux de la surface à l'illimité ne se contournent pas verticalement
@@ -2072,9 +2277,55 @@
       ${o.plan.filter((c) => c.hard.length).map((c) => `<div class="warn">⛔ ${esc(c.lg.from)}→${esc(c.lg.to)} : aucune altitude entre 1500 et 9500 ft ne respecte toutes les contraintes (${esc(c.hard.map((h) => h.why).join(', '))}) — modifier la route pour contourner, ou reporter.</div>`).join('')}
       <p class="meta">Profil conseillé : <b>${o.plan.map((c) => (c.hard.length ? '⛔' : c.alt)).join(' → ')} ft</b> (${o.tot.fuel} L de croisière, ${hhmm(o.tot.min)}).
         ${o.uni.hard ? `Altitude unique la moins contrainte : <b>${o.uni.alt} ft</b>, mais ⛔ ${esc(o.uni.why.join(' ; '))} — préférer le profil par branche.` : `Altitude unique conseillée : <b>${o.uni.alt} ft</b> (${o.uni.fuel} L, ${hhmm(o.uni.min)})${o.cur && o.uni.alt !== b.f.ft ? `, contre ${o.cur.fuel} L à ${b.f.ft} ft${d > 0 ? ` (−${d} L)` : ''}${o.cur.hard ? ` et ${o.cur.hard} contrainte(s) non respectée(s) à ${b.f.ft} ft` : ''}` : ''}.
-        ${o.uni.alt !== b.f.ft ? `<button class="btn" id="pf-optalt${sfx}" data-ft="${o.uni.alt}">Recalculer à ${o.uni.alt} ft</button>` : ''}`}</p>
+        ${o.uni.alt !== b.f.ft ? `<button class="btn" id="pf-optalt${sfx}" data-ft="${o.uni.alt}">Recalculer à ${o.uni.alt} ft</button>` : ''}`}
+        ${!o.plan.some((c) => c.hard.length) && (!b.stage || b.stage === 1) && o.plan.some((c) => c.alt !== (c.lg.ft || b.f.ft)) ? `<button class="btn" id="pf-optleg${sfx}" data-legft="${o.plan.map((c) => c.alt).join(' ')}">Appliquer le profil par branche</button>` : ''}</p>
       <p class="meta">Calcul : relief +1000 ft, crêtes et vent, cœur du Parc national, ZSM, parachutage / voltige, espaces contrôlés (hors abords du départ et de l'arrivée), zones P / R / D, AZBA active, NOTAM à limites verticales, base des nuages prévue, GRAMET (nuages, givrage), règle semi-circulaire, puis le moins de carburant avec le vent${o.noWind ? ' (vent indisponible à cette date : sans vent)' : ''}, montée comprise.
         Les SUP AIP n'ont pas de limites verticales dans les données : les lire dans la liste. Choix final au pilote (TEMSI, WINTEM, carte OACI).</p>`;
+  }
+
+  // ---------- vent traversier aux terrains (meilleure piste), rafales comprises : METAR si vol dans les 2 h, sinon prévision le long de la route
+  function crossWinds(b) {
+    const pts = (b.wxRoute && b.wxRoute.pts) || [], max = (b.f.T.speeds || {})['Vw 90° max'] || null;
+    return [b.depInfo, b.arrInfo, b.altInfo].filter((t) => t && t.rw && t.rw.best.cross != null).map((t) => {
+      const fcG = t.role === 'DÉPART' ? (pts[0] || {}).gust : (pts[pts.length - 1] || {}).gust, wspd = Math.hypot(t.rw.best.head || 0, t.rw.best.cross || 0);
+      const gust = t.wxSrc === 'METAR' && t.m && t.m.wgst ? +t.m.wgst : fcG && fcG > wspd + 5 ? fcG : null;
+      return { t, qfu: t.rw.best.qfu, head: t.rw.best.head, cross: t.rw.best.cross, gust, crossG: gust && wspd ? t.rw.best.cross * gust / wspd : t.rw.best.cross, max };
+    });
+  }
+  console.assert((() => { const t = { id: 'X', role: 'ARRIVÉE', wxSrc: 'prévision', rw: { best: { qfu: 90, head: 10, cross: 10 } } };
+    const r = crossWinds({ f: { T: { speeds: { 'Vw 90° max': 22 } } }, wxRoute: { pts: [{ gust: 28 }] }, depInfo: { rw: null }, arrInfo: t })[0]; return Math.round(r.crossG) === 20 && r.gust === 28; })(), 'crossWinds rafales');
+  function crossHtml(b) {
+    const xs = crossWinds(b); if (!xs.length) return '';
+    return `<p class="meta">💨 Vent traversier : ${xs.map((x) => `<span style="color:${x.max && x.crossG > x.max ? '#ff6b6b' : x.max && x.crossG >= x.max * .8 ? '#ff9f0a' : 'inherit'}">${esc(x.t.id)} piste ${x.qfu} : ${Math.round(x.cross)} kt${x.gust ? ` (${Math.round(x.crossG)} en rafale)` : ''}${x.head != null ? `, ${x.head >= 0 ? 'face' : 'arrière'} ${Math.abs(Math.round(x.head))} kt` : ''}</span>`).join(' · ')}${xs[0].max ? ` — limite démontrée ${xs[0].max} kt` : ' — limite démontrée non renseignée pour cet avion'}.</p>`;
+  }
+
+  // ---------- repères visuels par branche : villes, autoroutes, rivières, lacs, avec la minute de passage et le côté
+  function landmarksOf(b) {
+    const D = LANDM || { towns: [], mw: {}, rv: {}, lk: [] };
+    return b.legs.map((lg) => {
+      const la0 = Math.min(lg.a[0], lg.b[0]) - .1, la1 = Math.max(lg.a[0], lg.b[0]) + .1, lo0 = Math.min(lg.a[1], lg.b[1]) - .14, lo1 = Math.max(lg.a[1], lg.b[1]) + .14;
+      const near = (la, lo) => la >= la0 && la <= la1 && lo >= lo0 && lo <= lo1;
+      const at = (p) => { const r = routeDist(p, [lg.a, lg.b]); return r.along >= -0.5 && r.along <= lg.dist + 0.5 ? r : null; };
+      const side = (p) => (((bearing(lg.a, p) - lg.tc + 540) % 360) - 180 > 0 ? 'à droite' : 'à gauche');
+      const out = [];
+      for (const [n, la, lo, pop] of D.towns) { if (!near(la, lo)) continue; const r = at([la, lo]); if (r && r.d <= (pop >= 20000 ? 4 : pop >= 5000 ? 2.5 : 1.2)) out.push({ k: '🏘️', n, along: r.along, d: r.d, side: r.d < .4 ? 'dessous' : side([la, lo]), w: Math.log10(pop) }); }
+      const lines = (set, icon, w) => Object.entries(set).forEach(([n, pts]) => {
+        const hits = pts.filter(([la, lo]) => near(la, lo)).map((p) => ({ p, r: at(p) })).filter((x) => x.r && x.r.d <= 1);
+        if (!hits.length) return;
+        const h = hits.sort((x, y) => x.r.d - y.r.d)[0];
+        out.push({ k: icon, n: hits.length > 4 ? `${n} (longée)` : n, along: h.r.along, d: h.r.d, side: hits.length > 4 ? side(h.p) : 'croisée', w });
+      });
+      lines(D.mw, '🛣️', 5); lines(D.rv, '🌊', 4.6);
+      for (const [n, la, lo, km2] of D.lk) { if (!near(la, lo)) continue; const r = at([la, lo]); if (r && r.d <= 3) out.push({ k: '💧', n, along: r.along, d: r.d, side: side([la, lo]), w: 4 + km2 / 50 }); }
+      const top = out.sort((x, y) => y.w - x.w).slice(0, 8).sort((x, y) => x.along - y.along);
+      return { lg, list: top.map((x) => ({ ...x, min: Math.max(0, Math.round(x.along / lg.gs * 60)) })) };
+    });
+  }
+  function landmarksHtml(b) {
+    const L0 = landmarksOf(b); if (!L0.some((x) => x.list.length)) return '';
+    return `<details><summary><b>🏘️ Repères visuels par branche</b> (minute depuis le début de la branche)</summary>
+      ${L0.map((x) => `<p class="meta" style="margin:2px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> : ${x.list.map((t) => `${t.k} ${t.min}' ${esc(t.n)} <small>(${t.side}${t.side === 'croisée' || t.side === 'dessous' ? '' : `, ${t.d.toFixed(1)} NM`})</small>`).join(' · ') || 'peu de repères (campagne)'}</p>`).join('')}
+      <p class="meta">Villes de plus de 1500 habitants, autoroutes, rivières principales et lacs (OpenStreetMap). À compléter avec la carte OACI (châteaux d'eau, lignes HT, voies ferrées).</p></details>`;
   }
 
   // ---------- terrains de déroutement le long de la route
@@ -2178,6 +2429,13 @@
   // ---------- fiche radio par étape (messages types, à adapter)
   const rwyNum = (qfu) => String(Math.round(qfu / 10) % 36 || 36).padStart(2, '0');   // QFU 128° -> piste 13
   const cityOf = (id) => ((A.aptByIcao[id] || {}).name || id).split(/ (?:Pyrénées|Pays|Île|Ile|Atlantique|Bretagne|Val|Le Sequestre|Dordogne|Brie|Seyresse)\b|[-–(]/)[0].trim();
+  // points d'appel pour la clairance : 5 NM avant l'entrée dans un espace C / D / CTR traversé à l'altitude prévue
+  function callPoints(b) {
+    const v = b.vprofile; if (!v) return [];
+    const pad = v.total / Math.max(1, v.profile.length - 1) / 2, seen = new Set();
+    return v.conflicts.filter((sg) => /\((?:C|D)\)|CTR/.test(sg.name)).sort((x, y) => x.from - y.from).filter((sg) => { const k = sg.freq || sg.name; if (seen.has(k)) return false; seen.add(k); return true; })
+      .map((sg) => { const entry = Math.max(0, sg.from - pad); return { sg, entry, nm: Math.max(0, entry - 5), at: routePosAt(b, Math.max(0, entry - 5)).at }; });
+  }
   function radioCard(b) {
     const f = b.f, reg = f.ac.reg, typ = f.T.label.replace(/^Robin /, '').split(/[ /]/)[0], pob = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? 2 : 0);
     const svc = (id) => { const l = ((vacAt(id) || {}).freqs || []).join(' | '), fr = (re) => { const m = l.match(re); return m ? m[1] : ''; };
@@ -2192,6 +2450,8 @@
       if (seen.has(s.call)) return; seen.add(s.call);
       rows.push([`En route (${s.name})`, String(s.freq).split(' / ')[0], `${s.call}, ${reg}, ${typ}, VFR de ${cd} à ${ca}, ${lg.from === f.dep ? 'au départ de ' + cd : 'à proximité de ' + lg.from}, ${f.ft} ft, transpondeur 7000, ${/SIV|INFO/i.test(s.call + s.kind) ? "demandons l'information de vol" : 'demandons le transit'}.`]);
     }));
+    callPoints(b).forEach((c) => rows.push([`Clairance ${c.sg.name} (vers ${c.nm.toFixed(0)} NM, ${utc(c.at)})`, String(c.sg.freq || 'voir carte').split(' / ')[0],
+      `${reg}, ${typ}, ${pob} POB, VFR de ${cd} à ${ca}, à 5 NM de la limite de ${c.sg.name.replace(/ \(.\)$/, '')}, ${f.ft} ft, demandons le transit (entrée vers ${c.entry.toFixed(0)} NM).`]));
     if (a.twr) rows.push(['Arrivée', a.twr, `${ca} Tour, ${reg}, ${typ}, ${/^[A-Z]{1,3}-[A-Z]+/.test(lN.from) ? `au point ${lN.from}` : `à 5 NM de ${ca}`}, ${f.ft} ft${a.atis ? ", avec l'information" : ''}, pour intégration.`]);
     else rows.push(['Arrivée', a.afis || a.aa, `${ca} ${a.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, à 5 NM du terrain, ${f.ft} ft, pour intégration${b.arrInfo.rw ? ' piste ' + rwyNum(b.arrInfo.rw.best.qfu) : ''}.`]);
     return rows;
@@ -2265,24 +2525,33 @@
       ${c.rows.map((r) => `<tr${r === c.best ? ' style="font-weight:bold"' : ''}><td>${r.alt} ft${r.cur ? ' (prévue)' : ''}</td><td>${hhmm(r.min)}</td><td>${r.fuel} L</td><td>${esc(r.rg.name || r.rg)}</td><td style="text-align:left">${[r.low && `sous l'alti sécu (${c.maxSafe} ft)`, !r.semi && 'hors règle semi-circulaire au-dessus de 3000 ft sol'].filter(Boolean).join(', ') || '✅'}</td></tr>`).join('')}</table>
       <p class="meta">Vent Open-Meteo à l'heure de passage, montée comprise. Choisir aussi selon les espaces aériens, la base des nuages et le givrage.</p></details>`;
   }
-  const vacLinks = (b) => `<p class="meta">📄 VAC (copie du cycle en cours, consultable hors ligne après le calcul) : ${[...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].map((id) => `<a href="data/vac/${id}.pdf" target="_blank" rel="noopener">${id}</a>`).join(' · ')}</p>`;
+  // contact d'escale (e-mail relevé dans la VAC, ou à la main) avec la demande d'informations pré-remplie
+  function escaleMailHtml(b) {
+    const ids = [...new Set([b.f.arr, b.f.alt].filter(Boolean))];
+    return `<p class="meta">✉️ Infos d'escale : ${ids.map((id) => { const e = (A.escaleOf && A.escaleOf(id)) || {}, c = (e.contacts || []).find((x) => x.m === e.mail_escale) || {};
+      return e.mail_escale ? `<a href="#" data-esc-mail="${esc(id)}" style="color:#9cf">${esc(id)} : ${esc(e.mail_escale)}</a> <small>(${esc(c.r || 'VAC')})</small>` : `${esc(id)} : pas d'e-mail publié${(e.tel_ad || []).length ? `, 📞 ${esc(e.tel_ad[0])}` : ''}`; }).join(' · ')}</p>`;
+  }
+  const vacLinks = (b) => escaleMailHtml(b) + `<p class="meta">📄 VAC (copie du cycle en cours, consultable hors ligne après le calcul) : ${[...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].map((id) => `<a href="data/vac/${id}.pdf" target="_blank" rel="noopener">${id}</a>`).join(' · ')}</p>`;
   function summaryHtml(b, sfx = '') {
     const al = alertsOf(b);
     const nt = b.night;
     return `
       ${changesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button>${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
-      <table class="legs"><tr><th>Branche</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
-      ${b.legs.map((l) => `<tr><td>${l.from}→${l.to}</td><td>${l.safe ? l.safe.alt : '–'}</td><td>${r3(l.tm)}°</td><td>${l.dist.toFixed(0)}</td>
+      <table class="legs"><tr><th>Branche</th><th>Alt.</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
+      ${b.legs.map((l) => `<tr><td>${l.from}→${l.to}</td><td>${l.ft || b.f.ft}</td><td>${l.safe ? l.safe.alt : '–'}</td><td>${r3(l.tm)}°</td><td>${l.dist.toFixed(0)}</td>
         <td>${l.wind ? `${r3(l.wind.dir)}/${Math.round(l.wind.spd)}` : '–'}</td><td>${r3(l.hm)}°</td><td>${l.min}'</td><td>${l.fuel} L</td></tr>`).join('')}
-      <tr><th>Total</th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
+      <tr><th>Total</th><th></th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}${b.wxRes ? ` + réserve météo ${b.wxRes.L} L, ${b.wxRes.pct} % car ${esc(b.wxRes.why.join(' et '))}` : ''}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
+      ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}.</p>` : ''}
+      ${crossHtml(b)}
       ${perfLine(b, sfx)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
+      ${landmarksHtml(b)}
       ${altCmpHtml(b)}
       ${loadHtml(b)}
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
@@ -2634,7 +2903,7 @@
       const lg = b.legs[i];
       if (lg) {
         fuelLeft -= lg.fuel;
-        body.push([lg.safe ? String(lg.safe.alt) : '', `Rm ${r3(lg.tm)}°  Cm ${r3(lg.hm)}°  (vent ${lg.wind ? r3(lg.wind.dir) + '/' + Math.round(lg.wind.spd) : '-'}, Vs ${Math.round(lg.gs)})`,
+        body.push([lg.safe ? String(lg.safe.alt) : '', `${lg.ft && lg.ft !== b.f.ft ? lg.ft + ' ft  ' : ''}Rm ${r3(lg.tm)}°  Cm ${r3(lg.hm)}°  (vent ${lg.wind ? r3(lg.wind.dir) + '/' + Math.round(lg.wind.spd) : '-'}, Vs ${Math.round(lg.gs)})`,
           lg.dist.toFixed(0), `${lg.min}'`, '', '', `${lg.fuel} L`, '', freqTxt(lg)]);
       }
     });
@@ -2735,6 +3004,8 @@
       rows.push(['Paiement', (es.pay || []).join(' · ') || 'non précisé']);
       rows.push(['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' - ' + fee.note : ''} (${fee.source || 'tableau du club'}${fee.maj ? ', ' + fee.maj : ''})` : 'non renseignée - voir airfield.directory / aeroPS / exploitant']);
       if (es.exploitant || (es.tel_ad || []).length) rows.push(['Exploitant', [es.exploitant, ...(es.tel || [])].filter(Boolean).join(' · ')]);
+      const ec = A.escaleOf ? A.escaleOf(t.id) || {} : {};
+      rows.push(['Contact escale', ec.mail_escale ? `${ec.mail_escale} (${((ec.contacts || []).find((c) => c.m === ec.mail_escale) || {}).r || 'VAC'})` : `pas d'e-mail publié : ${(ec.tel_ad || []).join(' / ') || 'voir VAC'}`]);
       if (kind === 'DÉPART') {
         rows.push([b.f.T.takeoff && b.f.T.takeoff.table ? 'Décollage (manuel)' : 'Décollage (estimé)', `${t.tod ? t.tod + ' m' : 'non disponible - voir manuel de vol'} (15 m) pour ${t.len ? t.len + ' m de piste' : 'piste ?'} ${t.grass ? '(herbe)' : '(dur)'} — masse ${Math.round(b.mb.mass)} kg`]);
         const l0 = b.legs[0];
@@ -2822,8 +3093,13 @@
       h2('Points de contournement');
       table(['Point', 'Position', 'Contourne'], b.detours.map((d) => [d.id, `${d.p[0].toFixed(4)} ${d.p[1].toFixed(4)}`, d.around]), { size: 8 });
     }
-    h2('Coupe verticale');
-    drawProfilePdf(doc, b, M, y + 1, W - 2 * M, 62); y += 72;
+    // coupe : même dessin qu'à l'écran (version claire), sinon l'ancien tracé
+    const cut = b.vprofile ? await svgToJpeg(cutSvg(b.vprofile, b, { light: true }), 2000, 660).catch((e) => { console.warn('coupe PDF', e); return null; }) : null;
+    if (cut) {
+      const cw = W - 2 * M, ch = cw * 0.33; ensure(ch + 22); h2('Coupe verticale');
+      doc.addImage(cut, 'JPEG', M, y, cw, ch); y += ch + 2;
+      para(`Rose : profil prévu (montée et descente comprises)${cutGeom(b.vprofile, b).opt ? ' · vert pointillé : profil conseillé' : ''} · espaces colorés par classe (A rouge, C bleu foncé, D bleu, E vert), contour rouge = traversé à l'altitude prévue · gris : nuages (rouge clair : givrage) · bleu pointillé : isotherme 0 °C${nightAlong(b) != null ? ' · zone sombre : nuit aéronautique' : ''}. Altitudes en ft, distances en NM.`, { size: 7, color: [90, 90, 90] });
+    } else { h2('Coupe verticale'); drawProfilePdf(doc, b, M, y + 1, W - 2 * M, 62); y += 72; }
     h2('Météo le long de la route (prévision modèle à l\'heure de passage)');
     if (b.wxRoute && b.wxRoute.pts) {
       table(['Heure', 'Pos.', 'Avis', 'Nuages bas', 'Base est.', 'Visi', 'Pluie', 'Rafales', 'Détail'], b.wxRoute.pts.map((p) => [utc(p.at), `${p.along.toFixed(0)} NM`,
@@ -2869,6 +3145,11 @@
     }
     const semi = semiCircular(b);
     if (semi.length) para(`Règle semi-circulaire (au-dessus de 3000 ft sol : Rm 000-179 milliers impairs + 500, Rm 180-359 milliers pairs + 500) : ${semi.map((x) => `${x.lg.from}-${x.lg.to} Rm ${r3(x.lg.tm)} -> ${x.sug || '?'} ft`).join(' ; ')}.`, { size: 8, color: [170, 40, 0] });
+    const lmk = landmarksOf(b);
+    if (lmk.some((x) => x.list.length)) {
+      h2('Repères visuels par branche');
+      table(['Branche', 'Repères (minute depuis le début de la branche, côté)'], lmk.map((x) => [`${x.lg.from} -> ${x.lg.to}`, x.list.map((t) => `${t.min}' ${t.n} (${t.side})`).join(' · ') || '-']), { size: 7.3 });
+    }
     h2('Terrains de déroutement le long de la route');
     table(['Branche', 'Terrains à moins de 10 NM (distance, position)', 'Plus loin d\'un terrain'], diversions(b).map((x) => [`${x.lg.from} -> ${x.lg.to}`,
       x.list.slice(0, 6).map((t) => `${t.a.icao} ${t.a.name} (${t.d.toFixed(0)} NM, à ${t.along.toFixed(0)} NM)`).join('\n') || 'aucun', `${x.worst.d.toFixed(0)} NM${x.glide != null ? `\nplané ~${x.glide.toFixed(0)} NM` : ''}`]), { size: 7.3 });
@@ -2993,6 +3274,24 @@
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
   }
   function fmDrag() { if (fm) fm.follow = false; }
+  // espaces à la position (NM depuis le départ de l'étape) et à l'altitude, et le prochain espace rencontré à cette altitude
+  function aspAhead(v, nm, ft) {
+    const ter = (x) => (v.profile.reduce((m, q) => (Math.abs(q.along - x) < Math.abs(m.along - x) ? q : m), v.profile[0]) || { ft: 0 }).ft;
+    const inV = (sg, x) => { const g = ter(x); return ft >= sg.lower + (sg.aglL ? g : 0) && ft <= sg.upper + (sg.aglU ? g : 0); };
+    const cur = v.segs.filter((sg) => nm >= sg.from - 1.5 && nm <= sg.to + 1.5 && inV(sg, nm));
+    const next = v.segs.filter((sg) => sg.from - 1.5 > nm && !cur.includes(sg) && inV(sg, sg.from)).sort((x, y) => x.from - y.from)[0];
+    return { cur, next: next && { sg: next, d: Math.max(0, next.from - 1.5 - nm) } };
+  }
+  console.assert((() => { const v = { profile: [{ along: 0, ft: 0 }, { along: 20, ft: 0 }], segs: [{ name: 'TMA X (D)', from: 10, to: 20, lower: 3000, upper: 6000 }] }, r = aspAhead(v, 2, 4500);
+    return !r.cur.length && r.next && Math.round(r.next.d) === 7 && !aspAhead(v, 2, 2000).next; })(), 'aspAhead');
+  // mode en vol : petite coupe avec l'avion, espace actuel et suivant
+  function cutNowHtml(lg, best, altFt) {
+    const b = lg.brief, v = b.vprofile; if (!v) return '';
+    const nm = fm.legs.filter((x) => x.brief === b && x.i < lg.i).reduce((s, x) => s + x.dist, 0) + best.along, ft = altFt ?? lg.ft ?? b.f.ft;
+    const a = aspAhead(v, nm, ft);
+    return `<div class="if-cut">${cutSvg(v, b, { pos: { nm, ft } })}</div>
+      <div class="if-row"><small>${a.cur.length ? `Dans : <b>${esc(a.cur.map((s) => s.name).join(', '))}</b>` : 'Hors espace contrôlé (classe G)'}${a.next ? ` · ensuite <b>${esc(a.next.sg.name)}</b> dans ${a.next.d.toFixed(0)} NM (${esc(a.next.sg.lowerS || a.next.sg.lower)} – ${esc(a.next.sg.upperS || a.next.sg.upper)})${a.next.sg.freq ? ' · ' + esc(a.next.sg.freq) : ''}` : ''}${altFt == null ? ' — altitude prévue (pas d\'altitude GPS)' : ''}</small></div>`;
+  }
   // écart par rapport au log : temps (heure de décollage détectée au GPS) et carburant estimé (conso du régime)
   function devHtml(lg, best, p) {
     const b = lg.brief, t0 = fm.t0[b.stage || 1]; if (!t0) return '<div class="if-row"><small>Écarts au log : en attente du décollage (Vs > 40 kt).</small></div>';
@@ -3069,6 +3368,7 @@
       </div>
       <div class="if-row ${best.d > 2 ? 'if-off' : ''}">Écart ${best.d.toFixed(1)} NM ${best.d > 0.3 ? side : ''} · arrivée ${esc(lg.brief.f.arr)} ${utc(etaDest)} (${remDest.toFixed(0)} NM)</div>
       <div class="if-row if-f">📻 ${esc(freqs(lg) || 'classe G — 123.500 / SIV')}${next ? `<br><small>Ensuite (${esc(next.from)}→${esc(next.to)}) : ${esc(freqs(next) || 'classe G')}</small>` : ''}</div>
+      ${cutNowHtml(lg, best, altFt)}
       ${devHtml(lg, best, p)}
       ${fm.divert ? divertHtml(p, v, lg) : ''}
       <div class="if-row"><button class="btn" id="if-follow">${fm.follow ? '🔒 Suivi' : '🎯 Recentrer'}</button><button class="btn" id="if-div">${fm.divert ? '✕ Fermer déroutement' : '🛬 Dérouter'}</button><button class="btn" id="if-cock">${fm.cockpit ? '🗺️ Normal' : '🖥️ Cockpit'}</button><button class="btn" id="if-stop">✕ Quitter</button></div>
@@ -3082,7 +3382,7 @@
 
   // ================================================================== historique des préparations (12)
   const HIST_CACHE = 'aww-history';
-  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres'];
+  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt'];
   function histStart(id, trip) {
     const b = trip[0], f = lastForm || b.f;
     const list = store.get('hist', []);
@@ -3159,7 +3459,7 @@
     history.replaceState(null, '', location.pathname + location.search);
     // le lien vient de l'extérieur : nombres en nombres, textes limités aux caractères d'une route (pas de HTML)
     const NUM = ['regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'empty', 'turn', 'share', 'wxres'];
-    const safe = (k, v) => NUM.includes(k) ? (Number(v) || 0) : k === 'refuel' ? !!v : String(v).replace(/[^A-Za-z0-9 ./+-]/g, '').slice(0, 120);
+    const safe = (k, v) => NUM.includes(k) ? (Number(v) || 0) : k === 'refuel' || k === 'rt' ? v === true || v === 'true' : String(v).replace(/[^A-Za-z0-9 ./+-]/g, '').slice(0, 120);
     const clean = Object.fromEntries(SHARE_KEYS.filter((k) => k in o && k !== 'time').map((k) => [k, safe(k, o[k])]));
     store.set('form', { ...store.get('form', {}), ...clean });
     openForm();
@@ -3239,7 +3539,16 @@
     return { url: cv.toDataURL('image/jpeg', 0.82), w: W, h: H, z };
   }
 
-  // Coupe verticale dans le PDF
+  // SVG -> image JPEG (fond blanc) pour le PDF
+  function svgToJpeg(svg, w, h) {
+    return new Promise((ok, ko) => {
+      const im = new Image(), url = URL.createObjectURL(new Blob([svg.replace('width="100%"', `width="${w}" height="${h}"`)], { type: 'image/svg+xml;charset=utf-8' }));
+      im.onload = () => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(im, 0, 0, w, h); URL.revokeObjectURL(url); ok(cv.toDataURL('image/jpeg', 0.85)); };
+      im.onerror = () => { URL.revokeObjectURL(url); ko(new Error('SVG illisible')); };
+      im.src = url;
+    });
+  }
+  // Coupe verticale dans le PDF (secours si l'image ne peut pas être faite)
   function drawProfilePdf(doc, b, x0, y0, w, h) {
     const v = b.vprofile; if (!v) return;
     const top = Math.max(b.f.ft + 2000, v.maxTer + 1500, 3000);

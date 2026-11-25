@@ -962,8 +962,11 @@
     return `<h4>PPR / stationnement</h4>
       ${(e.ppr || []).length ? `<ul class="ppr">${e.ppr.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '<p class="meta">Pas de consigne PPR relevée dans la VAC.</p>'}
       ${e.exploitant ? `<p class="meta">Exploitant : ${esc(e.exploitant)}</p>` : ''}
+      ${e.mail_escale ? `<p style="margin:4px 0"><b>Contact pour l'escale :</b> <button class="btn primary" data-ppr-mail="${esc(e.mail_escale)}">✉️ ${esc(e.mail_escale)}</button>
+        <span class="meta">${esc(((e.contacts || []).find((c) => c.m === e.mail_escale) || {}).r || '')}${((e.contacts || []).find((c) => c.m === e.mail_escale) || {}).src ? ' · relevé hors VAC, à vérifier' : ' · VAC'}</span></p>`
+        : '<p class="meta">Pas d\'e-mail d\'escale publié : appeler le terrain (numéros ci-dessous).</p>'}
       <div class="row">
-        ${mails.map((m) => `<button class="btn" data-ppr-mail="${esc(m)}">✉️ ${esc(m)}</button>`).join('')}
+        ${(e.contacts || mails.map((m) => ({ m }))).filter((c) => c.m !== e.mail_escale).map((c) => `<button class="btn" data-ppr-mail="${esc(c.m)}">✉️ ${esc(c.m)}${c.r ? ` <small>(${esc(c.r)})</small>` : ''}</button>`).join('')}
         ${tels.map((t) => `<a class="btn" href="tel:${esc(t.replace(/\s/g, ''))}">📞 ${esc(t)}</a>`).join('')}
         ${web.map((u) => `<button class="btn" data-ext="${esc(u)}">🌐 ${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40))}</button>`).join('')}
         <button class="btn" data-ppr-copy="1">📋 Copier une demande type</button>
@@ -982,7 +985,7 @@
       subject: `Demande PPR / stationnement ${icao} — ${reg}`,
       body: `Bonjour,\n\nJe souhaiterais me poser à ${a.name} (${icao}) ${st ? 'le ' + arr : arr} (heure locale), départ prévu ${dep}.\n`
         + `Avion : ${reg}${f.reg && f.immat && f.immat !== f.reg ? ' (' + f.reg + ')' : ''}, aviation générale, vol privé VFR, avion léger.\n\n`
-        + `Pourriez-vous me confirmer l'accord (PPR si nécessaire) et une place de stationnement, ainsi que les conditions (taxe d'atterrissage, carburant, accès) ?\n\n`
+        + `Pourriez-vous me confirmer l'accord (PPR si nécessaire) et une place de stationnement, ainsi que les informations d'escale : horaires d'ouverture, carburant disponible${st && st.trip && st.trip[st.stage] ? ` (besoin d'environ ${Math.max(0, Math.round(st.trip[st.stage].loaded - Math.max(0, st.loaded - st.totFuel)))} L de ${st.f.T.fuel.name.split(' (')[0]})` : ''} et moyens de paiement, taxe d'atterrissage, accès et restauration ?\n\n`
         + `Pilote : …\nTéléphone : …\n\nMerci par avance, cordialement.`,
     };
   }
@@ -1402,7 +1405,7 @@
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
     metars, tafs, aptByIcao, APTS, SOURCES,
     showStack: (la, lo, t) => showStack(la, lo, t),
-    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor,
+    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor, pprText,
     showPanel(title, html) { showList(title, html); },
     detailBody, detail, store, highlight,
     setPickOff(v) { pickOff = v; },

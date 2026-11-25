@@ -358,3 +358,4 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 /* coupe verticale en grand : bandeau en bas de l'écran */
 #vp-big { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1800; max-height: 70vh; overflow: auto; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: #0d1b2a; color: #fff; border-top: 2px solid #39c; box-shadow: 0 -4px 16px rgba(0,0,0,.5); }
 #vp-big svg { width: 100%; height: auto; max-height: 55vh; margin: 6px 0; }
+#inflight .if-cut svg { max-height: 120px; }

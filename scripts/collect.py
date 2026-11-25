@@ -292,6 +292,35 @@ def collect_supaip():
             out.append({'num': num, 'title': title, 'url': url, 'from': dates[0] if dates else None,
                         'to': dates[1] if len(dates) > 1 else None, 'ifr': flags['IFR'], 'vfr': flags['VFR'],
                         'places': zone, 'outside': bool(places) and not zone})
+        # zones temporaires : PDF lu une fois (repris du fichier précédent tant que le numéro ne change pas)
+        # zones déjà lues : version publiée (la collecte ne réécrit pas le dépôt), sinon fichier local
+        prev = {}
+        for src in (lambda: json.loads(get(f'{FALLBACK_URL}/data/live/supaip.json', timeout=30)), lambda: json.load(open(os.path.join(OUT, 'supaip.json'), encoding='utf-8'))):
+            try:
+                prev.update({x['num']: x.get('zones') for x in src().get('data', []) if x.get('zones') is not None and x['num'] not in prev})
+            except Exception:  # noqa: BLE001
+                pass
+        import io
+        import pypdf
+        n_dl = 0
+        for x in out:
+            if not SUP_ZONE_RE.search(x['title']):
+                continue
+            if x['num'] in prev:
+                x['zones'] = prev[x['num']]
+                continue
+            if n_dl >= 40:
+                continue
+            try:
+                n_dl += 1
+                url = x['url'] if x['url'].startswith('http') else 'https://www.sia.aviation-civile.gouv.fr' + x['url']
+                with opener.open(urllib.request.Request(url, headers={'User-Agent': UA}), timeout=60) as r:
+                    pdf = pypdf.PdfReader(io.BytesIO(r.read()))
+                zs = sup_zones('\n'.join(p.extract_text() or '' for p in pdf.pages))
+                x['zones'] = [z for z in zs if any(in_zone(la, lo) for la, lo in z['poly'])]
+            except Exception as e:  # noqa: BLE001
+                print('  SUP', x['num'], ': PDF illisible', e)
+        print(f'  zones temporaires lues : {sum(len(x.get("zones") or []) for x in out)} ({n_dl} PDF téléchargés)')
         print(f'  {len(out)} SUP AIP, {sum(1 for x in out if x["places"])} localisés dans la zone')
         if not out:
             raise RuntimeError('liste vide')
@@ -299,6 +328,55 @@ def collect_supaip():
     except Exception as e:  # noqa: BLE001
         print('  SUP AIP : échec', e)
         fallback('supaip.json')
+
+
+# ---------------------------------------------------------------- SUP AIP : zones temporaires (ZRT, ZDT, ZIT) lues dans le PDF
+SUP_ZONE_RE = re.compile(r'\bZ[RDI]T\b|zones? (?:r[ée]glement[ée]e|dangereuse|interdite)', re.I)
+_DMS = r"(\d{2})°\s?(\d{2})['’]\s?(\d{2}(?:[.,]\d+)?)(?:\"|''|’’)?\s?([NS])\s*[,\-–]?\s*(\d{3})°\s?(\d{2})['’]\s?(\d{2}(?:[.,]\d+)?)(?:\"|''|’’)?\s?([EW])"
+
+
+def _sup_dms(m, k=0):
+    la = int(m[k]) + int(m[k + 1]) / 60 + float(m[k + 2].replace(',', '.')) / 3600
+    lo = int(m[k + 4]) + int(m[k + 5]) / 60 + float(m[k + 6].replace(',', '.')) / 3600
+    return [round(-la if m[k + 3] == 'S' else la, 5), round(-lo if m[k + 7] == 'W' else lo, 5)]
+
+
+def sup_zones(text):
+    """Zones d'un SUP AIP : contour (points ou cercle), limites verticales, créneaux d'activité.
+    Mise en page en colonnes (plusieurs zones côte à côte) : zones gardées dans l'ordre, limites associées si leur nombre correspond."""
+    t = text.replace('’’', '"').replace("''", '"')
+    sec = re.split(r'LIMITES LAT[ÉE]RALES ET VERTICALES', t, flags=re.I)
+    if len(sec) < 2:
+        return []
+    body = re.split(r'ORGANISMES? [ÀA] CONTACTER|CONTACTS?\n|DISPOSITIONS COMPL', sec[1])[0]
+    names = [re.sub(r'\s+', ' ', n).strip() for n in re.findall(r"(Z[RDI]T [A-Za-z0-9'ÉÈéèçÇ .-]+?)(?= Z[RDI]T |\n|$)", body)]
+    names = list(dict.fromkeys(n for n in names if len(n) > 5))
+    polys = []
+    for blk in re.split(r'LIMITES LAT[ÉE]RALES', body, flags=re.I)[1:]:
+        blk = re.split(r'LIMITES VERTICALES', blk, flags=re.I)[0]
+        c = re.search(r'cercle de (\d+(?:[.,]\d+)?)\s?(NM|km)[^\n]*?\n?[^\n]*?' + _DMS, blk, re.I | re.S)
+        if c:
+            r = float(c.group(1).replace(',', '.')) / (1.852 if c.group(2).lower() == 'km' else 1)
+            la, lo = _sup_dms(c.groups(), 2)
+            polys.append([[round(la + r / 60 * math.cos(math.radians(a)), 5), round(lo + r / 60 * math.sin(math.radians(a)) / math.cos(math.radians(la)), 5)] for a in range(0, 360, 15)])
+            continue
+        pts = [_sup_dms(m) for m in re.findall(_DMS, blk)]
+        if len(pts) >= 3:
+            polys.append(pts)
+    vert = [(lo.strip(), up.strip()) for lo, up in re.findall(r'LIMITES VERTICALES\s*\n?\s*([^\n/]{2,25}?)\s*/\s*([^\n]{2,25})', body, re.I)]
+    act = re.split(r'INFORMATION DES USAGERS|GESTIONNAIRE', (re.split(r'DATES ET HEURES D.ACTIVIT[ÉE]', t, flags=re.I) + [''])[1])[0]
+    hours = sorted({(a, b) for a, b in re.findall(r'\bde (\d{4}) [àa] (\d{4})', act)})
+    h24 = bool(re.search(r'H\s?24', act))
+    out = []
+    for i, poly in enumerate(polys):
+        lo, up = vert[i] if len(vert) == len(polys) else vert[0] if len(vert) == 1 else ('?', '?')
+        out.append({'name': names[i] if len(names) == len(polys) else (names[0] + (f' ({i + 1})' if len(polys) > 1 else '') if names else f'zone {i + 1}'),
+                    'lower': lo, 'upper': up, 'poly': poly, 'hours': [list(h) for h in hours], 'h24': h24 and not hours})
+    return out
+
+
+_T = 'LIMITES LATERALES ET VERTICALES\nZRT TEST\nLIMITES LATÉRALES\n45°18\'14"N, 000°56\'09"W\n45°17\'36"N, 000°55\'51"W\n45°16\'46"N, 000°51\'34"W\nLIMITES VERTICALES\nSFC / 330 ft ASFC\nORGANISMES A CONTACTER'
+assert sup_zones(_T) == [{'name': 'ZRT TEST', 'lower': 'SFC', 'upper': '330 ft ASFC', 'poly': [[45.30389, -0.93583], [45.29333, -0.93083], [45.27944, -0.85944]], 'hours': [], 'h24': False}], sup_zones(_T)
 
 
 # ---------------------------------------------------------------- AIP : cycle AIRAC, zones P/R/D, VAC
@@ -1097,13 +1175,77 @@ def ppr_contacts(v):
         if s not in snips and not any(s in x for x in snips):
             snips.append(s)
     allt = '\n'.join(lines)
-    mails = sorted({m.rstrip('.') for m in MAIL_RE.findall(allt)})
+    raw = [(x.group(0), vac_section(allt, x.end())) for x in MAIL_RE.finditer(allt)]
+    # morceau d'adresse coupée en fin de ligne dans le PDF (« yrenees-ctlld@… » pour « sna-so-pyrenees-ctl-ld@… ») : ignoré
+    full = {clean_mail(m) for m, _ in raw}
+    raw = [(m, sec) for m, sec in raw if not any(o != clean_mail(m) and o.replace('-', '').endswith(clean_mail(m).replace('-', '')) for o in full)]
+    mails = sorted({clean_mail(m) for m, _ in raw})
     web = sorted({u.rstrip('.') for u in URL_RE.findall(allt)})
-    return {'ppr': snips[:4], 'mails': mails[:4], 'web': web[:3]}
+    # contacts classés : le bon interlocuteur pour une escale d'abord (jamais la douane, l'armée ou un atelier)
+    roles = {}
+    for m, sec in raw:
+        roles.setdefault(clean_mail(m), mail_role(m, sec))
+    contacts = sorted(({'m': m, 'r': r} for m, r in roles.items()), key=lambda c: (ROLE_RANK.get(c['r'], 9), c['m']))
+    best = next((c['m'] for c in contacts if c['r'] not in ('douane', 'militaire', 'atelier')), None)
+    return {'ppr': snips[:4], 'mails': mails[:6], 'web': web[:3], 'contacts': contacts[:6], 'mail_escale': best}
+
+
+MANUAL_CONTACTS = os.path.join(ROOT, 'data', 'contacts.json')
+
+
+def with_manual(icao, es):
+    """Terrains sans e-mail dans la VAC : contact public relevé à la main (data/contacts.json, avec sa source)."""
+    if es.get('mail_escale') or not os.path.exists(MANUAL_CONTACTS):
+        return es
+    c = json.load(open(MANUAL_CONTACTS, encoding='utf-8')).get(icao)
+    if not c:
+        return es
+    return {**es, 'mail_escale': c.get('mail'), 'contacts': [{'m': c['mail'], 'r': c.get('role', 'autre'), 'src': c.get('src')}] + (es.get('contacts') or []) if c.get('mail') else es.get('contacts') or [],
+            'web': (es.get('web') or []) + ([c['web']] if c.get('web') else []), 'tel_ad': (es.get('tel_ad') or []) + ([c['tel']] if c.get('tel') else [])}
+
+
+ROLE_RANK = {'escale': 0, 'exploitant': 1, 'aéroclub': 2, 'AFIS / contrôle': 3, 'carburant': 4, 'autre': 5, 'atelier': 7, 'militaire': 8, 'douane': 8}
+
+
+def clean_mail(m):
+    """Adresse telle que recopiée du PDF : mot collé derrière (« …frACB », « …frATS »), point ou tiret final."""
+    m = re.sub(r'(\.[a-zA-Z]{2,6}?)(?:\.?[A-Z][\wé]*|[-.]+)$', r'\1', m)
+    return m.lower()
+
+
+# rubriques numérotées de la VAC (le titre suit son contenu : « …E-mail : x@y.fr Exploitant d'aérodrome / AD operator :4 - »)
+VAC_SECTION_ROLE = {'2': 'AFIS / contrôle', '3': 'AFIS / contrôle', '4': 'exploitant', '9': 'douane', '10': 'carburant', '14': 'atelier', '15': 'aéroclub'}
+
+
+def vac_section(txt, pos):
+    m = re.search(r' ?:(\d{1,2}) -', txt[pos:pos + 400])
+    return m.group(1) if m else None
+
+
+def mail_role(m, sec=None):
+    """Rôle probable d'une adresse : rubrique de la VAC, mot collé derrière (ACB = aéroclub, ATS, FBO…), nom de l'adresse."""
+    low, tail = m.lower(), (re.search(r'\.[a-z]{2,6}\.?([A-Z][\wé]*)$', m) or [None, ''])[1]
+    if 'douane' in low: return 'douane'
+    if re.search(r'^(escale|ops|trafic|operations?)\b|escale', low): return 'escale'
+    if sec in VAC_SECTION_ROLE: return VAC_SECTION_ROLE[sec]
+    if re.search(r'intradef|defense\.gouv|\.mil\b', low): return 'militaire'
+    if tail.startswith('Répar') or re.search(r'meca|atelier|maint', low): return 'atelier'
+    if re.search(r'^(escale|ops|trafic|operations?)\b|escale', low): return 'escale'
+    if tail == 'ACB' or re.search(r'aero.?club|^ac[a-z.-]*@|club', low): return 'aéroclub'
+    if tail in ('ATS', 'AFIS') or re.search(r'afis|twr|^tour@|ctl|aviation-civile', low): return 'AFIS / contrôle'
+    if re.search(r'avitaill|fuel|carbu', low): return 'carburant'
+    if tail == 'FBO' or re.search(r'aerodrome|aeroport|airport|exploitation|mairie|^cc-|agglo|accueil|^contact@|gestion|ville', low): return 'exploitant'
+    return 'autre'
+
+
+assert clean_mail('contact@aeroluchon.frACB') == 'contact@aeroluchon.fr' and clean_mail('accotedamour@orange.fr.ACB') == 'accotedamour@orange.fr' and clean_mail('ops.tarbes-lourdes@aeroports-laregion.fr-') == 'ops.tarbes-lourdes@aeroports-laregion.fr'
+assert clean_mail('larochesuryon.aerodrome@vendee.ccI.fr') == 'larochesuryon.aerodrome@vendee.cci.fr'
+assert mail_role('aeroclub09@gmail.comACB') == 'aéroclub' and mail_role('bsi-pau@douane.finances.gouv.fr') == 'douane' and mail_role('escale@aeroport-agen.fr') == 'escale' and mail_role('cao@marsaero.frRéparations') == 'atelier'
 
 
 assert ppr_contacts({'infos': 'PPR 48 HR par/ by TEL : 06 08 53 01 67\nE-mail : bsi-pau@douane.finances.gouv.fr'}) == {
-    'ppr': ['PPR 48 HR par/ by TEL : 06 08 53 01 67 E-mail : bsi-pau@douane.finances.gouv.fr'], 'mails': ['bsi-pau@douane.finances.gouv.fr'], 'web': []}
+    'ppr': ['PPR 48 HR par/ by TEL : 06 08 53 01 67 E-mail : bsi-pau@douane.finances.gouv.fr'], 'mails': ['bsi-pau@douane.finances.gouv.fr'], 'web': [],
+    'contacts': [{'m': 'bsi-pau@douane.finances.gouv.fr', 'r': 'douane'}], 'mail_escale': None}
 
 
 VIG_PH = [('wind', 'vent violent'), ('snow', 'neige-verglas'), ('ice', 'neige-verglas'), ('thunder', 'orages'), ('fog', 'brouillard'),
@@ -1258,5 +1400,5 @@ if __name__ == '__main__':
             save('vfr_points.json', {'source': f"SIA - VAC du cycle {vac.get('cycle')} (+ export XML SIA du {old.get('effDate')} pour {len(kept)} terrains)",
                                      'effDate': vac.get('cycle'), 'data': {**kept, **pts}})
         save('escale.json', {'generated': vac.get('generated'), 'cycle': vac.get('cycle'),
-                             'data': {k: {'escale': {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or [], 'pratique': vie_pratique(v), 'osm': osm.get(k, {})}} for k, v in (vac.get('data') or {}).items()}})
+                             'data': {k: {'escale': with_manual(k, {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or [], 'pratique': vie_pratique(v), 'osm': osm.get(k, {})})} for k, v in (vac.get('data') or {}).items()}})
     write_status()

@@ -1,0 +1,293 @@
+{
+ "_note": "Terrains sans e-mail dans la VAC : contact public relevé sur airfield.directory (à vérifier). Repris par scripts/collect.py (with_manual).",
+ "LFAJ": {
+  "mail": "contact@aeroclub-argentan.org",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFAJ (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFAO": {
+  "mail": "ac-andaines@orange.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFAO (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFAX": {
+  "mail": "acmortagne@wanadoo.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFAX (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclubmortagne@gmail.com"
+  ]
+ },
+ "LFBD": {
+  "mail": "lfbd@aviavip.com",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFBD (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFBZ": {
+  "mail": "aviationgenerale@biarritz.aeroport.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFBZ (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCD": {
+  "mail": "contact@aeroclubandernos.com",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFCD (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCF": {
+  "mail": "aeroclubfigeaclivernon@orange.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFCF (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCH": {
+  "mail": "aerodrome@agglo-cobas.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFCH (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCL": {
+  "mail": "aerodrometoulouselasbordes@toulouse-metropole.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFCL (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCO": {
+  "mail": "bureau@aeroclub-oloron.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFCO (relevé le 2026-11-25)",
+  "alt": [
+   "aerocluboloron@gmail.com"
+  ]
+ },
+ "LFCU": {
+  "mail": "aeroclub-ussel@hotmail.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFCU (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFCW": {
+  "mail": "info@aeroclub-villeneuve.com",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFCW (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFDA": {
+  "mail": "contact@aeroclub-aire.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFDA (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFDG": {
+  "mail": "gaillacois.aeroclub@wanadoo.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFDG (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFDL": {
+  "mail": "contact@aeroclubloudun.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFDL (relevé le 2026-11-25)",
+  "alt": [
+   "michel.richez@free.fr"
+  ]
+ },
+ "LFDP": {
+  "mail": "contact.ailesoleronaises@gmail.com",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFDP (relevé le 2026-11-25)",
+  "alt": [
+   "ailesoleronaises@gmail.com"
+  ]
+ },
+ "LFDR": {
+  "mail": "p.archambaud@aliceadsl.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFDR (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFDT": {
+  "mail": "aeroclub.bigorre@tiscali.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFDT (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFDV": {
+  "mail": "contact@civraisienpoitou.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFDV (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclub-couhe-verac@wanadoo.fr",
+   "plateformeaeronautique@gmail.com"
+  ]
+ },
+ "LFEA": {
+  "mail": "info@belle-ile.com",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFEA (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclub.belleile@gmail.com"
+  ]
+ },
+ "LFEJ": {
+  "mail": "lfej@free.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFEJ (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFEL": {
+  "mail": "aeroclubdublanc.aerodrome@neuf.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFEL (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFFI": {
+  "mail": "operations@ancenis.aeroport.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFFI (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFIG": {
+  "mail": "courriel@aeroclub-cassagnes.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFIG (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclub.segala@free.fr",
+   "remy.byache@gmail.com"
+  ]
+ },
+ "LFIL": {
+  "mail": "accueil@riondeslandes.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFIL (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFIM": {
+  "mail": "contact@planeur-saintgaudens.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFIM (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclub.comminges@gmail.com",
+   "ppc31@orange.fr"
+  ]
+ },
+ "LFIX": {
+  "mail": "aeroclub-itxassou@orange.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFIX (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFIY": {
+  "mail": "aeroclub.angerien@orange.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFIY (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFJB": {
+  "mail": "contact@aeroclubdubocage79.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFJB (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFJH": {
+  "mail": "aeroclubpalaminy@orange.fr",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFJH (relevé le 2026-11-25)",
+  "alt": [
+   "mickael127@hotmail.com"
+  ]
+ },
+ "LFJI": {
+  "mail": "aero.albert.baron@hotmail.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFJI (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFJT": {
+  "mail": "contact@touraine-planeur.org",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFJT (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFMG": {
+  "mail": "vvmontagnenoire@gmail.com",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFMG (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFNQ": {
+  "mail": "planeurlallagonne.contact@gmail.com",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFNQ (relevé le 2026-11-25)",
+  "alt": [
+   "planeurlallagonne@orange.fr"
+  ]
+ },
+ "LFNW": {
+  "mail": "clubpuivert@gmail.com",
+  "role": "aéroclub",
+  "src": "airfield.directory/airfield/LFNW (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFOF": {
+  "mail": "contact@aeroclub-alencon.org",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFOF (relevé le 2026-11-25)",
+  "alt": [
+   "acalenc@aol.com"
+  ]
+ },
+ "LFOG": {
+  "mail": "accueil@flers-agglo.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFOG (relevé le 2026-11-25)",
+  "alt": [
+   "aeroclubdeflers.conde@gmail.com"
+  ]
+ },
+ "LFRF": {
+  "mail": "thierry.leteissier@manche.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFRF (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFRP": {
+  "mail": "contact@planeurs-broceliande.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFRP (relevé le 2026-11-25)",
+  "alt": [
+   "j.jagoury@ploermel.com"
+  ]
+ },
+ "LFRW": {
+  "mail": "contact@aeroclub-avranches.org",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFRW (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFTQ": {
+  "mail": "aerodrome.pouance@gmail.com",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFTQ (relevé le 2026-11-25)",
+  "alt": [
+   "jean.r.troadec@gmail.com",
+   "langlaisfrancois@hotmail.fr"
+  ]
+ },
+ "LFYR": {
+  "mail": "contact@ac-sologne.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFYR (relevé le 2026-11-25)",
+  "alt": []
+ },
+ "LFYS": {
+  "mail": "svop@club-internet.fr",
+  "role": "exploitant",
+  "src": "airfield.directory/airfield/LFYS (relevé le 2026-11-25)",
+  "alt": []
+ }
+}

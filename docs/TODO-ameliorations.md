@@ -11,13 +11,13 @@ Règles du projet (à respecter) :
 - textes de l'interface en français simple ; ne jamais inventer de données (performances, contacts) : sinon « à vérifier ».
 
 ## Météo et sécurité
-- [ ] 10. Plafond et visibilité à l'heure de passage pour chaque terrain de déroutement ; lesquels restent utilisables.
-- [ ] 11. Turbulence et cisaillement : vent fort près du sol au décollage / à l'atterrissage, turbulence près des crêtes.
-- [ ] 12. Brouillard et stratus : risque de formation / levée (écart T / Td, heure, saison).
-- [ ] 13. Orages : heure de début probable le long de la route (CAPE, précipitations), alerte « rentrer avant ».
-- [ ] 33. Fenêtre météo du jour : frise heure par heure (départ, route, arrivée) favorable / marginal / défavorable.
-- [ ] 34. TAF et METAR traduits en phrases courtes en français.
-- [ ] 35. Tendance par rapport à la préparation précédente (amélioration / dégradation).
+- [x] 10. Plafond et visibilité à l'heure de passage pour chaque terrain de déroutement ; lesquels restent utilisables.
+- [x] 11. Turbulence et cisaillement : vent fort près du sol au décollage / à l'atterrissage, turbulence près des crêtes.
+- [x] 12. Brouillard et stratus : risque de formation / levée (écart T / Td, heure, saison).
+- [x] 13. Orages : heure de début probable le long de la route (CAPE, précipitations), alerte « rentrer avant ».
+- [x] 33. Fenêtre météo du jour : frise heure par heure (départ, route, arrivée) favorable / marginal / défavorable.
+- [x] 34. TAF et METAR traduits en phrases courtes en français.
+- [x] 35. Tendance par rapport à la préparation précédente (amélioration / dégradation).
 
 ## Masse, carburant, performances
 - [ ] 7. Masse au décollage par étape (passagers / bagages différents à chaque escale).

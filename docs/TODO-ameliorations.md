@@ -33,10 +33,10 @@ Règles du projet (à respecter) :
 - [x] 29. Avitaillement optimisé en voyage (où faire le plein).
 
 ## Route et navigation
-- [ ] 6. Itinéraire par les points VFR et repères évidents (élèves).
-- [ ] 21. 2 ou 3 routes proposées et comparées (directe, facile, repères).
-- [ ] 22. Points tournants suggérés sur des repères évidents tous les 15-20 NM.
-- [ ] 23. Contrôle de l'estime par branche : repère attendu à la minute Y, sinon action.
+- [x] 6. Itinéraire par les points VFR et repères évidents (élèves).
+- [x] 21. 2 ou 3 routes proposées et comparées (directe, facile, repères).
+- [x] 22. Points tournants suggérés sur des repères évidents tous les 15-20 NM.
+- [x] 23. Contrôle de l'estime par branche : repère attendu à la minute Y, sinon action.
 - [x] 24. Point de début de descente (TOD), vario conseillé, heure de passage.
 
 ## Documents

@@ -934,6 +934,8 @@
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
+    ['pf-lmk1', 'pf-lmk2'].forEach((id) => on(id, (e) => { $('#pf-wps').value = e.target.dataset.wps; $('#pf-exit').value = 'none'; run(false); }));
+    on('pf-routes', compareRoutes);
     document.querySelectorAll('#pf-out [data-setalt]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { if (b.stage && b.stage < b.nStages) { const st = ($('#pf-stalts').value || '').split(/\s+/); st[b.stage - 1] = el.dataset.setalt; $('#pf-stalts').value = st.join(' ').trim(); } else $('#pf-alt').value = el.dataset.setalt; run(false); }));
     on('pf-watch', (e) => watchToggle(b.trip || [b], e.target));
     document.querySelectorAll('#pf-out [data-esc-mail]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', (e) => {
@@ -2467,6 +2469,66 @@
       <p class="meta">Villes de plus de 1500 habitants, autoroutes, rivières principales et lacs (OpenStreetMap). À compléter avec la carte OACI (châteaux d'eau, lignes HT, voies ferrées).</p></details>`;
   }
 
+  // ---------- repères évidents le long de la route directe -> points tournants suggérés (22) ou itinéraire « élève » (6)
+  // pas : un point tous les ~step NM, à moins de dev NM de la route ; priorité aux grandes villes, lacs, croisements d'autoroutes
+  function landmarkRoute(b, step = 17, dev = 3) {
+    const D = LANDM || { towns: [] }, a = b.pts[0], z = b.pts[b.pts.length - 1], tot = distNm(a, z), tc = bearing(a, z);
+    if (tot < step * 1.4) return [];
+    const cands = [];
+    for (const [n, la, lo, pop] of D.towns) { if (pop < 3000) continue; const r = routeDist([la, lo], [a, z]); if (r.d <= dev && r.along > 5 && r.along < tot - 5) cands.push({ n, p: [la, lo], along: r.along, d: r.d, w: Math.log10(pop) - r.d * .15 }); }
+    for (const [n, la, lo, km2] of D.lk || []) { const r = routeDist([la, lo], [a, z]); if (r.d <= dev + 1 && r.along > 5 && r.along < tot - 5) cands.push({ n, p: [la, lo], along: r.along, d: r.d, w: 4.5 + km2 / 40 }); }
+    const out = [];
+    for (let k = 1; k * step < tot - step * 0.5; k++) {
+      const c = cands.filter((x) => Math.abs(x.along - k * step) <= step * 0.4 && !out.includes(x)).sort((x, y) => y.w - x.w)[0];
+      if (c) out.push(c);
+    }
+    return out.map((c) => ({ ...c, tok: `${c.p[0].toFixed(4)}/${c.p[1].toFixed(4)}` }));
+  }
+  function landmarkHtml(b, sfx) {
+    if (b.stage > 1 || b.legs.length > 4) return '';
+    const L1 = landmarkRoute(b), L2 = landmarkRoute(b, 12, 6);
+    if (!L1.length && !L2.length) return '';
+    const one = (L0, id, lbl) => L0.length ? `<p class="meta">${lbl} : ${L0.map((c) => `<b>${esc(c.n)}</b> (${c.along.toFixed(0)} NM)`).join(' → ')} <button class="btn" data-wps="${esc(L0.map((c) => c.tok).join(' '))}" id="${id}${sfx}">Utiliser</button></p>` : '';
+    return `<details><summary><b>📍 Points tournants sur des repères évidents</b></summary>
+      ${one(L1, 'pf-lmk1', '22 · Repères tous les ~17 NM, à moins de 3 NM de la route directe')}
+      ${one(L2, 'pf-lmk2', 'Itinéraire « élève » : un repère tous les ~12 NM, quitte à s\'écarter jusqu\'à 6 NM')}
+      <p class="meta">Villes de plus de 3000 habitants et grands lacs. « Utiliser » remplace les points tournants du formulaire et recalcule (points libres PT1, PT2… dans le log).</p></details>`;
+  }
+  // ---------- contrôle de l'estime par branche (23)
+  function deadReckoning(b) {
+    return landmarksOf(b).map((x) => {
+      const t0 = x.lg.eto.getTime() - x.lg.min * 6e4, cps = x.list.filter((t) => t.min >= 3).reduce((l, t) => (l.length < 3 && (!l.length || t.min - l[l.length - 1].min >= 4) ? [...l, t] : l), []);   // repères espacés d'au moins 4 min
+      return { lg: x.lg, t0, cps: cps.map((c, i) => ({ ...c, at: new Date(t0 + c.min * 6e4), next: cps[i + 1] })) };
+    });
+  }
+  function drHtml(b) {
+    const R = deadReckoning(b); if (!R.some((x) => x.cps.length)) return '';
+    return `<details><summary><b>⏱️ Contrôle de l'estime</b> (repères attendus et conduite à tenir)</summary>
+      ${R.map((x) => `<p class="meta" style="margin:3px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> · Cm ${r3(x.lg.hm)}° · ${x.lg.min} min${x.cps.length ? '<br>' + x.cps.map((c) => `${utc(c.at)} (+${c.min}') : ${c.k} ${esc(c.n)} ${esc(c.side)} — si rien à +2 min : vérifier cap, conservateur et vent ; à +5 min : ${c.next ? `chercher ${esc(c.next.n)} (+${c.next.min}')` : `revenir au dernier repère sûr`} ou demander l'aide du SIV`).join('<br>') : ' — peu de repères : tenir le cap et le temps, demander l\'aide du SIV en cas de doute'}</p>`).join('')}
+      <p class="meta">Heures UTC calculées au vent prévu. Garder la carte en main : ces repères complètent l'estime, ils ne la remplacent pas.</p></details>`;
+  }
+  // ---------- comparaison de 2 ou 3 routes (21) : directe, VFR facile, par repères
+  async function compareRoutes() {
+    const prog = $('#pf-prog');
+    try {
+      const f = readForm(), b0 = lastTrip && lastTrip[0]; if (!b0) { prog.textContent = 'Calcule d\'abord la route.'; return; }
+      const L0 = landmarkRoute(b0, 12, 6), variants = [['Directe', { ...f, wps: '', avoid: 'p+rtba', stages: '', rt: false }], ['VFR facile', { ...f, wps: '', avoid: 'easy', stages: '', rt: false }]];
+      if (L0.length) variants.push(['Par repères', { ...f, wps: L0.map((c) => c.tok).join(' '), avoid: 'p+rtba', stages: '', rt: false, exit: 'none', entry: 'auto' }]);
+      const res = [];
+      for (const [n, fv] of variants) { prog.textContent = `Comparaison des routes : ${n}…`; const t = await buildTrip(fv); res.push([n, fv, t[0]]); }
+      const row = (l, f2) => `<tr><td style="text-align:left">${l}</td>${res.map(([, , b]) => `<td>${f2(b)}</td>`).join('')}</tr>`;
+      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>🗺️ Comparaison des routes</h4><table class="legs"><tr><th></th>${res.map(([n]) => `<th>${esc(n)}</th>`).join('')}</tr>
+        ${row('Distance', (b) => b.totDist.toFixed(0) + ' NM')}${row('Temps', (b) => hhmm(b.totMin))}${row('Carburant', (b) => b.totFuel + ' L')}
+        ${row('Espaces traversés à l\'altitude prévue', (b) => (b.vprofile ? b.vprofile.conflicts.length : '?'))}${row('Zones R / D / ZRT traversées', (b) => b.zones.filter((x) => x.crossed && x.below && x.z.type !== 'P').length)}
+        ${row('Relief max', (b) => (b.vprofile ? b.vprofile.maxTer + ' ft' : '?'))}${row('Plus loin d\'un terrain', (b) => Math.max(...diversions(b).map((x) => x.worst.d)).toFixed(0) + ' NM')}
+        ${row('Branches sans altitude possible', (b) => (b.optAlt ? b.optAlt.plan.filter((c) => c.hard.length).length : '?'))}
+        <tr><td></td>${res.map(([n], i) => `<td><button class="btn" data-route="${i}">Choisir</button></td>`).join('')}</tr></table>
+        <p class="meta">Même avion, même altitude, même heure. « Choisir » remplit le formulaire avec cette route et recalcule.</p>`);
+      document.querySelectorAll('#pf-out [data-route]').forEach((el) => el.addEventListener('click', () => { const fv = res[+el.dataset.route][1]; $('#pf-wps').value = fv.wps; $('#pf-avoid').value = fv.avoid; if (fv.exit === 'none') $('#pf-exit').value = 'none'; run(false); }));
+      prog.textContent = '';
+    } catch (e) { console.error(e); prog.textContent = e.message || String(e); }
+  }
+
   // ---------- terrains de déroutement le long de la route
   const DIVERT_NM = 15;
   function diversions(b) {
@@ -2812,7 +2874,7 @@
     const nt = b.night;
     return `
       ${changesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button>${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">🗺️ Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
       <table class="legs"><tr><th>Branche</th><th>Alt.</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
@@ -2832,6 +2894,8 @@
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
       ${landmarksHtml(b)}
+      ${drHtml(b)}
+      ${landmarkHtml(b, sfx)}
       ${altCmpHtml(b)}
       ${loadHtml(b)}
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
@@ -3425,6 +3489,11 @@
     }
     const semi = semiCircular(b);
     if (semi.length) para(`Règle semi-circulaire (au-dessus de 3000 ft sol : Rm 000-179 milliers impairs + 500, Rm 180-359 milliers pairs + 500) : ${semi.map((x) => `${x.lg.from}-${x.lg.to} Rm ${r3(x.lg.tm)} -> ${x.sug || '?'} ft`).join(' ; ')}.`, { size: 8, color: [170, 40, 0] });
+    const drr = deadReckoning(b);
+    if (drr.some((x) => x.cps.length)) {
+      h2('Contrôle de l\'estime');
+      table(['Branche', 'Repères attendus (heure UTC, minute, côté) — si rien à +2 min : vérifier cap et vent ; à +5 min : repère suivant ou SIV'], drr.map((x) => [`${x.lg.from} -> ${x.lg.to}\nCm ${r3(x.lg.hm)} - ${x.lg.min} min`, x.cps.map((c) => `${utc(c.at)} (+${c.min}') ${c.n} (${c.side})`).join('\n') || 'peu de repères : cap et temps']), { size: 7.3 });
+    }
     const lmk = landmarksOf(b);
     if (lmk.some((x) => x.list.length)) {
       h2('Repères visuels par branche');

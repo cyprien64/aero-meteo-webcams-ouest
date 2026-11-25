@@ -26,18 +26,18 @@ Règles du projet (à respecter) :
 - [x] 32. Altitude-densité de chaque terrain le jour du vol, alerte en été / montagne.
 
 ## Terrains et escales
-- [ ] 25. Intégration au terrain d'arrivée : point d'entrée, altitude du tour de piste, côté, piste probable.
-- [ ] 26. Fiche escale complète par terrain en une carte (horaires du jour, PPR, carburant, paiement, taxe, restaurant, transport).
-- [ ] 27. Horaires des terrains de dégagement vérifiés à l'heure prévue.
-- [ ] 28. Choix automatique du meilleur dégagement (ouvert, météo, longueur de piste, carburant).
-- [ ] 29. Avitaillement optimisé en voyage (où faire le plein).
+- [x] 25. Intégration au terrain d'arrivée : point d'entrée, altitude du tour de piste, côté, piste probable.
+- [x] 26. Fiche escale complète par terrain en une carte (horaires du jour, PPR, carburant, paiement, taxe, restaurant, transport).
+- [x] 27. Horaires des terrains de dégagement vérifiés à l'heure prévue.
+- [x] 28. Choix automatique du meilleur dégagement (ouvert, météo, longueur de piste, carburant).
+- [x] 29. Avitaillement optimisé en voyage (où faire le plein).
 
 ## Route et navigation
 - [ ] 6. Itinéraire par les points VFR et repères évidents (élèves).
 - [ ] 21. 2 ou 3 routes proposées et comparées (directe, facile, repères).
 - [ ] 22. Points tournants suggérés sur des repères évidents tous les 15-20 NM.
 - [ ] 23. Contrôle de l'estime par branche : repère attendu à la minute Y, sinon action.
-- [ ] 24. Point de début de descente (TOD), vario conseillé, heure de passage.
+- [x] 24. Point de début de descente (TOD), vario conseillé, heure de passage.
 
 ## Documents
 - [ ] 5. Bande de carte le long de la route dans le PDF (strip-map par branche).

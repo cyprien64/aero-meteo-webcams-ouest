@@ -903,7 +903,7 @@
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
-      out.innerHTML = wxStripHtml(trip) + slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
+      out.innerHTML = wxStripHtml(trip) + slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
@@ -934,6 +934,7 @@
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
+    document.querySelectorAll('#pf-out [data-setalt]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { if (b.stage && b.stage < b.nStages) { const st = ($('#pf-stalts').value || '').split(/\s+/); st[b.stage - 1] = el.dataset.setalt; $('#pf-stalts').value = st.join(' ').trim(); } else $('#pf-alt').value = el.dataset.setalt; run(false); }));
     on('pf-watch', (e) => watchToggle(b.trip || [b], e.target));
     document.querySelectorAll('#pf-out [data-esc-mail]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', (e) => {
       e.preventDefault(); const id = el.dataset.escMail, m = A.escaleOf(id).mail_escale, t = A.pprText(id);
@@ -1942,7 +1943,7 @@
       const tf = tafAt(A.tafs[t.id], t.when);
       if (tf && tf.bad && tf.bad.length) al.push(`TAF ${t.id} vers ${utc(t.when)} : ${tf.bad.join(' ; ')}.`);
       const oh = outsideHours(t.v, t.when);
-      if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
+      if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : t.role === 'DÉGAGEMENT' ? 'dégagement éventuel' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
     al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b));
     dayAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
@@ -2043,6 +2044,74 @@
       <table class="legs"><tr><th>Terrain</th><th>Prévu</th><th>Défavorable</th><th>Avec marge</th><th>Piste</th><th>Alt.-densité</th></tr>
       ${P.map((x) => `<tr${x.ok ? '' : ' style="color:#ff6b6b;font-weight:bold"'}><td>${esc(x.t.id)} ${x.k === 'tod' ? 'décollage' : 'atterrissage'}</td>${x.normal ? `<td>${x.normal} m</td><td>${x.worst} m <small>(${x.tMax} °C${x.wet ? ', herbe mouillée' : ''}, sans vent de face)</small></td><td>${x.need} m <small>(×${String(x.fac).replace('.', ',')})</small></td>` : '<td colspan="3">pas de tableau dans le manuel saisi : voir le manuel de vol</td>'}<td>${x.t.len ?? '?'} m</td><td>${x.daNow ?? '–'} ft <small>(${x.da} ft au plus chaud)</small></td></tr>`).join('')}</table>
       <p class="meta">Défavorable : température maximale du jour au terrain, pas de vent de face, herbe mouillée s'il pleut dans les 6 h (+10 % au décollage, +15 % à l'atterrissage). Marges recommandées par l'UK CAA (Safety Sense 7). Pente de piste non comptée : voir la VAC.</p></details>` : ''}`;
+  }
+
+  // ---------- arrivée (24, 25) : début de descente, vario, intégration, tour de piste, piste probable
+  function arrivalPlan(b) {
+    const lN = b.legs[b.legs.length - 1], v = b.arrInfo.v || {}, tdpTxt = (v.tdp || [])[0] || '', tdpFt = +((/(\d{3,4})\s*ft/i.exec(tdpTxt) || [])[1] || 0) || (b.arrInfo.elev + 1000);
+    const cruise = lN.ft || b.f.ft, drop = Math.max(0, cruise - tdpFt), gs = lN.gs || b.f.tas, vs3 = Math.round(gs * 5 / 50) * 50, vs = Math.min(500, vs3);
+    const nm = drop / vs * gs / 60, entry = /^[A-Z]{1,3}-[A-Z0-9]+$/.test(lN.from) ? lN.from : null, ref = entry ? b.legs.reduce((s, l, i) => s + (i < b.legs.length - 1 ? l.dist : 0), 0) : b.totDist - 3;
+    const todAlong = Math.max(0, ref - nm), tod = routePosAt(b, todAlong);
+    const rw = b.arrInfo.rw, side = /main droite|right[- ]hand|RH\b|à droite/i.test(v.consignes || '') ? 'à droite (VAC)' : /main gauche|left[- ]hand|LH\b|à gauche/i.test(v.consignes || '') ? 'à gauche (VAC)' : 'côté : voir la VAC';
+    return { tdpFt, tdpTxt, cruise, drop, vs, vs3, nm, todAlong, tod, entry, rw, side };
+  }
+  console.assert((() => { const b = { legs: [{ from: 'A', ft: 4500, gs: 100, dist: 30 }], f: { ft: 4500, tas: 100 }, totDist: 30, arrInfo: { elev: 0, v: { tdp: ['1000 ft (1000 ft AAL)'] }, rw: null }, depT: new Date(0) };
+    b.legs[0].a = [43, 0]; b.legs[0].tc = 90; const r = arrivalPlan(b); return r.tdpFt === 1000 && r.vs === 500 && Math.round(r.nm * 10) === 117; })(), 'arrivalPlan');
+  function arrivalHtml(b) {
+    const x = arrivalPlan(b), vp = x.entry ? resolvePt(x.entry) : null;
+    return `<details><summary><b>🛬 Arrivée à ${esc(b.f.arr)}</b> — descente vers ${x.todAlong.toFixed(0)} NM (${utc(x.tod.at)}), tour de piste ${x.tdpFt} ft</summary>
+      <p class="meta">📉 <b>Début de descente</b> : ${x.drop ? `à ${x.nm.toFixed(1)} NM ${x.entry ? `avant ${esc(x.entry)}` : 'du terrain (3 NM avant)'}, soit vers ${x.todAlong.toFixed(0)} NM du départ (${utc(x.tod.at)}), de ${x.cruise} à ${x.tdpFt} ft à ${x.vs} ft/min (pente de 3° : ${x.vs3} ft/min à cette vitesse sol)` : 'pas de descente : croisière déjà à l\'altitude du tour de piste'}.</p>
+      <p class="meta">🧭 <b>Intégration</b> : ${x.entry ? `par ${esc(x.entry)}${vp && vp.desc ? ` (${esc(vp.desc)})` : ''}` : 'en direct (pas de point d\'entrée publié choisi)'} · tour de piste <b>${esc(x.tdpTxt || x.tdpFt + ' ft')}</b> · ${esc(x.side)}
+        · piste probable <b>${x.rw ? x.rw.best.qfu : '?'}</b>${x.rw && x.rw.best.head != null ? ` (vent ${x.rw.best.head >= 0 ? 'de face' : 'arrière'} ${Math.abs(Math.round(x.rw.best.head))} kt, travers ${Math.round(x.rw.best.cross)} kt)` : ''}.
+        Fréquence : ${esc(((b.arrInfo.v || {}).freqs || [])[0] || 'A/A 123.500')}.</p>
+      <p class="meta">Consignes particulières et circuit exact : <a href="data/vac/${esc(b.f.arr)}.pdf" target="_blank" rel="noopener" style="color:#9cf">VAC ${esc(b.f.arr)}</a>.</p></details>`;
+  }
+  // ---------- fiche escale (26) : horaires du jour, PPR, carburant, paiement, taxe, contact, vie pratique
+  function escaleCardHtml(b) {
+    const id = b.f.arr, v = b.arrInfo.v || {}, e = (A.escaleOf && A.escaleOf(id)) || {}, fee = A.feeFor ? A.feeFor(id) : null, oh = outsideHours(v, b.eta), h = atsHours(v);
+    const pr = e.pratique || {}, c = (e.contacts || []).find((x) => x.m === e.mail_escale) || {};
+    const rows = [
+      ['Horaires', h ? (oh ? `⚠️ arrivée ${utc(b.eta)} hors horaires (${oh.win})` : `arrivée ${utc(b.eta)} dans les horaires publiés`) + (h.ppr ? ' · PPR mentionné' : '') : 'H24 ou non précisé dans la VAC'],
+      ['PPR / stationnement', (e.ppr || []).slice(0, 2).join(' — ') || 'pas de consigne relevée'],
+      ['Carburant', e.none ? 'aucun' : (e.fuel || []).join(', ') || 'voir VAC'], ['Paiement', (e.pay || []).join(', ') || 'non précisé'],
+      ['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' — ' + fee.note : ''}` : 'non renseignée'],
+      ['Contact', e.mail_escale ? `${e.mail_escale} (${c.r || 'VAC'})` : ''] , ['Téléphone', (e.tel_ad || []).join(' / ')],
+      ['Situation', [pr.situation, pr.transport, pr.restaurant, pr.hotel].filter(Boolean).join(' · ')],
+    ].filter((r) => r[1]);
+    return `<details><summary><b>🏁 Fiche escale ${esc(id)}</b> ${esc((A.aptByIcao[id] || {}).name || '')}</summary><table class="legs">${rows.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left">${esc(r[1])}</td></tr>`).join('')}</table>
+      <p class="meta">Relevé automatique de la VAC et des fiches du site : vérifier sur la VAC et auprès du terrain.</p></details>`;
+  }
+  // ---------- meilleur dégagement (28) : terrains à moins de 40 NM de l'arrivée, ouverts, sans fermeture NOTAM, TAF correct, piste assez longue, carburant
+  function bestAlternates(b) {
+    const arr = A.aptByIcao[b.f.arr], when = new Date(b.eta.getTime() + 20 * 6e4), need = b.arrInfo.ldg ? Math.round(b.arrInfo.ldg * 1.43) : 600;
+    return A.APTS.filter((a) => a.icao !== b.f.arr && a.icao !== b.f.dep && a.icao.startsWith('LF') && vacAt(a.icao)).map((a) => {
+      const d = distNm([+arr.la, +arr.lo], [+a.la, +a.lo]); if (d > 40) return null;
+      const v = vacAt(a.icao), len = rwyLength(v), why = [], good = [];
+      if (outsideHours(v, when)) why.push('fermé à cette heure');
+      if (((A.NOTAM || {}).ad || {})[a.icao] && A.NOTAM.ad[a.icao].some((n) => isClosure(n) && notamAt(n, when))) why.push('fermé par NOTAM');
+      const tf = tafAt(A.tafs[a.icao], when); if (tf && tf.bad && tf.bad.length) why.push('TAF défavorable'); else if (tf && !tf.out) good.push('TAF correct');
+      if (len && len < need) why.push(`piste ${len} m < ${need} m`);
+      const fu = fuelAvail(v.escale, b.f.T); if (fu) good.push('carburant'); else if (fu === false) why.push('pas de carburant');
+      if (/militaire|MIL\b/i.test((v.infos || '').slice(0, 300)) && !v.cap) why.push('militaire');
+      return { a, d, len, why, good, score: why.length * 100 + d - good.length * 5 };
+    }).filter(Boolean).sort((x, y) => x.score - y.score).slice(0, 3);
+  }
+  function altHtml(b, sfx) {
+    const L0 = bestAlternates(b); if (!L0.length) return '';
+    return `<p class="meta">🔀 Dégagements possibles pour ${esc(b.f.arr)} (${utc(b.eta)} + 20 min) : ${L0.map((x) => `<b>${esc(x.a.icao)}</b> ${esc(x.a.name)} (${x.d.toFixed(0)} NM${x.len ? `, ${x.len} m` : ''}${x.good.length ? ', ' + x.good.join(', ') : ''}${x.why.length ? ` — <span style="color:#ff9f0a">${esc(x.why.join(', '))}</span>` : ''})${x.a.icao !== b.f.alt ? ` <button class="btn" data-setalt="${esc(x.a.icao)}">choisir</button>` : ' ✅ choisi'}`).join(' · ')}</p>`;
+  }
+  // ---------- avitaillement conseillé en voyage (29)
+  function refuelPlan(trip) {
+    if (trip.length < 2) return null;
+    const out = [];
+    trip.forEach((b, k) => { const nx = trip[k + 1]; if (!nx) return;
+      const left = Math.round(b.loaded - b.totFuel), needNext = nx.reqFuel, can = fuelAvail((b.arrInfo.v || {}).escale, b.f.T);
+      out.push({ id: b.f.arr, left, needNext, must: left < needNext, can, dist: b.totDist }); });
+    return out;
+  }
+  function refuelHtml(trip) {
+    const P = refuelPlan(trip); if (!P) return '';
+    return `<p class="meta">⛽ <b>Avitaillement conseillé</b> : ${P.map((x) => `${esc(x.id)} : ${x.must ? `<b style="color:${x.can === false ? '#ff6b6b' : '#ff9f0a'}">plein nécessaire</b> (reste ${x.left} L, il faut ${x.needNext} L pour l'étape suivante)${x.can === false ? ' — ⛔ pas de carburant sur place (VAC)' : x.can === null ? ' — carburant non confirmé' : ''}` : `pas nécessaire (reste ${x.left} L, besoin ${x.needNext} L)`}`).join(' · ')}.</p>`;
   }
 
   // ================================================================== sécurité : minima VFR, frontière, zones particulières, givrage
@@ -2757,6 +2826,9 @@
       ${tafHtml(b)}
       ${perfLine(b, sfx)}
       ${perfFuelHtml(b)}
+      ${altHtml(b, sfx)}
+      ${arrivalHtml(b)}
+      ${escaleCardHtml(b)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
       ${landmarksHtml(b)}

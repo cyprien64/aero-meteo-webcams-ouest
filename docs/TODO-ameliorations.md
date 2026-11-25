@@ -20,10 +20,10 @@ Règles du projet (à respecter) :
 - [x] 35. Tendance par rapport à la préparation précédente (amélioration / dégradation).
 
 ## Masse, carburant, performances
-- [ ] 7. Masse au décollage par étape (passagers / bagages différents à chaque escale).
-- [ ] 30. Carburant minimal légal détaillé ligne par ligne (roulage, étape, imprévus, dégagement, réserve finale).
-- [ ] 31. Performances au plus défavorable (herbe mouillée, pente, température max, rafales) avec marge sur la piste.
-- [ ] 32. Altitude-densité de chaque terrain le jour du vol, alerte en été / montagne.
+- [x] 7. Masse au décollage par étape (passagers / bagages différents à chaque escale).
+- [x] 30. Carburant minimal légal détaillé ligne par ligne (roulage, étape, imprévus, dégagement, réserve finale).
+- [x] 31. Performances au plus défavorable (herbe mouillée, pente, température max, rafales) avec marge sur la piste.
+- [x] 32. Altitude-densité de chaque terrain le jour du vol, alerte en été / montagne.
 
 ## Terrains et escales
 - [ ] 25. Intégration au terrain d'arrivée : point d'entrée, altitude du tour de piste, côté, piste probable.

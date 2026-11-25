@@ -550,6 +550,7 @@
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
         <label><input id="pf-rt" type="checkbox" ${f.rt ? 'checked' : ''}> Aller-retour (retour au départ ajouté)</label>
+        <label class="full" title="Pour chaque escale : passager avant / passagers arrière / bagages (kg) au départ de cette escale. Ex. « LFCH:0/0/15 » = on dépose le passager à Arcachon">Charges différentes au départ des escales (option)<input id="pf-stload" value="${esc(f.stload || '')}" placeholder="ex. LFCH:0/0/15 LFBP:75/0/10"></label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
         <label>Dégagement (destination finale) <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
@@ -747,7 +748,7 @@
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
       exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
       stages: v('#pf-stages').toUpperCase(), turn: +v('#pf-turn') || 0, refuel: v('#pf-refuel') === '1',
-      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
+      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), stload: v('#pf-stload').toUpperCase(), rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
     if (f.pil) { const all = store.get('pilots', {}); all[f.pil] = { ...(all[f.pil] || {}), m: f.m1, lic: f.lic, med: f.med, nuit: $('#pf-nuit').checked }; store.set('pilots', all); }
@@ -826,6 +827,12 @@
       prog.textContent = '';
     } catch (e) { console.error(e); prog.textContent = e.message || String(e); }
   }
+  // « LFCH:0/0/15 LFBP:75/0/10 » -> charges au départ de l'escale demandée { m2, m3, m4 } (kg), ou null
+  function stageLoad(txt, id) {
+    const m = new RegExp(`\\b${id}:(\\d+)/(\\d+)/(\\d+)\\b`).exec(txt || '');
+    return m ? { m2: +m[1], m3: +m[2], m4: +m[3] } : null;
+  }
+  console.assert(JSON.stringify(stageLoad('LFCH:0/0/15 LFBP:75/0/10', 'LFBP')) === '{"m2":75,"m3":0,"m4":10}' && stageLoad('LFCH:0/0/15', 'LFBP') === null, 'stageLoad');
   // construction du voyage (toutes les étapes) sans affichage : sert au calcul, à la comparaison de deux horaires et à la surveillance
   async function buildTrip(f, say = () => {}) {
     const stops = f.stages.split(/[\s,;]+/).filter(Boolean);
@@ -845,7 +852,8 @@
     let time = new Date(f.time), fuel = f.fuel, aux = f.aux;
     const cap0 = f.T.fuel.tanks[0].cap;
     for (let k = 0; k < legsDef.length; k++) {
-      const fk = { ...f, ...legsDef[k], legft: k ? "" : f.legft, time: time.toISOString(), fuel, aux };
+      const ld = k ? stageLoad(f.stload, legsDef[k].dep) : null;   // charges propres à cette escale (passagers déposés / pris, bagages)
+      const fk = { ...f, ...legsDef[k], ...(ld || {}), legft: k ? '' : f.legft, time: time.toISOString(), fuel, aux };
       const userIds = buildUserIds(fk);
       say(`${legsDef.length > 1 ? `Étape ${k + 1}/${legsDef.length} : ` : ''}calcul de la route, du vent et du relief…`);
       const b = await compute(fk, userIds);
@@ -1938,6 +1946,9 @@
     }
     al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b));
     dayAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
+    if (fuelLines(b).short) al.push(`Réserve finale ${b.f.res} min inférieure au minimum légal (${fuelLines(b).legal} min ${fuelLines(b).legal === 45 ? 'de nuit' : 'de jour'}).`);
+    perfWorst(b).filter((x) => !x.ok).forEach((x) => al.push(`${x.t.id} : ${x.k === 'tod' ? 'décollage' : 'atterrissage'} au plus défavorable ${x.worst} m, ${x.need} m avec la marge recommandée, pour ${x.t.len} m de piste — vérifier les performances.`));
+    perfWorst(b).filter((x) => x.da - x.t.elev >= 2000).forEach((x) => al.push(`${x.t.id} : altitude-densité ${x.da} ft au plus chaud (terrain à ${x.t.elev} ft) — performances nettement réduites (décollage plus long, montée plus faible).`));
     recentAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
     semiCircular(b).forEach((x) => al.push(`Règle semi-circulaire : ${x.lg.from}→${x.lg.to} (Rm ${r3(x.lg.tm)}°, vers l'${x.east ? 'est' : 'ouest'}) à ${b.f.ft} ft, à plus de 3000 ft sol — prendre ${x.east ? 'un millier impair' : 'un millier pair'} + 500 ft${x.sug ? `, par exemple ${x.sug} ft` : ''}.`));
     const rf = regFt(b.f.rg.name);
@@ -1994,6 +2005,46 @@
     return `<p class="meta">🛫 ${s.join(' · ')} — ${tab ? 'tableaux du manuel de vol (altitude, température, masse, herbe ; vent de face compté seulement avec le METAR d\'un vol dans les 2 h)' : 'estimation'}, passage 15 m. Montée : ${esc(b.climb.src)}.</p>
       <p class="meta">📝 Route plan de vol (case 15) : <code id="pf-icao${sfx}">${esc(icaoRoute(b))}</code> <button class="btn" id="pf-icao-copy${sfx}">Copier</button></p>`;
   }
+  // ---------- carburant minimal détaillé (30) : NCO.OP.125, avion VFR : étape + réserve finale 30 min de jour, 45 min de nuit
+  function fuelLines(b) {
+    const night = !!(b.night && (b.night.late || b.night.firstDark || b.night.early)), legal = night ? 45 : 30;
+    const taxi = TAXI_L, climb = Math.max(0, (b.climb ? b.climb.fuel : taxi) - taxi), cruise = b.totFuel - taxi - climb;
+    const rows = [['Roulage', taxi, 'mise en route, roulage, essais moteur'], ['Surplus de montée', climb, b.climb ? b.climb.src : ''], ['Croisière', cruise, `${b.totDist.toFixed(0)} NM au vent prévu`]];
+    if (b.altLeg) rows.push([`Dégagement ${b.altLeg.to}`, b.altLeg.fuel, `${b.altLeg.dist.toFixed(0)} NM + approche`]);
+    rows.push([`Réserve finale (${b.f.res} min)`, b.resFuel, `minimum légal ${legal} min ${night ? 'de nuit' : 'de jour'} (NCO.OP.125)`]);
+    if (b.wxRes) rows.push([`Réserve météo (${b.wxRes.pct} %)`, b.wxRes.L, b.wxRes.why.join(' et ')]);
+    return { rows, total: b.reqFuel, loaded: b.loaded, margin: b.loaded - b.reqFuel, legal, short: b.f.res < legal };
+  }
+  console.assert((() => { const r = fuelLines({ night: null, climb: { fuel: 6, src: '' }, totFuel: 30, totDist: 80, altLeg: null, f: { res: 20 }, resFuel: 9, wxRes: null, reqFuel: 39, loaded: 60 });
+    return r.rows[1][1] === 4 && r.rows[2][1] === 24 && r.short && r.margin === 21; })(), 'fuelLines');
+  // ---------- performances au plus défavorable (31) et altitude-densité (32)
+  // marges recommandées : UK CAA Safety Sense 7 (×1,33 au décollage, ×1,43 à l'atterrissage ; herbe mouillée +10 % au décollage, +15 % à l'atterrissage par rapport à l'herbe sèche)
+  function perfWorst(b) {
+    const W = b.dayWx;
+    return [[b.depInfo, 'tod', 'takeoff', b.mb.mass, 1.33, 1.10], [b.arrInfo, 'ldg', 'landing', b.landMass, 1.43, 1.15], [b.altInfo, 'ldg', 'landing', b.landMass, 1.43, 1.15]].filter(([t]) => t).map(([t, k, tk, mass, fac, wet]) => {
+      const pt = W && W.pts.find((x) => x.id === t.id), day = new Date(t.when);
+      const tMax = pt ? Math.max(t.temp, ...pt.h.time.map((x, i) => (x.slice(0, 10) === day.toISOString().slice(0, 10) ? pt.h.temperature_2m[i] : -99))) : t.temp;
+      const rainy = pt ? pt.h.time.some((x, i) => Math.abs(Date.parse(x + 'Z') - t.when) <= 6 * 3600e3 && pt.h.precipitation[i] >= 0.3) : false;
+      const tb = b.f.T[tk] && b.f.T[tk].table, pc = { elev: t.elev, temp: tMax, grass: t.grass, head: Math.min(0, t.rw ? t.rw.best.head || 0 : 0), mass };
+      const base = tb ? perfDist(tb, pc) : t[k] ? Math.round(t[k] * (1 + 0.01 * Math.max(0, tMax - t.temp))) : null;
+      const worst = base ? Math.round(base * (t.grass && rainy ? wet : 1) / 5) * 5 : null, need = worst ? Math.round(worst * fac / 5) * 5 : null;
+      const isa = 15 - 2 * t.elev / 1000, da = Math.round((t.elev + 118.8 * (tMax - isa)) / 100) * 100;
+      return { t, k, normal: t[k], worst, need, fac, tMax: Math.round(tMax), wet: t.grass && rainy, da, daNow: t.da, ok: need == null || !t.len || need <= t.len };
+    });
+  }
+  function perfFuelHtml(b) {
+    const F = fuelLines(b), P = perfWorst(b);
+    return `<details><summary><b>⛽ Carburant minimal détaillé</b> — requis ${F.total} L, à bord ${F.loaded} L, marge <span style="color:${F.margin < 0 ? '#ff6b6b' : 'inherit'}">${F.margin} L</span></summary>
+      <table class="legs"><tr><th>Poste</th><th>Litres</th><th>Détail</th></tr>${F.rows.map((r) => `<tr><td style="text-align:left">${esc(r[0])}</td><td>${r[1]}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}
+      <tr><th>Total requis</th><th>${F.total}</th><th></th></tr></table>
+      ${F.short ? `<div class="warn">⚠️ Réserve finale ${b.f.res} min inférieure au minimum légal de ${F.legal} min.</div>` : ''}
+      <p class="meta">Carburant inutilisable non compté : voir le manuel de vol. Pas d'imprévus de 5 % imposés en NCO, mais une marge reste prudente.</p></details>
+      ${P.length ? `<details><summary><b>🛬 Performances au plus défavorable et altitude-densité</b></summary>
+      <table class="legs"><tr><th>Terrain</th><th>Prévu</th><th>Défavorable</th><th>Avec marge</th><th>Piste</th><th>Alt.-densité</th></tr>
+      ${P.map((x) => `<tr${x.ok ? '' : ' style="color:#ff6b6b;font-weight:bold"'}><td>${esc(x.t.id)} ${x.k === 'tod' ? 'décollage' : 'atterrissage'}</td>${x.normal ? `<td>${x.normal} m</td><td>${x.worst} m <small>(${x.tMax} °C${x.wet ? ', herbe mouillée' : ''}, sans vent de face)</small></td><td>${x.need} m <small>(×${String(x.fac).replace('.', ',')})</small></td>` : '<td colspan="3">pas de tableau dans le manuel saisi : voir le manuel de vol</td>'}<td>${x.t.len ?? '?'} m</td><td>${x.daNow ?? '–'} ft <small>(${x.da} ft au plus chaud)</small></td></tr>`).join('')}</table>
+      <p class="meta">Défavorable : température maximale du jour au terrain, pas de vent de face, herbe mouillée s'il pleut dans les 6 h (+10 % au décollage, +15 % à l'atterrissage). Marges recommandées par l'UK CAA (Safety Sense 7). Pente de piste non comptée : voir la VAC.</p></details>` : ''}`;
+  }
+
   // ================================================================== sécurité : minima VFR, frontière, zones particulières, givrage
   // points de la route tous les ~step NM, avec la branche et la distance depuis le départ
   function routeSamples(b, step = 3) {
@@ -2705,6 +2756,7 @@
       ${crossHtml(b)}
       ${tafHtml(b)}
       ${perfLine(b, sfx)}
+      ${perfFuelHtml(b)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
       ${landmarksHtml(b)}
@@ -3538,7 +3590,7 @@
 
   // ================================================================== historique des préparations (12)
   const HIST_CACHE = 'aww-history';
-  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt'];
+  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt', 'stload'];
   function histStart(id, trip) {
     const b = trip[0], f = lastForm || b.f;
     const list = store.get('hist', []);

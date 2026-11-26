@@ -137,3 +137,11 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] BF. Service worker : fichiers fixes de data/ en cache d'abord ; données en direct avec délai de 8 s avant la copie locale ; vac.json plus préchargé ; préconnexion Open-Meteo et Géoplateforme.
 - [x] BG. Quota Open-Meteo : relief lu dans les tuiles Terrarium (AWS Open Data, sans quota, plus haut des 3 × 3 pixels) au lieu d'Open-Meteo ; réponses météo gardées 30 min sur l'appareil (Cache API) ; grille pluie / vent chargée au premier mouvement du curseur ; limite heure / jour : copie locale ou message clair, sans réessais. Coût d'une préparation : ~507 -> ~130 appels, recalcul identique : 0.
 - [x] BH. Prévision des terrains collectée par GitHub toutes les 3 h (`collect_adwx`, adwx.json : 72 h, 12 variables, ~530 appels / mise à jour) ; le site s'en sert pour les terrains (prévision au sol, fenêtre météo du jour, « Où voler ? ») : « Où voler ? » 80 -> ~1 appel, préparation ~130 -> ~120.
+
+## Lot du 26/11/2026 soir (5)
+- [x] BI. prepavol.js (500 ko) et data/aircraft.js chargés au premier clic (Préparer un vol, Historique, Où voler ?, Mesurer, lien #vol=) ; calcul du soleil déplacé dans extras.js.
+- [x] BJ. Compteur d'appels Open-Meteo de l'appareil (log.js, poids = lieux × variables / 10), affiché dans le formulaire, l'aide et le journal.
+- [x] BK. « Quoi de neuf ? » une fois après chaque mise à jour (`NEWS.v` dans extras.js ; pas pour un nouveau venu, qui a la visite guidée).
+- [x] BL. Aide intégrée (bouton « ? ») : préparer une nav en 5 étapes, avec les icônes des boutons ; visite guidée et nouveautés depuis l'aide.
+- [x] BM. Carte OACI du trajet gardée sur l'appareil (zoom 6 à 11, 10 NM autour de la route et du dégagement, cache `aww-tiles` lu par sw.js ; une seule route à la fois).
+- [ ] NOTAM allégés au démarrage : abandonné pour l'instant, le fichier fait 107 ko compressé (texte anglais + français = 60 %) ; gain ~60 ko contre un risque de texte tronqué dans les fiches.

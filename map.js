@@ -1324,6 +1324,7 @@
   }
   async function elevFt(points) {
     try {   // tuiles d'altitude de prepavol.js (sans quota) ; Open-Meteo seulement si elles manquent
+      if (!window.AWW_elevations && window.AWW_loadPrep) await window.AWW_loadPrep().catch(() => {});
       const m = window.AWW_elevations ? await window.AWW_elevations(points) : (await (await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${points.map((p) => p[0].toFixed(4)).join(',')}&longitude=${points.map((p) => p[1].toFixed(4)).join(',')}`)).json()).elevation;
       return m.map((x) => Math.max(0, Math.round(x * 3.281)));
     } catch { return points.map(() => 0); }
@@ -1529,6 +1530,7 @@
   $('#btn-log').addEventListener('click', () => {
     showList('Signaler un problème', `<p>Le <b>journal</b> est un petit fichier texte qui liste ce qui a chargé ou échoué sur cet appareil. Il aide à trouver la panne.</p>
       <div class="row"><button class="btn${CFG.contact ? '' : ' primary'}" id="rep-log">📋 Télécharger le journal</button>${CFG.contact ? '<button class="btn primary" id="rep-mail">✉️ Écrire un e-mail</button>' : ''}</div>
+      <p class="meta">${esc(window.AWW_LOG.omText())}</p>
       <p class="meta">${CFG.contact ? 'L\'e-mail contient déjà les dernières erreurs. Décris ce que tu faisais et, si possible, joins le journal.' : 'Envoie ce fichier, avec deux mots sur ce que tu faisais, à la personne qui t\'a partagé le site.'}</p>`);
     $('#rep-log').addEventListener('click', () => window.AWW_LOG.download());
     if (CFG.contact) $('#rep-mail').addEventListener('click', () => {

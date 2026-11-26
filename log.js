@@ -23,10 +23,24 @@
   addEventListener('unhandledrejection', (e) => push('ERREUR', ['promesse rejetée :', e.reason]));
 
   // Requêtes : on note les échecs et celles qui prennent plus de 4 s
+  // Appels Open-Meteo de cet appareil aujourd'hui (jour UTC), comptés comme le service : 1 par lieu,
+  // et plus de 10 variables = plusieurs appels. Limite : 10 000 par jour pour toute la connexion (box, 4G).
+  const omWeight = (u) => {
+    const q = new URL(u).searchParams, n = (k) => (q.get(k) || '').split(',').filter(Boolean).length;
+    const vars = n('hourly') + n('daily') + n('current') + n('minutely_15');
+    return Math.max(1, n('latitude')) * Math.max(1, vars / 10);
+  };
+  console.assert(omWeight('https://api.open-meteo.com/v1/forecast?latitude=1,2,3&longitude=1,2,3&hourly=a,b') === 3 && omWeight('https://x/?latitude=1&hourly=a,b,c,d,e,f,g,h,i,j,k,l,m,n,o') === 1.5, 'omWeight');
+  const omKey = 'aww.omcount', today = () => new Date().toISOString().slice(0, 10);
+  LOG.omCount = () => { try { const c = JSON.parse(localStorage.getItem(omKey) || '{}'); return c.d === today() ? c.n : 0; } catch { return 0; } };
+  LOG.omText = () => `Météo : environ ${Math.round(LOG.omCount())} appels Open-Meteo depuis cet appareil aujourd'hui (limite : 10 000 par jour pour toute la connexion, autres appareils compris).`;
+  const omAdd = (u) => { try { localStorage.setItem(omKey, JSON.stringify({ d: today(), n: LOG.omCount() + omWeight(u) })); } catch { /* stockage plein ou bloqué */ } };
+
   const origFetch = window.fetch.bind(window);
   window.fetch = async (u, o) => {
     const st = performance.now();
     const url = String((u && u.url) || u).replace(/apikey=[^&]+/, 'apikey=…').slice(0, 180);
+    if (/open-meteo\.com\//.test(url)) try { omAdd(String((u && u.url) || u)); } catch { /* URL illisible */ }
     try {
       const r = await origFetch(u, o);
       const ms = Math.round(performance.now() - st);
@@ -38,7 +52,7 @@
 
   LOG.text = () => {
     const tasks = [...LOG.tasks.values()].map((t) => `  ${t.name} : ${t.state}${t.ms != null ? ` (${(t.ms / 1000).toFixed(1)} s)` : ''}${t.err ? ' — ' + t.err : ''}`).join('\n');
-    return `Aéro Météo Ouest — journal\nDate : ${new Date().toISOString()}\nPage : ${location.href.split('?')[0]}\nNavigateur : ${navigator.userAgent}\nÉcran : ${innerWidth}×${innerHeight}\nEn ligne : ${navigator.onLine}\n\nChargements :\n${tasks}\n\nMessages :\n${LOG.lines.join('\n')}\n`;
+    return `Aéro Météo Ouest — journal\nDate : ${new Date().toISOString()}\nPage : ${location.href.split('?')[0]}\nNavigateur : ${navigator.userAgent}\nÉcran : ${innerWidth}×${innerHeight}\nEn ligne : ${navigator.onLine}\n${LOG.omText()}\n\nChargements :\n${tasks}\n\nMessages :\n${LOG.lines.join('\n')}\n`;
   };
   LOG.download = () => {
     const a = document.createElement('a');

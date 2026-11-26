@@ -563,3 +563,9 @@ body:has(#tslider) #update-bar, body:has(#tslider) #remind-bar { bottom: 150px; 
 #detail a:not(.btn), #panel a:not(.btn) { color: var(--link); }
 .ts-wind { pointer-events: none; } .ts-wind svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
 .ts-wind b { position: absolute; left: 22px; top: 8px; font: 700 10px -apple-system, system-ui, sans-serif; color: #0b2a44; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+
+/* aide et nouveautés */
+.help-ico { display: inline-flex; vertical-align: -4px; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 7px; background: var(--blue, #0a84ff); margin-right: 2px; }
+.help-ico .ico { width: 15px; height: 15px; color: #fff; stroke: #fff; }
+.news { margin: 6px 0 10px; padding-left: 4px; list-style: none; }
+.news li { margin: 7px 0; line-height: 1.4; }

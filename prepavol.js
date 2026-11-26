@@ -273,20 +273,7 @@
   }
 
   // ================================================================== soleil
-  function sunTimes(date, la, lo) {
-    const d0 = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-    const n = Math.floor((d0 - Date.UTC(2000, 0, 1, 12)) / 864e5) + 1;
-    const Js = n - lo / 360, M = (357.5291 + 0.98560028 * Js) % 360;
-    const C = 1.9148 * Math.sin(rad(M)) + 0.02 * Math.sin(rad(2 * M)) + 0.0003 * Math.sin(rad(3 * M));
-    const lam = (M + C + 180 + 102.9372) % 360;
-    const Jt = 2451545 + Js + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2 * lam));
-    const dec = Math.asin(Math.sin(rad(lam)) * Math.sin(rad(23.44)));
-    const cosw = (Math.sin(rad(-0.833)) - Math.sin(rad(la)) * Math.sin(dec)) / (Math.cos(rad(la)) * Math.cos(dec));
-    if (Math.abs(cosw) > 1) return null;
-    const w = deg(Math.acos(cosw)), toD = (j) => new Date((j - 2440587.5) * 864e5);
-    return { rise: toD(Jt - w / 360), set: toD(Jt + w / 360) };
-  }
-  A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
+  const sunTimes = A.sunTimes;   // défini dans extras.js (carte jour / nuit au démarrage)
 
   // ================================================================== données
   let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null, ADWX = null;
@@ -352,6 +339,7 @@
     for (const wait of [0, 6000, 20000]) {
       if (wait) { const p = document.getElementById('pf-prog'); if (p && !/patiente/.test(p.textContent)) p.textContent += ' (serveur météo saturé, patiente…)'; await new Promise((ok) => setTimeout(ok, wait)); }
       r = await fetch(url);
+      const oc = document.getElementById('pf-omcount'); if (oc) oc.textContent = window.AWW_LOG.omText();
       if (r.status !== 429) break;
       lim = omLimit((await r.clone().json().catch(() => ({}))).reason);
       if (lim === 'jour' || lim === 'heure') break;
@@ -753,6 +741,7 @@
       <div class="row" style="margin:4px 0"><label>🧭 Où voler ? Temps aller max (min) <input id="pf-where-min" type="number" min="15" max="240" step="5" value="60"></label><button class="btn" id="pf-where">Chercher les destinations</button></div>
       <div class="row" style="margin:4px 0"><label>⚖️ Comparer avec un autre départ <input id="pf-cmp-time" type="datetime-local"></label><button class="btn" id="pf-cmp">Comparer</button></div>
       <div class="prep-progress" id="pf-prog"></div>
+      <p class="meta small-print" id="pf-omcount">${esc(window.AWW_LOG.omText())}</p>
       <div id="pf-out"></div>`);
     const ARM_FIELDS = [['empty', 'Avion vide'], ['pilot', 'Pilote'], ['copilot', 'Passager avant'], ['pax', 'Passagers arrière'], ['bag', 'Bagages'], ['tank0', 'Réservoir principal'], ['tank1', 'Réservoir supp.']];
     const fillArms = () => {
@@ -1100,8 +1089,45 @@
       out.innerHTML = `<div class="warn">${esc(e.message || e)}</div>`;
     }
   }
+  // ---------------------------------------------------------------- carte OACI du trajet gardée pour le vol sans réseau
+  const TILE_CACHE = 'aww-tiles';   // lu par sw.js
+  function routeTiles(pts, nm = 10, zs = [6, 7, 8, 9, 10, 11]) {   // morceaux de carte (z/x/y) à moins de nm NM de la route
+    const out = new Set(), P = pts.length > 1 ? pts : [pts[0], pts[0]];
+    for (const z of zs) {
+      const n = 2 ** z, tx = (lo) => Math.floor((lo + 180) / 360 * n), ty = (la) => Math.floor((1 - Math.log(Math.tan(rad(la)) + 1 / Math.cos(rad(la))) / Math.PI) / 2 * n);
+      for (let i = 0; i < P.length - 1; i++) {
+        const a = P[i], c = P[i + 1], k = Math.max(1, Math.ceil(distNm(a, c) / (nm / 2)));
+        for (let j = 0; j <= k; j++) {
+          const la = a[0] + (c[0] - a[0]) * j / k, lo = a[1] + (c[1] - a[1]) * j / k, dLa = nm / 60, dLo = nm / 60 / Math.cos(rad(la));
+          for (let x = tx(lo - dLo); x <= tx(lo + dLo); x++) for (let y = ty(la + dLa); y <= ty(la - dLa); y++) out.add(`${z}/${x}/${y}`);
+        }
+      }
+    }
+    return [...out];
+  }
+  console.assert((() => { const t = routeTiles([[43.38, -0.42], [43.47, -1.52]], 10, [11]); return t.length > 10 && t.length < 80 && t.every((s) => /^11\/\d+\/\d+$/.test(s)) && routeTiles([[43.38, -0.42]], 10, [11]).length > 0; })(), 'routeTiles');
+  async function saveOfflineMap(b, sfx) {
+    const st = $('#pf-offline-st' + sfx), say = (t) => { if (st) st.textContent = t; };
+    if (!window.caches) { say('Ce navigateur ne permet pas de garder la carte.'); return; }
+    const pts = (window.AWW_LASTTRIP || [b]).flatMap((x) => x.pts.concat(x.f.alt && A.aptByIcao[x.f.alt] ? [[A.aptByIcao[x.f.alt].la, A.aptByIcao[x.f.alt].lo]] : []));
+    const tiles = routeTiles(pts, b.f.local ? Math.max(10, b.f.lrad || 15) : 10).slice(0, 1500);
+    await caches.delete(TILE_CACHE);   // shortcut: une seule route gardée à la fois (quelques Mo) ; garder plusieurs routes si le club le demande
+    const c = await caches.open(TILE_CACHE), tpl = window.AWW_GEOPF.oaci;
+    let ok = 0, bad = 0, i = 0;
+    const worker = async () => {
+      while (i < tiles.length) {
+        const [z, x, y] = tiles[i++].split('/'), u = tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+        try { const r = await fetch(u, { mode: 'cors' }); if (r.ok) { await c.put(u, r); ok++; } else bad++; } catch { bad++; }
+        say(`Carte OACI : ${ok + bad} / ${tiles.length} morceaux…`);
+      }
+    };
+    await Promise.all([1, 2, 3, 4].map(worker));
+    say(bad ? `⚠️ ${ok} / ${tiles.length} morceaux gardés, ${bad} manquants (réseau ?). Clique à nouveau pour compléter.`
+      : `✔ Carte OACI du trajet gardée sur cet appareil (${ok} morceaux, environ ${Math.max(1, Math.round(ok * 0.025))} Mo). Sans réseau, choisis le fond « Carte OACI-VFR ».`);
+  }
   function bindSummary(b, sfx) {
     const on = (id, fn) => { const el = $('#' + id + sfx); if (el) el.addEventListener('click', fn); };
+    on('pf-offline', () => saveOfflineMap(b, sfx));
     on('pf-back', () => {   // vol retour : route inversée, départ à l'arrivée prévue + durée d'escale
       const f = b.f, t = new Date(b.eta.getTime() + (f.turn || 45) * 6e4);
       store.set('form', { ...store.get('form', {}), dep: f.arr, arr: f.dep, ...revLeg(f), stages: '', rt: false, alt: '' });
@@ -3153,7 +3179,7 @@
       <details><summary><b>📻 Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
         ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
         ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
-      <p class="meta"><button class="btn" id="pf-back${sfx}">↩️ Préparer le retour</button> <button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span></p>
+      <p class="meta"><button class="btn" id="pf-back${sfx}">↩️ Préparer le retour</button> <button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span><br><button class="btn" id="pf-offline${sfx}">📴 Garder la carte OACI du trajet (vol sans réseau)</button> <span id="pf-offline-st${sfx}"></span></p>
       <div id="pf-fields-out${sfx}"></div><div id="pf-efato-out${sfx}"></div><div id="pf-obst-out${sfx}"></div>
       <details id="pf-photo-box${sfx}"><summary><b>📸 Photo du terrain d'arrivée et schéma du tour de piste</b></summary><div id="pf-photo${sfx}" class="meta">Ouvrir pour charger la photo…</div></details>`;
   }
@@ -5283,4 +5309,5 @@
     doc.text(latin('Croquis indicatif - rose : route (jaune : contournement) · rouge : RTBA · framboise : P · orange : D · violet : R · pointillés bleus : CTR/TMA traversées'), x0 + 1.5, y0 + h - 1.5);
     doc.setTextColor(0);
   }
+  window.AWW_PREP = true;   // module prêt : extras.js laisse passer les clics
 })();

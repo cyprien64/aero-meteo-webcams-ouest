@@ -9,6 +9,35 @@
   const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
+  // ================================================================ soleil (carte jour / nuit, accueil, briefing)
+  function sunTimes(date, la, lo) {
+    const d0 = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    const n = Math.floor((d0 - Date.UTC(2000, 0, 1, 12)) / 864e5) + 1;
+    const Js = n - lo / 360, M = (357.5291 + 0.98560028 * Js) % 360;
+    const C = 1.9148 * Math.sin(rad(M)) + 0.02 * Math.sin(rad(2 * M)) + 0.0003 * Math.sin(rad(3 * M));
+    const lam = (M + C + 180 + 102.9372) % 360;
+    const Jt = 2451545 + Js + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2 * lam));
+    const dec = Math.asin(Math.sin(rad(lam)) * Math.sin(rad(23.44)));
+    const cosw = (Math.sin(rad(-0.833)) - Math.sin(rad(la)) * Math.sin(dec)) / (Math.cos(rad(la)) * Math.cos(dec));
+    if (Math.abs(cosw) > 1) return null;
+    const w = deg(Math.acos(cosw)), toD = (j) => new Date((j - 2440587.5) * 864e5);
+    return { rise: toD(Jt - w / 360), set: toD(Jt + w / 360) };
+  }
+  A.sunTimes = sunTimes;
+  console.assert((() => { const s = sunTimes(new Date(Date.UTC(2026, 5, 21)), 43.38, -0.42); return s && s.rise.getUTCHours() === 4 && s.set.getUTCHours() === 19; })(), 'sunTimes Pau 21 juin');
+
+  // ================================================================ préparation de vol chargée seulement quand on s'en sert
+  // prepavol.js (500 ko) n'est plus lu à l'ouverture : le premier clic le charge, puis le clic est rejoué
+  let prepP = null;
+  const addScript = (src) => new Promise((ok, ko) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => ko(new Error(`${src} introuvable`)); document.head.appendChild(el); });
+  const loadPrep = window.AWW_loadPrep = () => window.AWW_PREP ? Promise.resolve() : prepP || (prepP = window.AWW_LOG.task('Préparation de vol', () => addScript('data/aircraft.js').then(() => addScript('prepavol.js')))
+    .then(() => { if (window.AWW_PREP) return; prepP = null; alert('La préparation de vol n\'a pas pu se charger (réseau ?). Réessaie dans un instant.'); throw new Error('prepavol.js non chargé'); }));   // LOG.task ne rejette jamais : on regarde le drapeau
+  ['#btn-prep', '#btn-hist'].forEach((s) => $(s) && $(s).addEventListener('click', (e) => {
+    if (window.AWW_PREP) return;
+    e.stopImmediatePropagation(); loadPrep().then(() => $(s).click(), () => {});
+  }, true));
+  if (location.hash.startsWith('#vol=')) loadPrep().catch(() => {});   // lien de vol partagé
+
   // ================================================================ 📏 Mesure d'un trajet
   const nmBetween = (a, b) => {
     const p1 = rad(a[0]), p2 = rad(b[0]), dl = rad(b[1] - a[1]);
@@ -157,7 +186,7 @@
   // ================================================================ 🌙 Jour / nuit aéronautique
   // Nuit aéronautique (France) : du coucher du soleil + 30 min au lever du soleil - 30 min.
   // même calcul que le briefing (prepavol.js), en millisecondes pour les comparaisons
-  const sunTimes = (day, la, lo) => { const s = A.sunTimes(day, la, lo); return s && { rise: +s.rise, set: +s.set }; };
+  const sunMs = (day, la, lo) => { const s = sunTimes(day, la, lo); return s && { rise: +s.rise, set: +s.set }; };
   const NB = { s: 41.3, n: 51.3, w: -6.0, e: 9.8 }, STEP = 0.1;
   const nightOverlay = L.imageOverlay('data:image/gif;base64,R0lGODlhAQABAAAAACw=', [[NB.s, NB.w], [NB.n, NB.e]], { opacity: 1, interactive: false, pane: 'maskPane' });
   const termLine = L.layerGroup();
@@ -177,7 +206,7 @@
       const la = deg(2 * Math.atan(Math.exp(yN - (y + .5) / H * (yN - yS))) - Math.PI / 2);   // lignes régulières en Mercator (comme la carte)
       for (let x = 0; x < W; x++) {
         const lo = NB.w + (x + .5) * STEP;
-        const s = sunTimes(t, la, lo);
+        const s = sunMs(t, la, lo);
         let r = 0, g = 0, b = 0, a = 0;
         if (s) {
           const sp = s.set, rp = s.rise;
@@ -195,7 +224,7 @@
     const pts = [];
     for (let la = NB.s; la <= NB.n; la += .5) {
       let best = null;
-      for (let lo = NB.w; lo <= NB.e; lo += .05) { const s = sunTimes(t, la, lo); if (!s) continue; const d = Math.abs(s.set + 30 * 6e4 - now); if (d < 4 * 6e4 && (!best || d < best.d)) best = { lo, d }; }
+      for (let lo = NB.w; lo <= NB.e; lo += .05) { const s = sunMs(t, la, lo); if (!s) continue; const d = Math.abs(s.set + 30 * 6e4 - now); if (d < 4 * 6e4 && (!best || d < best.d)) best = { lo, d }; }
       if (best) pts.push([la, best.lo]);
     }
     if (pts.length > 3) L.polyline(pts, { color: '#ffd60a', weight: 2.5, dashArray: '8 6', interactive: false, pane: 'outlinePane' }).bindTooltip('Début de la nuit aéronautique', { sticky: true }).addTo(termLine);
@@ -205,7 +234,7 @@
     const t = nightT; if (!t) return;
     const utcS = `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())} UTC`;
     // info à la position du centre de la carte
-    const c = map.getCenter(), sc = sunTimes(t, c.lat, c.lng);
+    const c = map.getCenter(), sc = sunMs(t, c.lat, c.lng);
     $('#night-lbl').innerHTML = `${hm(t)} locale · ${utcS}${sc ? `<br><span class="meta">au centre de la carte : coucher ${hm(new Date(sc.set))}, nuit aéro ${hm(new Date(sc.set + 30 * 6e4))} · jour aéro ${hm(new Date(sc.rise - 30 * 6e4))}</span>` : ''}`;
   }
   function setNight(on) {
@@ -254,7 +283,7 @@
   // tuiles d'accueil et thème
   $('#q-prep').addEventListener('click', () => $('#btn-prep').click());
   $('#q-measure').addEventListener('click', () => $('#btn-measure').click());
-  $('#q-where').addEventListener('click', () => { if (!$('#pf-where')) $('#btn-prep').click(); const w = $('#pf-where'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); w.click(); } });
+  $('#q-where').addEventListener('click', () => loadPrep().then(() => { if (!$('#pf-where')) $('#btn-prep').click(); const w = $('#pf-where'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); w.click(); } }, () => {}));
   $('#btn-theme').addEventListener('click', () => window.AWW_theme && window.AWW_theme.toggle());
 
   // ================================================================ tiroir du panneau sur téléphone : réduit / moitié / plein écran (toucher ou glisser la poignée)
@@ -311,7 +340,7 @@
     ['.search-wrap', 'Rechercher', 'Tape un code OACI (LFCP), un nom de terrain ou de ville, ou une webcam : la carte zoome et le terrain clignote en jaune.'],
     ['#btn-measure', 'Mesurer un trajet', 'Clique des points sur la carte : distance, cap, et temps de vol selon le vent prévu par 4 modèles météo. Si les modèles ne sont pas d\'accord, c\'est signalé.'],
     ['#map', 'Sur la carte', '<b>Clic</b> sur un point : sa fiche (METAR, webcams, NOTAM, carburant…). <b>Clic droit</b> (ou appui long) : les espaces aériens au-dessus et leurs règles. Les <b>pastilles orange numérotées</b> regroupent des points : clique ou zoome pour les voir.'],
-    ['#btn-log', 'En cas de problème', 'Si quelque chose ne charge pas, une barre l\'indique en haut. Le bouton <b>Signaler un problème</b> prépare le journal des erreurs à envoyer. Le bouton <b>?</b> en haut relance cette visite.'],
+    ['#btn-log', 'En cas de problème', 'Si quelque chose ne charge pas, une barre l\'indique en haut. Le bouton <b>Signaler un problème</b> prépare le journal des erreurs à envoyer. Le bouton <b>?</b> en haut ouvre l\'aide et relance cette visite.'],
   ];
   let tourI = -1;
   function tourShow() {
@@ -337,7 +366,48 @@
     const nx = bub.querySelector('.nx'); if (nx) nx.onclick = () => { tourI++; tourShow(); };
   }
   const startTour = () => { tourI = 0; tourShow(); };
-  $('#btn-tour').addEventListener('click', startTour);
   addEventListener('resize', () => { if (tourI >= 0) tourShow(); });
-  if (!A.store.get('tourDone', 0) && !location.hash.startsWith('#vol=')) setTimeout(startTour, 1200);
+
+  // ================================================================ Aide : comment préparer une nav (bouton « ? »)
+  const icon = (sel) => { const i = $(sel + ' .ico'); return i ? `<span class="help-ico">${i.outerHTML}</span>` : ''; };
+  function showHelp() {
+    A.showPanel('Comment préparer une nav', `
+      <div class="row"><button class="btn primary" id="help-tour">Visite guidée des boutons</button> <button class="btn" id="help-news">Nouveautés</button></div>
+      <h4>1. Remplir le formulaire</h4>
+      <p>${icon('#btn-prep')} <b>Préparer un vol</b>, puis 3 étapes : <b>Trajet</b> (départ, arrivée, points tournants ; 📍 pour choisir sur la carte), <b>Avion et chargement</b> (immatriculation, masses, carburant), <b>Pilote</b>. Le bouton <b>Calculer la route</b> lance le calcul.</p>
+      <h4>2. Lire le briefing</h4>
+      <p>L'anneau en haut donne la <b>chance de faire le vol en VFR</b> d'après 51 scénarios météo. En dessous, les onglets <b>Résumé, Météo, Route, Terrains, Radio, Sécurité</b>. Un chiffre orange sur un onglet signale une alerte à lire.</p>
+      <h4>3. Regarder la carte heure par heure</h4>
+      <p>Le <b>curseur horaire</b> en bas de la carte montre les nuages, la pluie et le vent le long de la route. Fais-le glisser jusqu'à ton heure de passage.</p>
+      <h4>4. Emporter les documents</h4>
+      <p><b>📄 Briefing PDF + log Excel</b> : le dossier complet et le log de nav du club. <b>↩️ Préparer le retour</b> : la route inverse en un clic. <b>🔗 Partager</b> : un lien qui rouvre la même préparation.</p>
+      <h4>5. Voler sans réseau</h4>
+      <p><b>📴 Garder la carte OACI du trajet</b> (dans le briefing) enregistre la carte autour de la route sur l'appareil. Le dernier briefing reste lisible dans ${icon('#btn-hist')} <b>Historique</b>. En vol, choisis le fond « Carte OACI-VFR ».</p>
+      <h4>Bon à savoir</h4>
+      <p>${icon('#btn-measure')} <b>Mesurer</b> : distance, cap et temps de vol entre des points cliqués. <b>Clic droit</b> (ou appui long) sur la carte : les espaces aériens au-dessus.</p>
+      <p class="meta">${esc(window.AWW_LOG.omText())}</p>
+      <div class="warn">Outil d'aide : la préparation réglementaire reste SOFIA-Briefing, le SIA et aviation.meteo.fr.</div>`);
+    $('#help-tour').addEventListener('click', () => { $('#detail-close').click(); startTour(); });
+    $('#help-news').addEventListener('click', () => showNews());
+  }
+  $('#btn-tour').addEventListener('click', showHelp);
+
+  // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
+  const NEWS = { v: 55, items: [
+    '🗺️ Toute la France métropolitaine, une interface plus claire (thème clair, briefing en onglets).',
+    '🕒 Curseur horaire sur la carte : nuages, pluie et vent le long de la route.',
+    '🧭 « Où voler aujourd\'hui ? » et la chance de faire le vol en VFR.',
+    '📴 La carte OACI du trajet peut être gardée pour voler sans réseau.',
+  ] };
+  function showNews() {
+    A.store.set('newsSeen', NEWS.v);
+    A.showPanel('Quoi de neuf ?', `<ul class="news">${NEWS.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      <div class="row"><button class="btn primary" id="news-help">Comment ça marche ?</button></div>`);
+    $('#news-help').addEventListener('click', showHelp);
+  }
+  const firstVisit = !A.store.get('tourDone', 0);
+  if (firstVisit) A.store.set('newsSeen', NEWS.v);   // un nouveau venu a la visite guidée, pas les nouveautés
+  if (location.hash.startsWith('#vol=')) { /* lien partagé : on ouvre la préparation, rien d'autre */ }
+  else if (firstVisit) setTimeout(startTour, 1200);
+  else if (A.store.get('newsSeen', 0) < NEWS.v) setTimeout(showNews, 1500);
 })();

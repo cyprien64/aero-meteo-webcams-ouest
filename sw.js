@@ -1,5 +1,5 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v54';
+const VERSION = 'aww-v55';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'theme.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
@@ -20,6 +20,11 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // carte OACI gardée par « Garder la carte OACI du trajet » (prepavol.js) : servie sans réseau
+  if (e.request.method === 'GET' && url.hostname === 'data.geopf.fr' && /GetTile/i.test(url.search)) {
+    e.respondWith(caches.open('aww-tiles').then((c) => c.match(e.request.url)).then((h) => h || fetch(e.request)));
+    return;
+  }
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;   // API externes : réseau direct
   // données en direct (data/live) et VAC : réseau d'abord ; si le réseau traîne plus de 8 s (mauvaise couverture),
   // la dernière copie s'affiche tout de suite et la réponse du réseau met le cache à jour pour la prochaine fois

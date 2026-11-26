@@ -40,7 +40,7 @@ const win = {
 win.window = win; win.self = win; win.globalThis = win;
 const ctx = vm.createContext(win);
 const html = fs.readFileSync(path.join(ROOT, 'map.html'), 'utf8');
-const scripts = [...html.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]).filter((s) => !/^lib\//.test(s) && !/^https?:/.test(s));
+const scripts = [...html.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]).filter((s) => !/^lib\//.test(s) && !/^https?:/.test(s)).concat(['data/aircraft.js', 'prepavol.js']);   // chargés à la demande par extras.js (premier clic sur « Préparer un vol »)
 for (const s of scripts) {
   try { vm.runInContext(fs.readFileSync(path.join(ROOT, s), 'utf8'), ctx, { filename: s }); } catch (e) { errors.push(`${s} : plante au chargement : ${e.message}`); }
 }

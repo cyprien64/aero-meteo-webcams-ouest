@@ -42,8 +42,11 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: data/vac
-          key: vac-pdf-${{ steps.cyc.outputs.c }}
-          restore-keys: vac-pdf-
+          # la liste des terrains fait partie de la clé : quand elle change, le cache est réenregistré avec les nouvelles VAC
+          key: vac-pdf-${{ steps.cyc.outputs.c }}-${{ hashFiles('data/sources.js') }}
+          restore-keys: |
+            vac-pdf-${{ steps.cyc.outputs.c }}-
+            vac-pdf-
 
       - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
         env:

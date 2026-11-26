@@ -409,7 +409,7 @@
       const hhmm = (d) => d.toISOString().slice(11, 16);
       const nxt = new Date(Math.floor(newest / 1800) * 1800e3 + 1800e3 + 5 * 6e4);   // METAR toutes les 30 min, publiés ~5 min après
       setStatus(`${Object.keys(metars).length} METAR · ${Object.keys(tafs).length} TAF · ${metarSrc === 'direct' ? 'en direct' : 'collecte'} · dernier METAR ${hhmm(new Date(newest * 1000))} UTC (il y a ${age} min), prochain vers ${hhmm(nxt)}`);
-      status.style.color = age > 45 ? '#ffb21e' : '';
+      status.style.color = age > 45 ? 'var(--warn-text)' : '';
       if (openedIcao) showAerodrome(openedIcao, false);
     } catch (e) {
       console.warn(e);
@@ -1152,7 +1152,7 @@
     } catch (e) { console.warn('sup', e); st.push('SUP AIP indisponibles'); }
     const ageH = NOTAM.generated ? (Date.now() - Date.parse(NOTAM.generated)) / 3600e3 : 0;
     $('#status2').textContent = st.join(' · ') + (NOTAM.generated ? ` (collecte il y a ${ageH < 1 ? Math.round(ageH * 60) + ' min' : ageH.toFixed(1).replace('.', ',') + ' h'})` : '') + (ageH > 2 ? ' ⚠️ collecte en retard : vérifier sur SOFIA' : '');
-    $('#status2').style.color = ageH > 2 ? '#ffb21e' : '';
+    $('#status2').style.color = ageH > 2 ? 'var(--warn-text)' : '';
     if (openedIcao) showAerodrome(openedIcao, false);
     if (st.some((x) => /indisponibles/.test(x))) throw new Error(st.join(' · '));
   }

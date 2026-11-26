@@ -264,6 +264,7 @@
     const set = (k) => { st = Math.max(0, Math.min(2, k)); S.forEach((c, i) => p.classList.toggle(c, i === st)); p.style.height = ''; };
     set(1);
     g.addEventListener('click', () => set(st === 2 ? 0 : st + 1));
+    g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); g.click(); } });
     g.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; h0 = p.getBoundingClientRect().height; p.style.transition = 'none'; }, { passive: true });
     g.addEventListener('touchmove', (e) => { if (y0 == null) return; p.style.height = Math.max(90, h0 + y0 - e.touches[0].clientY) + 'px'; }, { passive: true });
     g.addEventListener('touchend', (e) => {

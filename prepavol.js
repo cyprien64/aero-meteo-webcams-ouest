@@ -1010,6 +1010,7 @@
       if (window.caches) caches.open('aww-offline-vac').then((c) => Promise.all([...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))]
         .map((id) => fetch(`data/vac/${id}.pdf`).then((r) => r.ok && c.put(`data/vac/${id}.pdf`, r)).catch(() => {})))).catch(() => {});
       drawTrip(trip);
+      timeSlider(trip);
       try {
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
@@ -1160,7 +1161,57 @@
       <p class="meta">${totDist.toFixed(0)} NM · escale ${last.f.turn} min · ${last.f.refuel ? 'plein à chaque escale' : 'sans avitaillement aux escales'} · « Dernier déc. » = dernier décollage pour arriver avant la nuit aéronautique (coucher du soleil + 30 min).</p>
       ${notes}${warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Carburant, centrage et horaires compatibles sur toutes les étapes.</div>'}`;
   }
-  window.addEventListener('aww-clear', () => { if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } stopPick(); });
+  window.addEventListener('aww-clear', () => { if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } stopPick(); timeSlider(null); });
+  // ---------- curseur horaire : départ simulé, avis VFR et vent à l'heure de passage de chaque point de la route (données de dayWx, sans nouvel appel)
+  // points de la journée dans l'ordre du vol, avec leur décalage par rapport au départ
+  function slidePts(trip) {
+    const W = trip[0].dayWx; if (!W) return [];
+    const by = (id) => W.pts.find((x) => x.id === id), t0 = trip[0].depT.getTime(), out = [];
+    trip.forEach((b) => {
+      const d0 = b.depT - t0, dur = b.eta - b.depT;
+      if (b.stage === 1 || trip.length === 1) out.push({ pt: by(b.f.dep), off: d0 });
+      [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6].forEach((k) => out.push({ pt: by(`R${b.stage}-${k}`), off: d0 + dur * k }));
+      out.push({ pt: by(b.f.arr), off: d0 + dur });
+    });
+    return out.filter((x) => x.pt);
+  }
+  console.assert((() => { const P = (id) => ({ id, p: [0, 0] }), trip = [{ stage: 1, f: { dep: 'A', arr: 'B' }, depT: new Date(0), eta: new Date(6e5), dayWx: { pts: [P('A'), P('B'), ...[1, 2, 3, 4, 5].map((k) => P(`R1-${k / 6}`))] } }];
+    const r = slidePts(trip); return r.length === 7 && r[0].off === 0 && r[6].off === 6e5 && r[3].off === 3e5; })(), 'slidePts');
+  let tsLayer = null;
+  function timeSlider(trip) {
+    document.getElementById('tslider')?.remove(); if (tsLayer) { map.removeLayer(tsLayer); tsLayer = null; }
+    const P = trip ? slidePts(trip) : []; if (P.length < 2) return;
+    const b0 = trip[0], dur = trip[trip.length - 1].eta - b0.depT, day = new Date(b0.depT); day.setHours(0, 0, 0, 0);
+    const lo = 6 * 60, hi = Math.max(lo + 60, 20 * 60 - Math.ceil(dur / 6e4)), cur = Math.round((b0.depT - day) / 6e4 / 15) * 15;
+    const el = document.createElement('div'); el.id = 'tslider'; el.className = 'glass';
+    el.innerHTML = `<div class="ts-row"><b>Départ simulé</b><output id="ts-out"></output><button type="button" class="btn" id="ts-use" title="Recalculer la préparation avec cette heure">Utiliser</button><button type="button" class="icon-btn" id="ts-x" title="Fermer" aria-label="Fermer le curseur horaire">✕</button></div>
+      <input type="range" id="ts-r" min="${lo}" max="${hi}" step="15" value="${Math.min(hi, Math.max(lo, cur))}" aria-label="Heure de départ simulée">
+      <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p>`;
+    document.body.appendChild(el);
+    tsLayer = L.layerGroup().addTo(map);
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const at = (m) => P.map((x) => { const t = day.getTime() + m * 6e4 + x.off; return { ...x, t, w: wxAt(x.pt, t) }; });
+    // bande du haut : avis le plus défavorable de la route pour chaque départ possible
+    $('#ts-bar').innerHTML = Array.from({ length: (hi - lo) / 15 + 1 }, (_, i) => { const r = at(lo + i * 15).map((x) => x.w).filter(Boolean); const lv = r.length ? Math.max(...r.map((w) => w.lv)) : null;
+      return `<i style="background:${lv == null ? 'transparent' : WXCOL[lv]}"></i>`; }).join('');
+    const draw = () => {
+      const m = +$('#ts-r').value, R = at(m); tsLayer.clearLayers();
+      for (let i = 1; i < R.length; i++) { const lv = Math.max(R[i - 1].w ? R[i - 1].w.lv : 0, R[i].w ? R[i].w.lv : 0);
+        L.polyline([R[i - 1].pt.p, R[i].pt.p], { color: WXCOL[lv], weight: 14, opacity: .45, interactive: false }).addTo(tsLayer); }
+      R.forEach((x) => { if (!x.w) return; const w = x.w, d = w.ws >= 3 ? w.wd : null, len = Math.min(12, 4 + w.ws / 2.5);
+        L.marker(x.pt.p, { icon: L.divIcon({ className: 'ts-mk', iconSize: [34, 34], iconAnchor: [17, 17],
+          html: `<svg width="34" height="34" viewBox="0 0 34 34">${d != null ? `<g transform="rotate(${d} 17 17)"><path d="M17 11V${(11 - len).toFixed(1)}" stroke="#0b2a44" stroke-width="3.4" stroke-linecap="round"/><path d="M17 11V${(11 - len).toFixed(1)}" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></g>` : ''}<circle cx="17" cy="17" r="6.5" fill="${WXCOL[w.lv]}" stroke="#fff" stroke-width="2"/>${w.storm ? '<text x="17" y="21" text-anchor="middle" font-size="9">⚡</text>' : ''}</svg>` }) })
+          .bindTooltip(`${esc(x.pt.lbl)} · passage ${hm(Math.round((x.t - day) / 6e4))} (heure locale)<br>${esc(WXTXT[w.lv])}${w.why.length ? ' : ' + esc(w.why.join(', ')) : ''}<br>vent ${Math.round(w.wd)}° ${Math.round(w.ws)} kt${w.gust >= 20 ? ` rafales ${Math.round(w.gust)}` : ''} · nuages bas ${w.low ?? '?'} %${w.base != null ? ` base ~${w.base} ft sol` : ''}`, { className: 'tip' }).addTo(tsLayer); });
+      const ws = R.map((x) => x.w).filter(Boolean), lv = ws.length ? Math.max(...ws.map((w) => w.lv)) : 0, why = [...new Set(ws.flatMap((w) => w.why))];
+      $('#ts-out').innerHTML = `<b style="color:${WXCOL[lv]}">●</b> ${hm(m)} → ${hm(m + Math.round(dur / 6e4))} · ${esc(WXTXT[lv])}`;
+      $('#ts-why').textContent = why.slice(0, 4).join(', ') || 'rien de signalé sur la route';
+    };
+    $('#ts-r').addEventListener('input', draw); draw();
+    const phone = innerWidth <= 700;   // route visible entre le panneau, la barre et le curseur
+    map.fitBounds(L.latLngBounds(P.map((x) => x.pt.p)), { paddingTopLeft: phone ? [20, 170] : [370, 90], paddingBottomRight: phone ? [20, 200] : [40, 170], maxZoom: 9 });
+    $('#ts-x').addEventListener('click', () => timeSlider(null));
+    $('#ts-use').addEventListener('click', () => { const t = new Date(day.getTime() + +$('#ts-r').value * 6e4), i = $('#pf-time'); if (!i) return; i.value = localInput(t); timeSlider(null); run(false); });
+  }
   function drawTrip(trip) {
     if (routeLayer) map.removeLayer(routeLayer);
     routeLayer = L.layerGroup().addTo(map);
@@ -3716,7 +3767,7 @@
     const add = (id, lbl, p, kind) => { if (p && !pts.some((x) => x.id === id)) pts.push({ id, lbl, p, kind }); };
     const ap = (id) => { const a = A.aptByIcao[id]; return a ? [+a.la, +a.lo] : null; };
     add(b0.f.dep, b0.f.dep, ap(b0.f.dep), 'dep');
-    trip.forEach((b) => { [0.25, 0.5, 0.75].forEach((k) => add(`R${b.stage}-${k}`, `route ${b.f.dep}→${b.f.arr}`, routePosAt(b, b.totDist * k).p, 'route')); add(b.f.arr, b.f.arr, ap(b.f.arr), 'arr'); if (b.f.alt) add(b.f.alt, b.f.alt, ap(b.f.alt), 'alt'); });
+    trip.forEach((b) => { [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6].forEach((k) => add(`R${b.stage}-${k}`, `route ${b.f.dep}→${b.f.arr}`, routePosAt(b, b.totDist * k).p, 'route')); add(b.f.arr, b.f.arr, ap(b.f.arr), 'arr'); if (b.f.alt) add(b.f.alt, b.f.alt, ap(b.f.alt), 'alt'); });
     trip.forEach((b) => diversions(b).forEach((x) => x.list.slice(0, 4).forEach((t) => add(t.a.icao, t.a.icao, [+t.a.la, +t.a.lo], 'div'))));
     const P = pts.slice(0, 40), days = [...new Set([b0.depT, trip[trip.length - 1].eta].map((d) => d.toISOString().slice(0, 10)))].sort();
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${P.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${P.map((x) => x.p[1].toFixed(3)).join(',')}`
@@ -3831,9 +3882,14 @@
   const TABS = [['res', 'Résumé'], ['wx', 'Météo'], ['route', 'Route'], ['ad', 'Terrains'], ['radio', 'Radio'], ['sec', 'Sécurité']];
   function tabsHtml(parts, badge = {}) {
     const ks = TABS.filter(([k]) => (parts[k] || '').trim());
-    return `<div class="tabwrap"><div class="tabs" role="tablist">${ks.map(([k, l], i) => `<button type="button" role="tab" class="tab${i ? '' : ' on'}" data-tab="${k}">${TAB_ICON[k] || ''}${l}${badge[k] ? ` <i class="tbadge">${badge[k]}</i>` : ''}</button>`).join('')}</div>
+    return `<div class="tabwrap"><div class="tabs" role="tablist">${ks.map(([k, l], i) => `<button type="button" role="tab" aria-selected="${!i}" tabindex="${i ? -1 : 0}" class="tab${i ? '' : ' on'}" data-tab="${k}">${TAB_ICON[k] || ''}${l}${badge[k] ? ` <i class="tbadge">${badge[k]}</i>` : ''}</button>`).join('')}</div>
       ${ks.map(([k], i) => `<div class="tabp${i ? '' : ' on'}" data-tabp="${k}" role="tabpanel">${parts[k]}</div>`).join('')}</div>`;
   }
+  document.addEventListener('keydown', (e) => {   // flèches gauche / droite entre les onglets (comme un sélecteur iOS au clavier)
+    const t = e.target.closest && e.target.closest('.tabs .tab'); if (!t || !/^Arrow(Left|Right)$/.test(e.key)) return;
+    const all = [...t.parentElement.querySelectorAll('.tab')], n = all[(all.indexOf(t) + (e.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length];
+    e.preventDefault(); n.focus(); n.click();
+  });
   document.addEventListener('click', (e) => {   // étapes du formulaire
     const t = e.target.closest('[data-step], [data-goto-step]'); if (!t) return;
     const n = t.dataset.step || t.dataset.gotoStep;
@@ -3843,7 +3899,7 @@
   document.addEventListener('click', (e) => {
     const t = e.target.closest('.tabs .tab'); if (!t) return;
     const w = t.closest('.tabwrap');
-    w.querySelectorAll(':scope > .tabs .tab').forEach((x) => x.classList.toggle('on', x === t));
+    w.querySelectorAll(':scope > .tabs .tab').forEach((x) => { x.classList.toggle('on', x === t); x.setAttribute('aria-selected', x === t); x.tabIndex = x === t ? 0 : -1; });
     w.querySelectorAll(':scope > .tabp').forEach((x) => x.classList.toggle('on', x.dataset.tabp === t.dataset.tab));
   });
   function summaryHtml(b, sfx = '', top = {}) {

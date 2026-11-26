@@ -122,3 +122,9 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] AU. Fiche terrain : bandeau webcam, catégorie de vol en grand, schéma de la piste avec le vent.
 - [x] AV. PDF : page de garde (verdict, probabilité VFR, chiffres clés, croquis de la route).
 - [x] AW. Test de chargement : `L.geoJSON` appelle son style (attrape une const utilisée avant sa déclaration).
+
+## Lot du 26/11/2026 (8)
+- [x] AX. Curseur horaire sur la carte : départ simulé de 6 h à 20 h, avis VFR et vent à l'heure de passage de chaque point de la route, bande des bonnes heures, bouton « Utiliser » (`timeSlider`, `slidePts`, données de `dayWx`, 5 points par étape).
+- [x] AY. Vitesse : mesurée sur le site publié (~1 Mo compressé au démarrage, surtout les NOTAM ; lecture JSON < 20 ms sur ordinateur ; VAC chargées seulement à la préparation) ; rien de bloquant, pas de changement.
+- [x] AZ. Workflow : actions GitHub en versions Node 24 (checkout v7, cache v6, configure-pages v6, upload-pages-artifact v5, deploy-pages v5).
+- [x] BA. Lisibilité : contrastes ≥ 4,5:1 dans les deux thèmes (textes secondaires, couleurs vives du HTML généré), contour de focus au clavier, flèches entre les onglets, poignée du tiroir au clavier.

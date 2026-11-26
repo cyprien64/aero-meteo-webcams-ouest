@@ -931,7 +931,7 @@
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
-      out.innerHTML = wxStripHtml(trip) + slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
+      out.innerHTML = verdictHtml(trip) + wxStripHtml(trip) + slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
@@ -984,6 +984,7 @@
     on('pf-icao-copy', (e) => { navigator.clipboard.writeText(icaoRoute(b)).then(() => { e.target.textContent = 'Copié ✔'; }, () => { e.target.textContent = 'Copie impossible : sélectionner le texte'; }); });
     if (b.gramet && !b.gramet.err && $('#pf-gramet' + sfx)) drawGramet($('#pf-gramet' + sfx), b.gramet, b);
     bindProfile(b, sfx);
+    bindWhatIf(b, sfx);
     on('pf-gramet-big', () => {
       const cv = document.createElement('canvas'); cv.width = 1800; cv.height = 860; drawGramet(cv, b.gramet, b);
       const w = window.open(''); if (w) { w.document.title = 'GRAMET ' + b.ids.join(' - '); w.document.body.style.margin = 0; const im = w.document.createElement('img'); im.src = cv.toDataURL('image/png'); im.style.width = '100%'; w.document.body.appendChild(im); }
@@ -1029,6 +1030,8 @@
     if (routeLayer) map.removeLayer(routeLayer);
     routeLayer = L.layerGroup().addTo(map);
     trip.forEach((b) => drawRoute(b, routeLayer, trip.length === 1 || b.stage === 1));
+    trip.forEach((b) => activeZones(b).forEach((z) => L.polygon(z.poly, { color: z.col, weight: 2, fillColor: z.col, fillOpacity: .22, dashArray: z.sure ? null : '6 4' })
+      .bindTooltip(`${esc(z.name)}<br>${esc(z.lim)}<br>${esc(z.why)}`, { sticky: true }).addTo(routeLayer)));
     map.fitBounds(L.latLngBounds(trip.flatMap((b) => b.pts)).pad(0.25), { paddingTopLeft: [320, 20], paddingBottomRight: [480, 20] });
   }
 
@@ -1590,11 +1593,12 @@
     mk.push(`<text x="${X(v.total) - 2}" y="${H - 6}" font-size="9" fill="${C.txt}" text-anchor="end">${esc(b.ids[b.ids.length - 1])}</text>`);
     const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${H - B + 20}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
     const calls = callPoints(b).map((c) => `<g><line x1="${X(c.nm).toFixed(1)}" x2="${X(c.nm).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-dasharray="2 3" stroke-opacity=".7"/><text x="${(X(c.nm) + 2).toFixed(1)}" y="${T + 22}" font-size="10">📞</text><title>Appeler ${esc(c.sg.name)}${c.sg.freq ? ' ' + esc(c.sg.freq) : ''} vers ${c.nm.toFixed(0)} NM (${utc(c.at)}) pour la clairance</title></g>`).join('');
+    const tb = turnBacks(b).map((x) => `<g><line x1="${X(x.at).toFixed(1)}" x2="${X(x.at).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="#ff9f0a" stroke-width="2" stroke-dasharray="6 3"/><text x="${(X(x.at) + 3).toFixed(1)}" y="${T + 36}" font-size="11" fill="#ff9f0a">↩ ${esc(x.back.icao)}</text><title>Demi-tour au plus tard ici si la base est sous ${x.need} ft (prévu ~${x.bad.baseAmsl} ft plus loin) : repli ${esc(x.back.icao)}</title></g>`).join('');
     // nuit aéronautique : zone sombre à partir du point où l'on passerait après coucher + 30 min
     const nA = nightAlong(b), night = nA != null ? `<rect x="${X(nA)}" y="${T}" width="${X(v.total) - X(nA)}" height="${H - B - T}" fill="#1a237e" fill-opacity=".35"><title>nuit aéronautique à partir de ${nA.toFixed(0)} NM</title></rect><text x="${X(nA) + 3}" y="${T + 10}" font-size="9" fill="#9fa8da">🌙 nuit aéro</text>` : '';
     const ac = opts.pos ? `<g transform="translate(${X(opts.pos.nm).toFixed(1)},${Y(opts.pos.ft).toFixed(1)})"><circle r="6" fill="#00e5ff" stroke="#000"/><line x1="0" x2="0" y1="6" y2="${(H - B - Y(opts.pos.ft)).toFixed(1)}" stroke="#00e5ff" stroke-dasharray="2 2"/></g>` : '';
     return `<svg ${opts.id ? `id="${opts.id}"` : ''} viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:${C.bg};border-radius:6px;display:block;touch-action:pan-y" font-family="Helvetica, Arial, sans-serif">
-      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${mk.join('')}${wx}${ac}
+      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${mk.join('')}${wx}${ac}
       <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>`;
   }
   function profileSvg(v, b, sfx = '') {
@@ -2143,6 +2147,120 @@
   function refuelHtml(trip) {
     const P = refuelPlan(trip); if (!P) return '';
     return `<p class="meta">⛽ <b>Avitaillement conseillé</b> : ${P.map((x) => `${esc(x.id)} : ${x.must ? `<b style="color:${x.can === false ? '#ff6b6b' : '#ff9f0a'}">plein nécessaire</b> (reste ${x.left} L, il faut ${x.needNext} L pour l'étape suivante)${x.can === false ? ' — ⛔ pas de carburant sur place (VAC)' : x.can === null ? ' — carburant non confirmé' : ''}` : `pas nécessaire (reste ${x.left} L, besoin ${x.needNext} L)`}`).join(' · ')}.</p>`;
+  }
+
+  function turnBackHtml(b) {
+    const T = turnBacks(b); if (!T.length) return '';
+    return `<div class="warn">↩️ <b>Points de demi-tour météo</b> : ${T.map((x) => `${esc(x.lg.from)}→${esc(x.lg.to)} : base prévue ~${x.bad.baseAmsl} ft vers ${x.bad.along.toFixed(0)} NM, il faut au moins ${x.need} ft (relief + 1000 ft + 500 ft sous les nuages) — décider au plus tard vers <b>${x.at.toFixed(0)} NM</b> (${utc(routePosAt(b, x.at).at)}), repli <b>${esc(x.back.icao)}</b> ${esc(x.back.name || '')}`).join(' ; ')}. Marqués ↩ sur la coupe.</div>`;
+  }
+  // ---------- zones actives à l'heure de passage (44) : P, AZBA active, ZRT dans ses créneaux, R / D actives (plein) ; parachutage et R / D à vérifier (pointillés)
+  function activeZones(b) {
+    const out = [];
+    for (const x of b.zones || []) {
+      if (!x.crossed && x.d > 3) continue;
+      const r = x.z.rtba && (b.rtba || []).find((y) => y.z === x.z), lim = `${x.z.lower} – ${x.z.upper}`, name = `${x.z.id} ${x.z.name}`;
+      if (x.z.type === 'P') out.push({ poly: x.z.poly, col: '#d81b60', name, lim, why: 'zone interdite', sure: true });
+      else if (x.z.rtba) { if (r && r.conflict) out.push({ poly: x.z.poly, col: '#ff3b30', name, lim, why: `AZBA active ${r.slots.join(', ')} UTC`, sure: true }); }
+      else if (x.z.sup) { if (x.z.sup.active !== false) out.push({ poly: x.z.poly, col: '#e65100', name, lim, why: x.z.sup.active ? `ZRT active pendant le vol (SUP ${x.z.sup.num})` : `ZRT activable (SUP ${x.z.sup.num})`, sure: !!x.z.sup.active }); }
+      else if (x.act && x.act.st !== 'inactive') out.push({ poly: x.z.poly, col: x.act.st === 'active' ? '#ff3b30' : '#fb8c00', name, lim, why: x.act.st === 'active' ? `active : ${x.act.why}` : `à vérifier : ${x.act.why}`, sure: x.act.st === 'active' });
+    }
+    const smp = routeSamples(b, 2);
+    for (const a of (SPECIAL || {}).act || []) {
+      if (Math.min(...smp.map((x) => distNm(x.p, [a.la, a.lo]))) > 3) continue;
+      const r = /^FL/.test(a.upper) ? 2.5 : 1.5, poly = []; for (let k = 0; k < 360; k += 30) poly.push(destPt([a.la, a.lo], k, r));
+      out.push({ poly, col: '#8e24aa', name: `${a.kind} ${a.name}`, lim: `jusqu'à ${a.upper}`, why: `${a.hours || 'horaires : voir AIP / NOTAM'} — cercle indicatif autour du site (ENR 5.5)`, sure: false });
+    }
+    return out;
+  }
+  // ---------- fréquences dans l'ordre du vol (43)
+  function freqTimeline(b) {
+    const out = [], fq = (id) => ((vacAt(id) || {}).freqs || []);
+    out.push({ nm: 0, at: b.depT, where: `${b.f.dep} (départ)`, freq: fq(b.f.dep).join(' · ') || 'A/A 123.500', what: 'ATIS puis sol / tour / AFIS ou auto-information' });
+    const v = b.vprofile, seen = new Set();
+    let acc = 0;
+    b.legs.forEach((lg) => { lg.airspaces.filter((s) => s.kind === 'SIV' && s.freq).forEach((s) => { if (seen.has(s.freq)) return; seen.add(s.freq); out.push({ nm: acc, at: routePosAt(b, acc).at, where: `${s.name} (SIV)`, freq: s.freq, what: 'information de vol, écoute conseillée' }); }); acc += lg.dist; });
+    const conf = new Set(v ? v.conflicts : []);
+    ((v && v.segs) || []).filter((sg) => sg.freq && !/CTR/.test(sg.name) && sg.from > 3).sort((x, y) => x.from - y.from).forEach((sg) => {
+      if (seen.has(sg.freq)) return; seen.add(sg.freq);
+      const nm = Math.max(0, sg.from - (conf.has(sg) ? 5 : 1));
+      out.push({ nm, at: routePosAt(b, nm).at, where: sg.name, freq: sg.freq, what: conf.has(sg) ? 'traversé à l\'altitude prévue : demander le transit 5 NM avant' : 'au-dessus / en dessous : écoute ou contact recommandé' });
+    });
+    const ap = typeof arrivalPlan === 'function' ? arrivalPlan(b) : null;
+    out.push({ nm: ap ? ap.todAlong : b.totDist - 10, at: ap ? ap.tod.at : routePosAt(b, b.totDist - 10).at, where: `${b.f.arr} (arrivée)`, freq: fq(b.f.arr).join(' · ') || 'A/A 123.500', what: 'ATIS / information, puis tour ou AFIS ou auto-information avant le début de descente' });
+    return out.sort((x, y) => x.nm - y.nm);
+  }
+  function freqHtml(b) {
+    const F = freqTimeline(b);
+    return `<details><summary><b>📻 Fréquences dans l'ordre du vol</b> (${F.length})</summary><table class="legs"><tr><th>Heure</th><th>NM</th><th>Où</th><th>Fréquence</th><th>Quoi</th></tr>
+      ${F.map((x) => `<tr><td>${utc(x.at)}</td><td>${x.nm.toFixed(0)}</td><td style="text-align:left">${esc(x.where)}</td><td style="text-align:left">${esc(x.freq)}</td><td style="text-align:left">${esc(x.what)}</td></tr>`).join('')}</table>
+      <p class="meta">Ordre calculé sur la route et l'altitude prévues. Fréquences des espaces : données OpenAir FFVP et VAC, à vérifier sur la carte.</p></details>`;
+  }
+  // ---------- verdict global (39) : rouge = au moins une alerte bloquante, orange = points à surveiller, vert sinon
+  function verdict(b) {
+    const al = alertsOf(b), stop = al.filter((x) => /^⛔/.test(x)), why = [], warn = [];
+    const imp = b.optAlt ? b.optAlt.plan.filter((c) => c.hard.length) : [];
+    if (imp.length) why.push(`${imp.length} branche(s) sans altitude possible (${imp[0].lg.from}→${imp[0].lg.to} : ${imp[0].hard[0].why})`);
+    const F = fuelLines(b); if (F.margin < 0) why.push(`carburant insuffisant (${F.margin} L)`);
+    perfWorst(b).filter((x) => !x.ok).forEach((x) => warn.push(`${x.t.id} : piste juste au plus défavorable (${x.need} m pour ${x.t.len} m)`));
+    crossWinds(b).filter((x) => x.max && x.crossG >= x.max * .8).forEach((x) => warn.push(`vent traversier ${Math.round(x.crossG)} kt à ${x.t.id}`));
+    const wx = (b.wxRoute && b.wxRoute.worst) || 0; if (wx === 2) why.push('météo défavorable sur la route'); else if (wx === 1) warn.push('météo marginale sur la route');
+    if (b.mb.mass > b.f.T.mtow) why.push(`masse ${Math.round(b.mb.mass)} kg > ${b.f.T.mtow} kg`);
+    const reasons = [...stop.map((x) => x.replace(/^⛔\s*/, '')), ...why, ...warn];
+    const lv = stop.length || why.length ? 2 : warn.length || al.length > 12 ? 1 : 0;
+    return { lv, reasons: reasons.slice(0, 3), n: reasons.length };
+  }
+  console.assert((() => { const pick = (st, wh, wa, n) => (st || wh ? 2 : wa || n > 12 ? 1 : 0); return pick(1, 0, 0, 1) === 2 && pick(0, 0, 1, 1) === 1 && pick(0, 0, 0, 3) === 0; })(), 'verdict niveaux');
+  function verdictHtml(trip) {
+    const V = trip.map(verdict), lv = Math.max(...V.map((v) => v.lv)), r = V.flatMap((v, i) => v.reasons.map((x) => (trip.length > 1 ? `étape ${i + 1} : ` : '') + x)).slice(0, 3);
+    const lbl = ['✅ On peut partir', '⚠️ À surveiller', '⛔ Ne pas partir en l\'état'][lv];
+    return `<div style="border-radius:10px;padding:10px 12px;margin:6px 0;background:${WXCOL[lv]};color:#000"><b style="font-size:1.15em">${lbl}</b>${r.length ? `<br>${r.map((x) => '• ' + esc(x)).join('<br>')}` : '<br>Aucune alerte importante.'}</div>
+      <p class="meta">Synthèse automatique des alertes ci-dessous : la décision reste celle du pilote (TEMSI, TAF, NOTAM du jour).</p>`;
+  }
+  // ---------- scénario « et si » (41) : départ décalé, passager en plus, vent plus fort ; recalcul local sans réseau
+  function whatIf(b, { delay = 0, kg = 0, wind = 0 }) {
+    let min = 0;
+    b.legs.forEach((lg) => { const w = lg.wind ? { dir: lg.wind.dir, spd: lg.wind.spd + wind } : wind ? { dir: (lg.tc + 180) % 360, spd: wind } : null; min += legMinutes(lg.dist, lg.tc, w, b.f.tas); });
+    min += b.climb ? b.climb.min : 0;
+    const fuel = Math.round(min * b.f.ff / 60) + (b.climb ? b.climb.fuel : 0), req = b.reqFuel - b.totFuel + fuel, eta = new Date(b.depT.getTime() + (delay + min) * 6e4);
+    const mass = b.mb.mass + kg, arm = b.f.T.arms.pax, cg = b.mb.cg != null && arm != null ? (b.mb.mom + kg * arm) / mass : null;
+    const night = b.night ? b.night.night : null, tod = b.f.T.takeoff && b.f.T.takeoff.table ? perfDist(b.f.T.takeoff.table, { elev: b.depInfo.elev, temp: b.depInfo.temp, grass: b.depInfo.grass, head: 0, mass }) : null;
+    const cw = crossWinds(b).find((x) => x.t.role === 'ARRIVÉE'), ws = cw ? Math.hypot(cw.head || 0, cw.cross || 0) : 0;
+    return { min: Math.round(min), fuel, margin: b.loaded - req, eta, night, dark: night && eta > night, mass, over: mass > b.f.T.mtow, cg, cgOk: cg == null || b.mb.inEnv(cg, mass), tod, len: b.depInfo.len, cross: cw ? Math.round(ws ? cw.crossG * (ws + wind) / ws : cw.crossG) : null, max: cw ? cw.max : null };
+  }
+  function whatIfHtml(b, sfx) {
+    if (b.stage > 1) return '';
+    return `<details><summary><b>🔮 Et si…</b> (départ retardé, passager en plus, vent plus fort)</summary>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><label>Départ retardé de <select data-wi="delay"><option>0</option><option>30</option><option>60</option><option>90</option><option>120</option></select> min</label>
+      <label>Masse en plus <select data-wi="kg"><option>0</option><option>20</option><option>75</option><option>150</option></select> kg</label>
+      <label>Vent plus fort de <select data-wi="wind"><option>0</option><option>5</option><option>10</option><option>15</option><option>20</option></select> kt</label></div>
+      <div id="pf-wi${sfx}" class="meta"></div></details>`;
+  }
+  function bindWhatIf(b, sfx) {
+    const box = $('#pf-wi' + sfx); if (!box) return;
+    const sels = box.parentElement.querySelectorAll('[data-wi]');
+    const upd = () => { const o = {}; sels.forEach((x) => { o[x.dataset.wi] = +x.value; }); const r = whatIf(b, o);
+      const c = (ok) => `style="color:${ok ? 'inherit' : '#ff6b6b'};font-weight:${ok ? 'normal' : 'bold'}"`;
+      box.innerHTML = `Temps ${hhmm(r.min)} · carburant d'étape ${r.fuel} L · <span ${c(r.margin >= 0)}>marge ${r.margin} L</span><br>
+        <span ${c(!r.dark)}>arrivée ${utc(r.eta)}${r.night ? ` (nuit aéro ${utc(r.night)})` : ''}${r.dark ? ' : DE NUIT' : ''}</span> ·
+        <span ${c(!r.over && r.cgOk)}>masse ${Math.round(r.mass)} / ${b.f.T.mtow} kg${r.cg != null ? `, centrage ${r.cg.toFixed(3)} m${r.cgOk ? '' : ' HORS LIMITES'}` : ''}</span>
+        ${r.tod ? ` · <span ${c(!r.len || r.tod * 1.33 <= r.len)}>décollage ${r.tod} m (${Math.round(r.tod * 1.33)} m avec marge, piste ${r.len || '?'} m)</span>` : ''}
+        ${r.cross != null ? ` · <span ${c(!r.max || r.cross <= r.max)}>travers à l'arrivée ${r.cross} kt${r.max ? ` / ${r.max} kt` : ''}</span>` : ''}`; };
+    sels.forEach((x) => x.addEventListener('change', upd)); upd();
+  }
+  // ---------- points de demi-tour météo (42) : base minimale = alti sécu de la branche + 500 ft ; décision 5 NM avant, repli = dernier terrain passé
+  function turnBacks(b) {
+    const out = []; let acc = 0;
+    const dv = diversions(b);
+    b.legs.forEach((lg, i) => {
+      const need = (lg.safe ? lg.safe.alt : 1500) + 500, pts = ((b.wxRoute && b.wxRoute.pts) || []).filter((p) => p.leg === i);
+      const bad = pts.find((p) => p.low >= 50 && p.baseAmsl != null && p.baseAmsl < need);
+      if (bad) {
+        const at = Math.max(acc, bad.along - 5), back = dv.slice(0, i + 1).flatMap((x, k) => x.list.map((t) => ({ ...t, abs: dv.slice(0, k).reduce((s, y) => s + y.lg.dist, 0) + t.along }))).filter((t) => t.abs <= at).pop();
+        out.push({ lg, need, at, bad, back: back ? back.a : A.aptByIcao[b.f.dep] });
+      }
+      acc += lg.dist;
+    });
+    return out;
   }
 
   // ================================================================== sécurité : minima VFR, frontière, zones particulières, givrage
@@ -2937,6 +3055,8 @@
       ${crossHtml(b)}
       ${tafHtml(b)}
       ${perfLine(b, sfx)}
+      ${whatIfHtml(b, sfx)}
+      ${turnBackHtml(b)}
       ${perfFuelHtml(b)}
       ${altHtml(b, sfx)}
       ${arrivalHtml(b)}
@@ -2955,6 +3075,7 @@
       ${azbaHtml(b)}
       ${mountainHtml(b)}
       ${diversionsHtml(b)}
+      ${freqHtml(b)}
       ${radioHtml(b)}
       ${vacLinks(b)}
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>

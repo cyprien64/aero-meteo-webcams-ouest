@@ -53,11 +53,11 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [ ] D. Nettoyage du stockage de l'appareil (listes cochées anciennes, rappels orphelins, historique orphelin, cache VAC limité). Idem : à refaire.
 
 ## Préparation, lot du 26/11/2026
-- [ ] 39. Verdict global vert / orange / rouge en tête, avec les 3 raisons principales.
-- [ ] 41. Scénario « et si » : départ décalé, passager en plus, vent plus fort.
-- [ ] 42. Points de demi-tour météo sur la coupe, avec terrain de repli.
-- [ ] 43. Fréquences dans l'ordre du vol avec heure et point de changement.
-- [ ] 44. Zones actives à l'heure de passage en surbrillance sur la carte.
+- [x] 39. Verdict global vert / orange / rouge en tête, avec les 3 raisons principales.
+- [x] 41. Scénario « et si » : départ décalé, passager en plus, vent plus fort.
+- [x] 42. Points de demi-tour météo sur la coupe, avec terrain de repli.
+- [x] 43. Fréquences dans l'ordre du vol avec heure et point de changement.
+- [x] 44. Zones actives à l'heure de passage en surbrillance sur la carte.
 - [ ] 45. Préparation d'un vol local (zone de travail, durée, carburant).
 - [ ] 46. Terrains à éviter pour l'avion (piste courte, herbe détrempée).
 - [ ] 47. Notes personnelles par terrain, rappelées à la préparation.

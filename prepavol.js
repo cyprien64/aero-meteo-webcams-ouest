@@ -1257,17 +1257,28 @@
         else if (f.avoid === 'easy' && ((z.rtba && rtbaSlots(z).some((s) => slotOverlap(s, dayStart, t0, t1))) || (z.sup && z.sup.active !== false)
           || (/^[RD]$/.test(z.type) && !z.rtba && zoneStatus(z, t0, t1, N.fir || []).st === 'active'))) obstacles.push({ z, why: z.sup ? 'ZRT' : z.rtba ? 'RTBA active' : 'zone active' });
       }
-      // route « VFR facile » : contourne aussi les espaces de classe A / C / D à l'altitude prévue (sauf ceux du départ et de l'arrivée)
+      // route « VFR facile » : contourne seulement ce qu'on ne peut pas survoler par-dessous : classe A, CTR et espaces C / D qui partent
+      // du sol (≤ 1000 ft), hors ceux du départ et de l'arrivée ; les TMA à plancher se passent dessous (altitude optimale)
       if (f.avoid === 'easy') {
         const ends = [userPts[0], userPts[userPts.length - 1]];
         for (const s of (ASP && ASP.data) || []) {
-          if (!/^[ACD]$/.test(s.cls || '') || ends.some((p) => inPoly(p, s.poly)) || !vOverlap(s) || polyRouteDist(s.poly, userPts) > 30) continue;
-          obstacles.push({ z: { ...s, id: s.name, name: `(classe ${s.cls})`, type: s.kind || 'TMA' }, why: `classe ${s.cls}` });
+          const low = (parseAlt(s.lower) ?? 0) <= 1000 || isAgl(s.lower);
+          if (!(s.cls === 'A' || (/^[CD]$/.test(s.cls || '') && (s.kind === 'CTR' || low)))) continue;
+          if (ends.some((p) => inPoly(p, s.poly)) || !vOverlap(s) || polyRouteDist(s.poly, userPts) > 15) continue;
+          obstacles.push({ z: { ...s, id: s.name, name: `(classe ${s.cls})`, type: s.kind || 'TMA' }, why: `classe ${s.cls}`, comfort: s.cls !== 'A' });
         }
       }
     }
-    const routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
     const directNm = userPts.slice(1).reduce((t, p, i) => t + distNm(userPts[i], p), 0);
+    let routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
+    // détour plafonné : au-delà de max(8 NM, 12 %), on renonce aux contournements « de confort » (CTR, C / D), les plus grands d'abord
+    const lenOf = (r) => r.pts.slice(1).reduce((t, p, i) => t + distNm(r.pts[i], p), 0), cap = Math.max(8, directNm * 0.12), kept = [];
+    let obs = obstacles.slice();
+    while (f.avoid === 'easy' && lenOf(routed) - directNm > cap && obs.some((o) => o.comfort)) {
+      const big = obs.filter((o) => o.comfort).sort((x, y) => y.z.poly.length - x.z.poly.length)[0];
+      kept.push(big.z.id); obs = obs.filter((o) => o !== big);
+      routed = obs.length ? avoidRoute(userPts, userIds, obs) : { pts: userPts, ids: userIds, detours: [] };
+    }
     const pts = routed.pts, ids = routed.ids;
     const adIds = [...new Set([...userIds, f.alt].filter((id) => id && A.aptByIcao[id]))];
     const varDeg = (() => {
@@ -1456,7 +1467,7 @@
       f, userIds, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))],
+      profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -3145,7 +3156,7 @@
       <tr><th>Total</th><th></th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}${b.wxRes ? ` + réserve météo ${b.wxRes.L} L, ${b.wxRes.pct} % car ${esc(b.wxRes.why.join(' et '))}` : ''}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
-      ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}.</p>` : ''}
+      ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}${b.crossedOk && b.crossedOk.length ? ` · traversés plutôt qu'un grand détour (clairance) : ${esc(b.crossedOk.join(', '))}` : ''}. Les TMA à plancher se passent dessous : voir l'altitude optimale.</p>` : ''}
       ${crossHtml(b)}
       ${tafHtml(b)}
       ${perfLine(b, sfx)}

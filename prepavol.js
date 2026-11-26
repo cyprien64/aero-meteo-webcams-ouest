@@ -2781,12 +2781,13 @@
       else if ((m = /^([+-]|VC)?(MI|BC|PR|DR|BL|SH|TS|FZ)?((?:RA|DZ|SN|SG|GR|GS|PL|FG|BR|HZ|FU|SQ|FC|UP)+)?$/.exec(x)) && (m[2] || m[3])) {
         const ph = (m[3] || '').match(/../g) || [], base = ph.map((c) => WXW[c]).join(' et ');
         const desc = m[2] === 'TS' ? `orage${base ? ' avec ' + base : ''}` : m[2] === 'SH' ? `averses${base ? ' de ' + base : ''}` : m[2] === 'FZ' ? `${base} verglaçant${/pluie|bruine/.test(base) ? 'e' : ''}` : m[2] === 'BC' ? `bancs de ${base}` : m[2] === 'MI' ? `${base} mince` : base;
-        out.push(`${m[1] === '-' ? 'faible ' : m[1] === '+' ? 'fort(e) ' : ''}${desc}${m[1] === 'VC' ? ' au voisinage' : ''}`);
+        const pl = m[2] === 'SH' || m[2] === 'BC';   // « averses », « bancs » : pluriel
+        out.push(`${m[1] === '-' ? (pl ? 'faibles ' : 'faible ') : m[1] === '+' ? (pl ? 'fortes ' : 'fort(e) ') : ''}${desc}${m[1] === 'VC' ? ' au voisinage' : ''}`);
       }
     }
     return out.join(', ');
   }
-  console.assert(tokWords(['27010G20KT', '4000', '-SHRA', 'BKN015CB']) === 'vent 270° 10 kt (rafales 20), visibilité 4 km, faible averses de pluie, nuageux à 1500 ft avec cumulonimbus', 'tokWords');
+  console.assert(tokWords(['27010G20KT', '4000', '-SHRA', 'BKN015CB']) === 'vent 270° 10 kt (rafales 20), visibilité 4000 m, faibles averses de pluie, nuageux à 1500 ft avec cumulonimbus', 'tokWords');
   const hLoc = (ms, withDay) => new Date(ms).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', ...(withDay ? { weekday: 'short' } : {}) }).replace(':00', '').replace(/(\d\d)$/, '$1 h');
   function tafWords(taf) {
     const G = tafGroups(taf); if (!G) return [];

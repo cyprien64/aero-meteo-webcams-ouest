@@ -27,6 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # bloque la publication si un script du site ne se charge plus ou si un console.assert échoue (le site en ligne reste tel quel)
+      - name: Test de chargement du site
+        run: node tests/test_site.js
+
       - name: Dépendance (lecture des cartes VAC)
         run: python3 -m pip install --quiet pypdf
 

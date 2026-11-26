@@ -1402,7 +1402,7 @@
 
   // ---------- API interne pour le module de préparation de vol (flightprep.js) ----------
   window.AWW = {
-    map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor,
+    map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor, altFt,
     metars, tafs, aptByIcao, APTS, SOURCES,
     showStack: (la, lo, t) => showStack(la, lo, t),
     get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor, pprText,

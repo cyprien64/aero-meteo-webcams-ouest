@@ -390,14 +390,8 @@
     }
     return out;
   }
-  function parseAlt(s) { // -> ft (ASFC/AGL ramené au sol = valeur brute)
-    if (!s) return null;
-    if (/SFC|GND/i.test(s)) return 0;
-    if (/UNL/i.test(s)) return 99999;
-    let m = s.match(/FL ?(\d{2,3})/i); if (m) return +m[1] * 100;
-    m = s.match(/(\d{3,5}) ?FT/i); if (m) return +m[1];
-    return null;
-  }
+  const parseAlt = A.altFt;   // -> ft ; ASFC / AGL : valeur brute, le sol est ajouté par l'appelant
+  console.assert(parseAlt('3300ft ASFC') === 3300 && parseAlt('( LFRJ ARP ) 500ft ASFC') === 500 && parseAlt('SFC') === 0 && parseAlt('FL 65') === 6500 && parseAlt('UNL') === 99999, 'parseAlt ASFC');
   const isAgl = (s) => /ASFC|AGL|SFC\b(?! *-)/i.test(s || '') && !/^SFC$|^GND$/i.test((s || '').trim());
 
   // RTBA : NOTAM "ZONES AIRFORCE RTBA ACT ZONE R57 BRETAGNE 0900-1100:ACTIVE ..."
@@ -1287,9 +1281,10 @@
     const dayStart = Date.UTC(depT.getUTCFullYear(), depT.getUTCMonth(), depT.getUTCDate());
     const roughDur = userPts.slice(1).reduce((s, p, i) => s + distNm(userPts[i], p), 0) / f.tas * 3600e3;
     const t0 = depT.getTime() - 1800e3, t1 = depT.getTime() + roughDur * 1.3 + 1800e3;
+    const zoneGround = new Map();   // zone -> relief max sous la zone (ft), null si le relief n'a pas pu être lu
     const vOverlap = (z) => {
-      const lo = parseAlt(z.lower), up = parseAlt(z.upper);
-      const upFt = up === null ? 99999 : up + (/ASFC|AGL/i.test(z.upper) ? 1500 : 0);
+      const lo = parseAlt(z.lower), up = parseAlt(z.upper), g = zoneGround.get(z);
+      const upFt = up === null ? 99999 : !/ASFC|AGL/i.test(z.upper) ? up : g === undefined ? up + 1500 : g === null ? 99999 : up + g;
       return (lo === null || lo <= f.ft + 500) && upFt >= f.ft - 500;
     };
     const rtbaSlots = (z) => {
@@ -1303,6 +1298,13 @@
       rmk: `${s.title} — ${z.hours.length ? 'activable ' + z.hours.map((h) => h.join('-')).join(', ') + ' UTC' : z.h24 ? 'activable H24' : 'horaires : voir le SUP'}`,
       sup: { num: s.num, url: s.url, active: z.hours.length ? z.hours.some((h) => slotOverlap(h.join('-'), dayStart, t0, t1)) : null } })));
     const allZones = [...((ZONES && ZONES.data) || []), ...supZones];
+    // sommet réel des zones limitées « au-dessus du sol » : relief le plus haut sous la zone (points du contour + centre), une requête pour toutes ;
+    // relief illisible -> sommet inconnu, la zone est considérée comme gênante
+    const aglZones = allZones.filter((z) => /ASFC|AGL/i.test(z.upper || '') && polyRouteDist(z.poly, userPts) <= 40);
+    const aglPts = aglZones.map((z) => { const st = Math.max(1, Math.ceil(z.poly.length / 12)); return [...z.poly.filter((_, i) => i % st === 0), z.poly.reduce((c, p) => [c[0] + p[0] / z.poly.length, c[1] + p[1] / z.poly.length], [0, 0])]; });
+    const aglEl = aglZones.length ? await elevations(aglPts.flat()).catch(() => null) : [];
+    let aglK = 0;
+    aglZones.forEach((z, i) => { const n = aglPts[i].length; zoneGround.set(z, aglEl ? Math.round(Math.max(0, ...aglEl.slice(aglK, aglK + n).map((x) => x || 0)) * 3.281) : null); aglK += n; });
     const obstacles = [];
     if (f.avoid !== 'none') {
       for (const z of allZones) {

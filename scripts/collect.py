@@ -227,8 +227,8 @@ def collect_notam():
             batch(icaos[i:i + 20])
         ad = {k: sorted(v.values(), key=lambda x: x['from'] or '') for k, v in ad.items()}
         print(f'  Aérodromes avec NOTAM : {len(ad)} ({sum(len(v) for v in ad.values())} NOTAM)')
-        if not fir_list and not ad:
-            raise RuntimeError('aucun NOTAM reçu')
+        if not fir_list or not ad:   # NOTAM d'aérodromes absents = fermetures de piste invisibles : on garde la version publiée
+            raise RuntimeError(f'NOTAM incomplets (FIR : {len(fir_list)}, aérodromes : {len(ad)})')
         save('notam.json', {'generated': NOW.isoformat(), 'horizon': horizon, 'source': 'SOFIA-Briefing (SIA/DGAC)',
                             'fir': sorted(fir_list.values(), key=lambda x: x['from'] or ''), 'ad': ad})
     except Exception as e:  # noqa: BLE001

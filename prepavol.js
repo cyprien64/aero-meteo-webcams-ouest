@@ -1691,11 +1691,13 @@
     const wx = b.wxRoute && b.wxRoute.pts ? b.wxRoute.pts.map((p) => `<circle cx="${X(p.along).toFixed(1)}" cy="${H - B + 20}" r="3.5" fill="${WXCOL[p.level]}"><title>${esc(utc(p.at))} ${esc(WXTXT[p.level])} ${esc(p.why.join(', '))}</title></circle>`).join('') : '';
     const calls = callPoints(b).map((c) => `<g><line x1="${X(c.nm).toFixed(1)}" x2="${X(c.nm).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-dasharray="2 3" stroke-opacity=".7"/><text x="${(X(c.nm) + 2).toFixed(1)}" y="${T + 22}" font-size="10">📞</text><title>Appeler ${esc(c.sg.name)}${c.sg.freq ? ' ' + esc(c.sg.freq) : ''} vers ${c.nm.toFixed(0)} NM (${utc(c.at)}) pour la clairance</title></g>`).join('');
     const tb = turnBacks(b).map((x) => `<g><line x1="${X(x.at).toFixed(1)}" x2="${X(x.at).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="#ff9f0a" stroke-width="2" stroke-dasharray="6 3"/><text x="${(X(x.at) + 3).toFixed(1)}" y="${T + 36}" font-size="11" fill="#ff9f0a">↩ ${esc(x.back.icao)}</text><title>Demi-tour au plus tard ici si la base est sous ${x.need} ft (prévu ~${x.bad.baseAmsl} ft plus loin) : repli ${esc(x.back.icao)}</title></g>`).join('');
+    const pp = pnrEtp(b), ppm = pp ? [[pp.etp, 'ETP', '#64d2ff', 'Point équitemps : au-delà, continuer est plus rapide que revenir au départ'], [pp.pnr, 'PNR', '#ff6b6b', 'Point de non-retour : au-delà, plus assez de carburant pour revenir au départ avec la réserve finale']]
+      .filter(([nm]) => nm > 0 && nm < v.total).map(([nm, l, c, t]) => `<g><line x1="${X(nm).toFixed(1)}" x2="${X(nm).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="${c}" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${(X(nm) + 3).toFixed(1)}" y="${T + 50}" font-size="10" font-weight="bold" fill="${c}">${l}</text><title>${t} (${nm.toFixed(0)} NM)</title></g>`).join('') : '';
     // nuit aéronautique : zone sombre à partir du point où l'on passerait après coucher + 30 min
     const nA = nightAlong(b), night = nA != null ? `<rect x="${X(nA)}" y="${T}" width="${X(v.total) - X(nA)}" height="${H - B - T}" fill="#1a237e" fill-opacity=".35"><title>nuit aéronautique à partir de ${nA.toFixed(0)} NM</title></rect><text x="${X(nA) + 3}" y="${T + 10}" font-size="9" fill="#9fa8da">🌙 nuit aéro</text>` : '';
     const ac = opts.pos ? `<g transform="translate(${X(opts.pos.nm).toFixed(1)},${Y(opts.pos.ft).toFixed(1)})"><circle r="6" fill="#00e5ff" stroke="#000"/><line x1="0" x2="0" y1="6" y2="${(H - B - Y(opts.pos.ft)).toFixed(1)}" stroke="#00e5ff" stroke-dasharray="2 2"/></g>` : '';
     return `<svg ${opts.id ? `id="${opts.id}"` : ''} viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:${C.bg};border-radius:6px;display:block;touch-action:pan-y" font-family="Helvetica, Arial, sans-serif">
-      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${mk.join('')}${wx}${ac}
+      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${ppm}${mk.join('')}${wx}${ac}
       <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>`;
   }
   function profileSvg(v, b, sfx = '') {
@@ -2020,6 +2022,10 @@
     });
     if (b.userPts && (b.detours.length || b.valley)) L.polyline(b.userPts, { color: '#40c4ff', weight: 3, opacity: .9, dashArray: '8 7' })
       .bindTooltip(`Route directe : ${b.directNm.toFixed(0)} NM (route facile en magenta : ${b.totDist.toFixed(0)} NM)`, { className: 'tip', sticky: true }).addTo(routeLayer);
+    const mo = mountainOf(b);   // onde / rotors : zone sous le vent (approximative, 12 NM de part et d'autre du point haut, 20 NM sous le vent)
+    if (mo) mo.legs.forEach((m) => { if (!waveRisk(m)) return; const dn = (m.wind.dir + 180) % 360, ax = m.hi.p[0] < 43.4 ? 110 : (m.wind.dir + 90) % 360, e1 = destPt(m.hi.p, ax, 12), e2 = destPt(m.hi.p, ax + 180, 12);
+      L.polygon([e1, e2, destPt(e2, dn, 20), destPt(e1, dn, 20)], { color: '#ff9f0a', weight: 1, fillOpacity: .18, dashArray: '3 4' })
+        .bindTooltip(`Sous le vent (${r3(m.wind.dir)}°/${Math.round(m.wind.spd)} kt) : descendances et rotors probables — zone approximative à éviter`, { className: 'tip', sticky: true }).addTo(routeLayer); });
     L.polyline(b.pts, { color: '#ff2bd6', weight: 4, opacity: .95 }).addTo(routeLayer);
     const mk = routeMarks(b);
     mk.ticks.forEach((t) => {
@@ -2080,7 +2086,7 @@
       const oh = outsideHours(t.v, t.when);
       if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : t.role === 'DÉGAGEMENT' ? 'dégagement éventuel' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
-    al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b));
+    al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b), ...safetyAlerts(b));
     dayAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
     if (fuelLines(b).short) al.push(`Réserve finale ${b.f.res} min inférieure au minimum légal (${fuelLines(b).legal} min ${fuelLines(b).legal === 45 ? 'de nuit' : 'de jour'}).`);
     perfWorst(b).filter((x) => !x.ok).forEach((x) => al.push(`${x.t.id} : ${x.k === 'tod' ? 'décollage' : 'atterrissage'} au plus défavorable ${x.worst} m, ${x.need} m avec la marge recommandée, pour ${x.t.len} m de piste — vérifier les performances.`));
@@ -2503,6 +2509,66 @@
     if (x.andorra) al.push('Andorre hors espace Schengen et hors union douanière : pas d\'atterrissage possible en Andorre, survol avec plan de vol.');
     if (x.foreignAd.some((id) => !/^LE/.test(id))) x.customs.forEach(([id, t]) => t && /douane|PPR|police/i.test(t) && al.push(`${id} douane / police (VAC) : ${t}`));
     return al;
+  }
+
+  // ---------- givrage carburateur (diagramme CAA « carburettor icing », approché) : 0 nul, 1 faible, 2 modéré, 3 fort ; moteur réduit (descente) : un cran de plus
+  const CARB = ['nul', 'faible', 'modéré', 'fort'], CARBCOL = ['#2ecc40', '#2ecc40', '#ff9f0a', '#ff3b30'];
+  function carbIce(T, Td, descent) {
+    if (T == null || Td == null || T < -10 || T > 35) return 0;
+    const sp = Math.max(0, T - Td), c = sp <= 3 && T >= -5 && T <= 20 ? 3 : sp <= 7 && T <= 25 ? 2 : sp <= 13 && T <= 30 ? 1 : 0;
+    return descent ? (c ? Math.min(3, c + 1) : sp <= 18 && T <= 30 ? 1 : 0) : c;
+  }
+  console.assert(carbIce(10, 8) === 3 && carbIce(15, 10) === 2 && carbIce(25, 13) === 1 && carbIce(30, 5) === 0 && carbIce(15, 10, true) === 3 && carbIce(-15, -16) === 0, 'carbIce');
+  function carbOf(b) {   // T / Td au sol (prévision le long de la route) ramenés à l'altitude : -2 °C et -0,6 °C par 1000 ft
+    const ok = ((b.wxRoute && b.wxRoute.pts) || []).filter((p) => p.T != null && p.Td != null); if (!ok.length) return null;
+    const at = (p, ft) => { const h = Math.max(0, ft - p.elevFt) / 1000; return { T: Math.round(p.T - 2 * h), Td: Math.round(p.Td - 0.6 * h) }; };
+    const pick = (arr) => arr.reduce((m, x) => (x.lv > m.lv ? x : m), arr[0]);
+    const cruise = pick(ok.map((p) => { const ft = (b.legs[p.leg] || b.legs[0]).ft || b.f.ft, v = at(p, ft); return { ...v, ft, lv: carbIce(v.T, v.Td) }; }));
+    const last = ok[ok.length - 1], top = b.legs[b.legs.length - 1].ft || b.f.ft;
+    const descent = pick([last.elevFt + 1000, (top + last.elevFt) / 2, top].map((ft) => { const v = at(last, ft); return { ...v, ft: Math.round(ft / 100) * 100, lv: carbIce(v.T, v.Td, true) }; }));
+    return { cruise, descent };
+  }
+
+  // ---------- branches au-dessus de l'eau : distance à la côte comparée au plané (NCO.IDE.A.175 : gilets au-delà de la distance de plané)
+  function waterOf(b) {
+    if (!window.FRANCE) return null;
+    const fin = b.f.T.glide || 9, land = window.FRANCE.flat();
+    const sea = routeSamples(b, 1).filter((x) => x.p[0] >= 43.4 && !inFrance(x.p))   // au sud de 43,4° : Espagne (terre), pas la mer
+      .map((x) => { const ft = x.lg.ft || b.f.ft; return { ...x, ft, d: Math.min(...land.map((q) => distNm(x.p, q))), glide: ft * fin / 6076 }; });
+    if (!sea.length) return null;
+    const worst = sea.reduce((m, x) => (x.d - x.glide > m.d - m.glide ? x : m));
+    return { sea, worst, beyond: sea.filter((x) => x.d > x.glide) };
+  }
+  if (window.FRANCE) console.assert((() => { const w = waterOf({ f: { T: {}, ft: 2000 }, legs: [{ a: [46.0, -2.6], tc: 270, dist: 4, ft: 2000 }] }); return w && w.beyond.length > 0 && w.worst.d > 10; })() && !waterOf({ f: { T: {}, ft: 2000 }, legs: [{ a: [43.38, -0.42], tc: 90, dist: 10, ft: 2000 }] }), 'waterOf');
+
+  // ---------- survol des agglomérations : SERA 1000 ft au-dessus de l'obstacle le plus haut ; en France, monomoteur : hauteur plus grande selon la taille
+  // (arrêté du 10/10/1957) ; taille estimée ici d'après la population — shortcut: pas de contour des agglomérations, à remplacer par les zones bâties OSM si besoin
+  function townsLow(b) {
+    const towns = (LANDM && LANDM.towns) || [], prof = b.profile || [], smp = routeSamples(b, 0.5), out = [];
+    for (const [n, la, lo, pop] of towns) {
+      if (pop < 2000) continue;
+      const r = pop >= 50000 ? 2 : pop >= 10000 ? 1 : 0.5, hit = smp.find((x) => Math.abs(x.p[0] - la) < .05 && distNm(x.p, [la, lo]) <= r);
+      if (!hit || hit.along < 10 || hit.along > b.totDist - 10) continue;   // départ / arrivée : trajectoires et hauteurs fixées par la VAC et le contrôle
+      const g = prof.length ? prof.reduce((m, q) => (distNm(q.p, [la, lo]) < distNm(m.p, [la, lo]) ? q : m)).ft : 0, need = pop >= 50000 ? 5000 : pop >= 10000 ? 3300 : 1650, h = (hit.lg.ft || b.f.ft) - g;
+      if (h < need) out.push({ n, pop, along: hit.along, h, need });
+    }
+    return out.sort((x, y) => x.along - y.along);
+  }
+  function safetyAlerts(b) {
+    const al = [], c = carbOf(b), w = waterOf(b), tl = townsLow(b), seen = new Set();
+    if (c && Math.max(c.cruise.lv, c.descent.lv) >= 3) al.push(`Givrage carburateur fort probable ${c.cruise.lv >= 3 ? `en croisière (T ${c.cruise.T} °C, point de rosée ${c.cruise.Td} °C vers ${c.cruise.ft} ft)` : `en descente moteur réduit (T ${c.descent.T} °C, point de rosée ${c.descent.Td} °C)`} : réchauffage carburateur régulier, plein chaud avant de réduire.`);
+    if (w && w.beyond.length) al.push(`Au-dessus de l'eau vers ${w.worst.along.toFixed(0)} NM : ${w.worst.d.toFixed(0)} NM de la côte pour un plané d'environ ${w.worst.glide.toFixed(0)} NM à ${w.worst.ft} ft — gilets de sauvetage obligatoires pour chaque occupant (NCO.IDE.A.175). Monter plus haut si possible, contact SIV.`);
+    if (tl.length) al.push(`Survol d'agglomération trop bas : ${tl.slice(0, 5).map((t) => `${t.n} vers ${t.along.toFixed(0)} NM (~${Math.round(t.h / 100) * 100} ft sol, minimum estimé ${t.need} ft sol)`).join(', ')}${tl.length > 5 ? '…' : ''}. Monomoteur en France : hauteur minimale selon la taille de l'agglomération (arrêté du 10/10/1957, valeurs estimées, à vérifier) et au moins 1000 ft au-dessus de l'obstacle le plus haut (SERA) — contourner ou monter.`);
+    b.legs.forEach((lg) => lg.airspaces.filter((s) => /^(RMZ|TMZ)$/.test(s.kind || '') && !seen.has(s.name) && seen.add(s.name)).forEach((s) => al.push(s.kind === 'RMZ'
+      ? `${s.name} (RMZ, ${s.lower} – ${s.upper}) traversée : contact radio obligatoire avant d'entrer${s.freq ? ` (${String(s.freq).split(' / ')[0]})` : ''}.`
+      : `${s.name} (TMZ, ${s.lower} – ${s.upper}) traversée : transpondeur mode S obligatoire.`)));
+    return al;
+  }
+  function safetyHtml(b) {
+    const c = carbOf(b), w = waterOf(b), out = [];
+    if (c) out.push(`🧊 Givrage carburateur (estimation, diagramme CAA) : croisière <b style="color:${CARBCOL[c.cruise.lv]}">${CARB[c.cruise.lv]}</b> (T ${c.cruise.T} °C, rosée ${c.cruise.Td} °C vers ${c.cruise.ft} ft) · descente moteur réduit <b style="color:${CARBCOL[c.descent.lv]}">${CARB[c.descent.lv]}</b>. ${Math.max(c.cruise.lv, c.descent.lv) >= 2 ? 'Réchauffage carburateur : contrôle régulier en croisière, plein chaud avant de réduire.' : 'Essai du réchauffage au point d\'arrêt, plein chaud en descente.'}`);
+    if (w && !w.beyond.length) out.push(`🌊 Au-dessus de l'eau : au plus ${w.worst.d.toFixed(0)} NM de la côte, plané ≈ ${w.worst.glide.toFixed(0)} NM : gilets non obligatoires, mais conseillés.`);
+    return out.map((x) => `<p class="meta">${x}</p>`).join('');
   }
 
   // ---------- zones particulières : ZSM gypaète (STAC), parachutage / voltige (ENR 5.5), cœur du Parc national des Pyrénées
@@ -3257,6 +3323,7 @@
       ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
+      ${safetyHtml(b)}
       ${azbaHtml(b)}
       ${mountainHtml(b)}
       ${diversionsHtml(b)}

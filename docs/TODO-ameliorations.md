@@ -71,3 +71,11 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] H. Point VFR publié à ≤ 3 NM préféré au point de contournement s'il garde la route hors de la zone (les routes de transit des VAC ne sont pas dans les données).
 - [x] I. Plafond bas sur le relief : route par les vallées (couloir ±15 NM, point le plus haut le plus bas) si elle abaisse le relief sous la route d'au moins 500 ft et rallonge de 40 % au plus : `lowPath`, `valleyRoute`.
 - [x] J. Route directe en bleu pointillé sur la carte à côté de la route facile.
+
+## Sécurité, lot du 26/11/2026 (2)
+- [x] K. Givrage carburateur croisière / descente (diagramme CAA approché) : `carbIce`, `carbOf`, alerte si fort.
+- [x] L. Ondes / rotors : zone sous le vent dessinée sur la carte (l'alerte `waveRisk` existait).
+- [x] M. Point équitemps / non-retour marqués sur la coupe et donc dans le PDF (le calcul `pnrEtp` existait).
+- [x] N. Branches au-dessus de l'eau : distance à la côte comparée au plané, gilets obligatoires au-delà (`waterOf`).
+- [x] O. Survol d'agglomérations trop bas (taille estimée d'après la population, à vérifier) : `townsLow`. Parc national et ZSM existaient ; réserves naturelles : pas de données.
+- [x] P. RMZ / TMZ traversées : contact radio / transpondeur obligatoire. La frontière (plan de vol) existait.

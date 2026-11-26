@@ -40,7 +40,7 @@ Règles du projet (à respecter) :
 - [x] 24. Point de début de descente (TOD), vario conseillé, heure de passage.
 
 ## Documents
-- [ ] 5. Bande de carte le long de la route dans le PDF (strip-map par branche). — Code écrit (buildPdf, renderNavMap opt.ratio) mais PDF non vérifié : générer un PDF et contrôler les pages « BANDE DE CARTE ».
+- [x] 5. Bande de carte le long de la route dans le PDF (strip-map par branche). — Vérifiée le 26/11/2026 sur un vrai PDF Pau → Lasbordes (carte OACI, route, repères 10 NM, cartouche temps / cap / distance).
 - [x] 8. Coût réel du voyage (taxes, carburant aux escales, partage, export club).
 - [x] 9. Plan de vol OACI pré-rempli complet à copier dans SOFIA.
 
@@ -100,3 +100,8 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] AE. NOTAM en français simple, triés par importance (`notamPlain`, `notamKind`).
 - [x] AF. Photo du terrain d'arrivée avec pistes OSM, schéma du tour de piste et point d'entrée, aussi dans le PDF (`airfieldPhoto`).
 - [x] AG. Éoliennes et lignes haute tension (OSM) sur la carte et la coupe (`osmObstacles`).
+
+## Lot du 26/11/2026 (5)
+- [x] AH. Indice de confiance : plafond, vent et visibilité comparés entre Météo-France, ICON et GFS sur 8 points de la route ; « prévision incertaine » si désaccord (`modelSpread`, `modelConfidence`).
+- [x] AI. Fiche radio dans l'ordre du vol avec l'heure, appels en route à l'entrée réelle des espaces, vent arrière et finale en auto-information / AFIS (`radioCard` existait).
+- [x] AJ. Vol retour : bouton « Préparer le retour » (route inversée, départ = arrivée + escale) ; l'aller-retour reprend la route de l'aller à l'envers (`revLeg`).

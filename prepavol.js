@@ -920,6 +920,8 @@
   }
   console.assert(JSON.stringify(stageLoad('LFCH:0/0/15 LFBP:75/0/10', 'LFBP')) === '{"m2":75,"m3":0,"m4":10}' && stageLoad('LFCH:0/0/15', 'LFBP') === null, 'stageLoad');
   // construction du voyage (toutes les étapes) sans affichage : sert au calcul, à la comparaison de deux horaires et à la surveillance
+  const revLeg = (f) => ({ wps: (f.wps || '').split(/[\s,;]+/).filter(Boolean).reverse().join(' '), exit: f.entry || 'auto', entry: f.exit || 'auto' });
+  console.assert((() => { const r = revLeg({ wps: 'A B,C', exit: 'LFBP-N', entry: 'auto' }); return r.wps === 'C B A' && r.exit === 'auto' && r.entry === 'LFBP-N'; })(), 'revLeg');
   async function buildTrip(f, say = () => {}) {
     const stops = f.stages.split(/[\s,;]+/).filter(Boolean);
     if (f.rt && (stops[stops.length - 1] || f.arr) !== f.dep) stops.push(f.dep);   // aller-retour : retour au terrain de départ
@@ -931,6 +933,8 @@
     // Étapes : départ → arrivée (points tournants du formulaire), puis escales suivantes en direct (points VFR auto)
     const legsDef = [{ dep: f.dep, arr: f.arr, wps: f.wps, exit: f.exit, entry: f.entry }];
     stops.forEach((s) => legsDef.push({ dep: legsDef[legsDef.length - 1].arr, arr: s, wps: '', exit: 'auto', entry: 'auto' }));
+    // aller-retour simple : le retour reprend la route de l'aller à l'envers (points tournants et points VFR inversés)
+    if (f.rt && legsDef.length === 2 && legsDef[1].arr === f.dep) Object.assign(legsDef[1], revLeg(f));
     // dégagement : celui du formulaire pour la dernière étape ; escales : saisi dans « Dégagements des escales » ou terrain à METAR le plus proche
     legsDef.forEach((L, k) => { L.alt = k === legsDef.length - 1 ? f.alt : (stAlts[k] || nearestMetarAd(L.arr) || ''); });
     const trip = [];
@@ -1022,6 +1026,11 @@
   }
   function bindSummary(b, sfx) {
     const on = (id, fn) => { const el = $('#' + id + sfx); if (el) el.addEventListener('click', fn); };
+    on('pf-back', () => {   // vol retour : route inversée, départ à l'arrivée prévue + durée d'escale
+      const f = b.f, t = new Date(b.eta.getTime() + (f.turn || 45) * 6e4);
+      store.set('form', { ...store.get('form', {}), dep: f.arr, arr: f.dep, ...revLeg(f), stages: '', rt: false, alt: '' });
+      openForm(); $('#pf-time').value = localInput(t); run(false);
+    });
     on('pf-pax', () => { const w = window.open('', '_blank'); if (!w) { alert('Fenêtre bloquée : autoriser les fenêtres de ce site.'); return; } w.document.write(paxBrief(b)); w.document.close(); w.focus(); setTimeout(() => w.print(), 300); });
     on('pf-efato', async () => {
       const st = $('#pf-fields-st' + sfx), out = $('#pf-efato-out' + sfx); st.textContent = 'Recherche des champs dans l\'axe…';
@@ -1528,6 +1537,7 @@
     // --- Terrains : briefing départ / arrivée
     // réserve météo : +x % du carburant d'étape si vent de face moyen > 15 kt ou météo en route marginale
     const wxRoute = await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message }));
+    const conf = horizon <= 10 && wxRoute && wxRoute.pts && wxRoute.pts.length ? await modelConfidence(wxRoute.pts).catch((e) => ({ err: e.message })) : null;
     const aq = horizon < 4 && wxRoute && wxRoute.pts ? await airQuality(wxRoute.pts).catch((e) => { console.warn('qualité de l\'air', e); return null; }) : null;
     const head = totDist ? legs.reduce((s, lg) => s + (lg.wind ? lg.wind.spd * Math.cos(rad(lg.wind.dir - lg.tc)) : 0) * lg.dist, 0) / totDist : 0;
     const wxWhy = [head > 15 && `vent de face moyen ${Math.round(head)} kt`, wxRoute && wxRoute.worst >= 1 && `météo « ${WXTXT[wxRoute.worst]} »`].filter(Boolean);
@@ -1575,7 +1585,7 @@
       f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, mids, depElev: elevOf(f.dep), wxRoute, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
+      profile, mids, depElev: elevOf(f.dep), wxRoute, conf, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -1633,6 +1643,39 @@
     return { pts: pts2, worst: Math.max(0, ...pts2.map((x) => x.level)) };
   }
   const WXCOL = ['#2ecc40', '#ff9f0a', '#ff3b30'], WXTXT = ['VFR favorable', 'VFR marginal', 'VFR défavorable'];
+  // ---------- indice de confiance : mêmes points / heures vus par 3 modèles (Open-Meteo « seamless » : AROME/ARPEGE, ICON, GFS)
+  const MODELS = { meteofrance_seamless: 'Météo-France', icon_seamless: 'ICON', gfs_seamless: 'GFS' };
+  // v : [{ m, base (ft sol, null = pas de couche basse ≥ 50 %), wind (kt), vis (m) }] -> raisons du désaccord
+  function modelSpread(v) {
+    const why = [], ft = (x) => (x.base == null ? 'pas de plafond bas' : `~${x.base} ft`);
+    const ce = v.map((x) => (x.base == null ? 99999 : x.base)), lo = Math.min(...ce), hi = Math.max(...ce);
+    if (lo < 2000 && hi - lo >= 1000) why.push(`plafond : ${v.map((x) => `${MODELS[x.m]} ${ft(x)}`).join(', ')}`);
+    const ws = v.filter((x) => x.wind != null);
+    if (ws.length > 1 && Math.max(...ws.map((x) => x.wind)) - Math.min(...ws.map((x) => x.wind)) >= 10) why.push(`vent : ${ws.map((x) => `${MODELS[x.m]} ${Math.round(x.wind)} kt`).join(', ')}`);
+    const vs = v.filter((x) => x.vis != null);
+    if (vs.length > 1 && Math.min(...vs.map((x) => x.vis)) < 5000 && Math.max(...vs.map((x) => x.vis)) >= 8000) why.push(`visibilité : ${vs.map((x) => `${MODELS[x.m]} ${Math.round(x.vis / 1000)} km`).join(', ')}`);
+    return why;
+  }
+  console.assert(modelSpread([{ m: 'gfs_seamless', base: 600, wind: 8 }, { m: 'icon_seamless', base: null, wind: 10 }]).length === 1 && !modelSpread([{ m: 'gfs_seamless', base: 2400, wind: 8 }, { m: 'icon_seamless', base: null, wind: 12 }]).length
+    && modelSpread([{ m: 'gfs_seamless', base: null, wind: 5, vis: 3000 }, { m: 'icon_seamless', base: null, wind: 18, vis: 20000 }]).length === 2, 'modelSpread');
+  async function modelConfidence(wpts) {
+    const n = Math.min(8, wpts.length), S = Array.from({ length: n }, (_, i) => wpts[Math.round(i * (wpts.length - 1) / Math.max(1, n - 1))]);
+    const days = [...new Set(S.map((x) => x.at.toISOString().slice(0, 10)))].sort(), M = Object.keys(MODELS);
+    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${S.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${S.map((x) => x.p[1].toFixed(3)).join(',')}`
+      + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,wind_speed_10m,visibility&models=${M.join(',')}&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+    if (!Array.isArray(d)) d = [d];
+    const pts = S.map((x, i) => {
+      const h = d[i].hourly, k = h.time.indexOf(roundHour(x.at)), g = (v, m) => (k < 0 ? null : (h[`${v}_${m}`] || [])[k] ?? null);
+      const v = M.map((m) => { const T = g('temperature_2m', m), Td = g('dew_point_2m', m), low = g('cloud_cover_low', m);
+        return { m, base: low != null && low >= 50 && T != null && Td != null ? Math.max(0, Math.round((T - Td) * 4) * 100) : null, wind: g('wind_speed_10m', m), vis: g('visibility', m), ok: T != null }; }).filter((y) => y.ok);
+      return { along: x.along, at: x.at, n: v.length, why: v.length > 1 ? modelSpread(v) : [] };
+    });
+    const bad = pts.filter((x) => x.why.length);
+    return { pts, bad, n: Math.max(0, ...pts.map((x) => x.n)) };
+  }
+  const confHtml = (b) => { const c = b.conf; if (!c || c.err || c.n < 2) return '';
+    return c.bad.length ? `<div class="warn">🎲 <b>Prévision incertaine</b> : les modèles (${Object.values(MODELS).join(', ')}) ne sont pas d'accord sur ${c.bad.length} des ${c.pts.length} points comparés — ${esc(c.bad.slice(0, 3).map((x) => `vers ${x.along.toFixed(0)} NM (${utc(x.at)}) : ${x.why.join(' ; ')}`).join(' · '))}. Prévoir une marge, regarder les webcams et la TEMSI avant de partir.</div>`
+      : `<p class="meta">🎲 Confiance : ${c.n} modèles (${Object.values(MODELS).join(', ')}) d'accord sur le plafond, le vent et la visibilité aux ${c.pts.length} points comparés.</p>`; };
 
   // ================================================================== coupe verticale
   // couleurs des espaces par classe, proches des cartes OACI / applications de navigation
@@ -2181,6 +2224,7 @@
     b.zones.filter((x) => x.crossed && x.below && x.act && x.act.st === 'active').forEach((x) => al.push(`⛔ Zone ${x.z.id} ${x.z.name} (${x.z.lower} – ${x.z.upper}) active pendant le vol (${x.act.why}) et traversée à ${b.f.ft} ft — contourner ou passer au-dessus / en dessous, ou obtenir l'accord du gestionnaire.`));
     b.zones.filter((x) => x.crossed && x.below && x.z.sup && x.z.sup.active !== false).forEach((x) => al.push(`${x.z.sup.active ? '⛔ ZRT active pendant le vol' : 'ZRT activable'} : ${x.z.name} (${x.z.id}, ${x.z.lower} – ${x.z.upper}) traversée — ${x.z.sup.active ? 'contournement obligatoire sauf accord du gestionnaire' : 'vérifier son activation (NOTAM, SIV)'} ; ${x.z.rmk.split(' — ')[1] || ''}.`));
     if (b.wxRoute && b.wxRoute.worst) al.push(`Météo en route : ${WXTXT[b.wxRoute.worst]} (${[...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 4).join(', ')}).`);
+    if (b.conf && b.conf.bad && b.conf.bad.length) al.push(`Prévision incertaine : les modèles météo divergent sur ${b.conf.bad.length} des ${b.conf.pts.length} points comparés (${b.conf.bad[0].why[0]}).`);
     if (b.gramet && !b.gramet.err && b.gramet.icing) al.push(`GRAMET : givrage probable près de ${b.f.ft} ft (nuage entre 0 et -15 °C) — vol VFR hors nuages impératif, prévoir une altitude plus basse.`);
     if (b.gramet && !b.gramet.err && b.gramet.storm) al.push('GRAMET : instabilité / orages possibles sur le trajet (voir TEMSI).');
     if (b.mountain) b.mountain.warn.forEach((w) => al.push('Montagne : ' + w));
@@ -2883,7 +2927,7 @@
       <details><summary><b>📻 Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
         ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
         ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
-      <p class="meta"><button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span></p>
+      <p class="meta"><button class="btn" id="pf-back${sfx}">↩️ Préparer le retour</button> <button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span></p>
       <div id="pf-fields-out${sfx}"></div><div id="pf-efato-out${sfx}"></div><div id="pf-obst-out${sfx}"></div>
       <details id="pf-photo-box${sfx}"><summary><b>📸 Photo du terrain d'arrivée et schéma du tour de piste</b></summary><div id="pf-photo${sfx}" class="meta">Ouvrir pour charger la photo…</div></details>`;
   }
@@ -3418,20 +3462,28 @@
     const svc = (id) => { const l = ((vacAt(id) || {}).freqs || []).join(' | '), fr = (re) => { const m = l.match(re); return m ? m[1] : ''; };
       return { twr: fr(/TWR[^|]*?(\d{3}\.\d{2,3})/), gnd: fr(/(?:GND|SOL)[^|]*?(\d{3}\.\d{2,3})/), afis: fr(/AFIS[^|]*?(\d{3}\.\d{2,3})/), aa: fr(/A\/A[^|]*?(\d{3}\.\d{2,3})/) || '123.500', atis: /ATIS/.test(l) }; };
     const d = svc(f.dep), a = svc(f.arr), cd = cityOf(f.dep), ca = cityOf(f.arr), l0 = b.legs[0], lN = b.legs[b.legs.length - 1];
-    const rows = [];
-    if (d.gnd || d.twr) rows.push(['Mise en route / roulage', `${d.gnd || d.twr}`, `${cd} ${d.gnd ? 'Sol' : 'Tour'}, ${reg}, ${typ}, ${pob} POB, au parking${d.atis ? ", avec l'information" : ''}, VFR à destination de ${ca}, demandons le roulage.`]);
-    else rows.push(['Roulage', d.afis || d.aa, `${cd} ${d.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, roule vers le point d'arrêt piste ${b.depInfo.rw ? rwyNum(b.depInfo.rw.best.qfu) : '..'}${d.afis ? ', pour un vol VFR à destination de ' + ca : ''}.`]);
-    if (d.twr) rows.push(['Sortie', d.twr, `${cd} Tour, ${reg}, ${/^[A-Z]{1,3}-[A-Z]+/.test(l0.to) ? `au point ${l0.to}` : 'quittons la zone'}, ${f.ft} ft, quittons la fréquence.`]);
-    const seen = new Set();
-    b.legs.forEach((lg) => lg.airspaces.filter((s) => s.call && s.freq && /TMA|CTR|CTA|SIV|RMZ|TMZ/.test(s.kind || '')).forEach((s) => {
+    const rows = [], add = (nm, phase, fq, msg) => rows.push({ nm, r: [`${phase} · ${utc(routePosAt(b, Math.min(nm, b.totDist)).at)}`, fq, msg] });
+    if (d.gnd || d.twr) add(0, 'Mise en route / roulage', `${d.gnd || d.twr}`, `${cd} ${d.gnd ? 'Sol' : 'Tour'}, ${reg}, ${typ}, ${pob} POB, au parking${d.atis ? ", avec l'information" : ''}, VFR à destination de ${ca}, demandons le roulage.`);
+    else add(0, 'Roulage', d.afis || d.aa, `${cd} ${d.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, roule vers le point d'arrêt piste ${b.depInfo.rw ? rwyNum(b.depInfo.rw.best.qfu) : '..'}${d.afis ? ', pour un vol VFR à destination de ' + ca : ''}.`);
+    if (d.twr) add(0.5, 'Sortie', d.twr, `${cd} Tour, ${reg}, ${/^[A-Z]{1,3}-[A-Z]+/.test(l0.to) ? `au point ${l0.to}` : 'quittons la zone'}, ${f.ft} ft, quittons la fréquence.`);
+    const seen = new Set(), smp = routeSamples(b, 2);
+    let acc = 0;
+    b.legs.forEach((lg) => { lg.airspaces.filter((s) => s.call && s.freq && /TMA|CTR|CTA|SIV|RMZ|TMZ/.test(s.kind || '')).forEach((s) => {
       if (seen.has(s.call)) return; seen.add(s.call);
-      rows.push([`En route (${s.name})`, String(s.freq).split(' / ')[0], `${s.call}, ${reg}, ${typ}, VFR de ${cd} à ${ca}, ${lg.from === f.dep ? 'au départ de ' + cd : 'à proximité de ' + lg.from}, ${f.ft} ft, transpondeur 7000, ${/SIV|INFO/i.test(s.call + s.kind) ? "demandons l'information de vol" : 'demandons le transit'}.`]);
-    }));
-    callPoints(b).forEach((c) => rows.push([`Clairance ${c.sg.name} (vers ${c.nm.toFixed(0)} NM, ${utc(c.at)})`, String(c.sg.freq || 'voir carte').split(' / ')[0],
-      `${reg}, ${typ}, ${pob} POB, VFR de ${cd} à ${ca}, à 5 NM de la limite de ${c.sg.name.replace(/ \(.\)$/, '')}, ${f.ft} ft, demandons le transit (entrée vers ${c.entry.toFixed(0)} NM).`]));
-    if (a.twr) rows.push(['Arrivée', a.twr, `${ca} Tour, ${reg}, ${typ}, ${/^[A-Z]{1,3}-[A-Z]+/.test(lN.from) ? `au point ${lN.from}` : `à 5 NM de ${ca}`}, ${f.ft} ft${a.atis ? ", avec l'information" : ''}, pour intégration.`]);
-    else rows.push(['Arrivée', a.afis || a.aa, `${ca} ${a.afis ? 'Info' : 'auto-information'}, ${reg}, ${typ}, à 5 NM du terrain, ${f.ft} ft, pour intégration${b.arrInfo.rw ? ' piste ' + rwyNum(b.arrInfo.rw.best.qfu) : ''}.`]);
-    return rows;
+      const ent = (smp.find((x) => x.lg === lg && s.poly && inPoly(x.p, s.poly)) || { along: acc }).along;   // entrée dans l'espace ; appel 5 NM avant (SIV : à l'entrée)
+      add(Math.max(lg.from === f.dep ? 1 : 0, ent - (/SIV/.test(s.kind) ? 0 : 5)), `En route (${s.name})`, String(s.freq).split(' / ')[0], `${s.call}, ${reg}, ${typ}, VFR de ${cd} à ${ca}, ${lg.from === f.dep ? 'au départ de ' + cd : 'à proximité de ' + lg.from}, ${f.ft} ft, transpondeur 7000, ${/SIV|INFO/i.test(s.call + s.kind) ? "demandons l'information de vol" : 'demandons le transit'}.`);
+    }); acc += lg.dist; });
+    callPoints(b).forEach((c) => add(c.nm, `Clairance ${c.sg.name} (vers ${c.nm.toFixed(0)} NM)`, String(c.sg.freq || 'voir carte').split(' / ')[0],
+      `${reg}, ${typ}, ${pob} POB, VFR de ${cd} à ${ca}, à 5 NM de la limite de ${c.sg.name.replace(/ \(.\)$/, '')}, ${f.ft} ft, demandons le transit (entrée vers ${c.entry.toFixed(0)} NM).`));
+    const ap = arrivalPlan(b), qfu = b.arrInfo.rw ? rwyNum(b.arrInfo.rw.best.qfu) : '..', main = /droite/.test(ap.side) ? ' main droite' : /gauche/.test(ap.side) ? ' main gauche' : '';
+    if (a.twr) add(b.totDist - 5, 'Arrivée', a.twr, `${ca} Tour, ${reg}, ${typ}, ${/^[A-Z]{1,3}-[A-Z]+/.test(lN.from) ? `au point ${lN.from}` : `à 5 NM de ${ca}`}, ${f.ft} ft${a.atis ? ", avec l'information" : ''}, pour intégration.`);
+    else {
+      const who = `${ca} ${a.afis ? 'Info' : ''}`.trim();
+      add(b.totDist - 5, 'Arrivée', a.afis || a.aa, `${who}${a.afis ? '' : ' (auto-information)'}, ${reg}, ${typ}, à 5 NM du terrain, ${ap.tdpFt} ft, pour intégration piste ${qfu}.`);
+      add(b.totDist, 'Vent arrière', a.afis || a.aa, `${who}, ${reg}, vent arrière${main} piste ${qfu}, ${ap.tdpFt} ft${main ? '' : ' (côté du tour de piste : voir la VAC)'}.`);
+      add(b.totDist, 'Finale', a.afis || a.aa, `${who}, ${reg}, en finale piste ${qfu} pour un complet.`);
+    }
+    return rows.sort((x, y) => x.nm - y.nm).map((x) => x.r);   // tri stable : à NM égal, l'ordre d'ajout reste
   }
   const radioHtml = (b) => `<details><summary><b>📻 Fiche radio de l'étape</b> (messages types, à adapter aux consignes de la VAC)</summary>
       <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table></details>`;
@@ -3714,6 +3766,7 @@
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
       ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
         <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
+      ${confHtml(b)}
       <h4>✈️ Coupe verticale de la route</h4>
       ${profileSvg(b.vprofile, b, sfx)}
       ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
@@ -4284,6 +4337,7 @@
         p.low != null ? `${p.low} %` : '?', p.baseAgl != null ? `${p.baseAgl} ft sol / ${p.baseAmsl} ft` : '?', p.vis != null ? `${Math.round(p.vis / 1000)} km` : '?',
         p.rr != null ? `${p.rr} mm` : '?', p.gust != null ? `${Math.round(p.gust)} kt` : '?', p.why.join(', ')]), { size: 7 });
       para('Base estimée par l\'écart température / point de rosée (x 400 ft) - indicatif, ne remplace pas les TEMSI.', { size: 7, color: [90, 90, 90] });
+      if (b.conf && b.conf.bad && b.conf.n > 1) para(b.conf.bad.length ? `Prévision incertaine (modèles ${Object.values(MODELS).join(', ')}) : ${b.conf.bad.slice(0, 3).map((x) => `vers ${x.along.toFixed(0)} NM (${utc(x.at)}) : ${x.why.join(' ; ')}`).join(' · ')}.` : `Confiance : ${b.conf.n} modèles d'accord aux ${b.conf.pts.length} points comparés.`, { size: 7.5, color: b.conf.bad.length ? [190, 90, 0] : [20, 130, 40] });
     } else para('Prévision en route indisponible.', { size: 8 });
     h2('Vent et stations le long de la route');
     if (b.winds) para(`Vent prévu à ${b.f.ft} ft (Open-Meteo, interpolé entre niveaux, à l'heure de passage de chaque branche) : ${b.legs.map((l) => `${l.from}-${l.to} ${r3(l.wind.dir)}°/${Math.round(l.wind.spd)} kt ${Math.round(l.wind.t)}°C`).join(' · ')}. Isotherme 0° ~${Math.round((b.winds[0].iso || 0) * 3.281 / 100) * 100} ft.`, { size: 8 });

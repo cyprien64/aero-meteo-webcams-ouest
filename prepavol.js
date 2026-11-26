@@ -289,7 +289,7 @@
   A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
 
   // ================================================================== données
-  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null;
+  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null, ADWX = null;
   async function loadAip() {
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
@@ -297,6 +297,7 @@
     if (!SPECIAL) SPECIAL = await A.getLive('special.json').catch(() => ({ act: [], zsm: [] }));
     if (!LANDM) LANDM = await A.getJSON('data/landmarks.json', 'default').catch(() => ({ towns: [], mw: {}, rv: {}, lk: [] }));
     if (!FIRES) FIRES = await A.getLive('fires.json').catch(() => ({ data: [] }));
+    if (!ADWX) ADWX = await A.getLive('adwx.json').catch(() => ({ data: {} }));
     await loadVfr();
   }
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
@@ -368,6 +369,17 @@
       .then(() => store.keys()).then((k) => k.length > 200 && Promise.all(k.slice(0, k.length - 200).map((x) => store.delete(x)))).catch(() => {});
     return j;
   }
+  // prévision horaire des terrains publiée par la collecte GitHub (adwx.json, toutes les 3 h) : même forme qu'une réponse Open-Meteo,
+  // pour ne demander à Open-Meteo que les points propres à la route (le quota est par connexion)
+  function adwxHourly(file, id) {
+    const d = file && file.data && file.data[id]; if (!d) return null;
+    const t0 = Date.parse(file.start + 'Z'), h = { time: d[0].map((_, k) => new Date(t0 + k * 36e5).toISOString().slice(0, 13) + ':00') };
+    file.vars.forEach((v, i) => { h[v] = d[i]; });
+    return h;
+  }
+  console.assert((() => { const h = adwxHourly({ start: '2026-11-26T00:00', vars: ['temperature_2m', 'cape'], data: { LFBP: [[5, 6], [0, 10]] } }, 'LFBP'); return h.time[1] === '2026-11-26T01:00' && h.cape[1] === 10 && h.temperature_2m[0] === 5; })(), 'adwxHourly');
+  // série du terrain si elle couvre toutes les heures demandées (sinon null : Open-Meteo)
+  const adH = (id, ...ts) => { const h = adwxHourly(ADWX, id); return h && ts.every((t) => h.time.includes(roundHour(new Date(t)))) ? h : null; };
   const WLV = [1000, 975, 950, 925, 900, 850, 800, 700, 600];
   const roundHour = (d) => new Date(Math.round(d.getTime() / 36e5) * 36e5).toISOString().slice(0, 13) + ':00';
   // Vent à l'altitude exacte (interpolé entre les niveaux de pression encadrants, via leur géopotentiel)
@@ -393,6 +405,8 @@
   }
   // température et vent à 10 m prévus, un point par terrain à son heure
   async function surfaceForecast(list) {
+    const H = list.map(([id, t]) => adH(id, t));
+    if (H.every(Boolean)) return list.map(([, t], i) => { const h = H[i], k = h.time.indexOf(roundHour(t)); return { temp: h.temperature_2m[k], wdir: h.wind_direction_10m[k], wspd: h.wind_speed_10m[k], gust: h.wind_gusts_10m[k] }; });
     const ap = list.map(([id]) => A.aptByIcao[id]), days = list.map(([, t]) => t.toISOString().slice(0, 10)).sort();
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${ap.map((a) => (+a.la).toFixed(3)).join(',')}&longitude=${ap.map((a) => (+a.lo).toFixed(3)).join(',')}`
       + `&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
@@ -3258,15 +3272,19 @@
     if (!cand.length) throw new Error(`Aucun terrain avec VAC entre 15 et ${Math.round(maxNm)} NM.`);
     cand.forEach((x) => { x.min = x.d / f.tas * 60 + 10; x.eta = new Date(depT.getTime() + x.min * 6e4); x.mid = destPt(P0, bearing(P0, [+x.a.la, +x.a.lo]), x.d / 2); });
     say(`Météo sur ${cand.length} destinations…`);
-    const pts = cand.flatMap((x) => [{ p: x.mid, at: new Date((depT.getTime() + x.eta.getTime()) / 2) }, { p: [+x.a.la, +x.a.lo], at: x.eta }]);
-    const days = [...new Set(pts.map((x) => x.at.toISOString().slice(0, 10)))].sort(), W = [];
-    for (let i = 0; i < pts.length; i += 100) {
-      const ch = pts.slice(i, i + 100);
+    // prévision publiée des terrains (adwx.json) : arrivée = le terrain ; milieu = terrain le plus proche à moins de 20 NM ; le reste à Open-Meteo
+    const near = (p) => { let best = null, bd = 20; for (const a of A.APTS) { if (!ADWX || !ADWX.data || !ADWX.data[a.icao]) continue; const d = distNm(p, [+a.la, +a.lo]); if (d < bd) { bd = d; best = a; } } return best; };
+    const pts = cand.flatMap((x) => [{ p: x.mid, at: new Date((depT.getTime() + x.eta.getTime()) / 2), ad: near(x.mid) }, { p: [+x.a.la, +x.a.lo], at: x.eta, ad: x.a }]);
+    const W = new Array(pts.length), rest = [];
+    const lvl = (h, k, elevFt) => wxLevel({ T: h.temperature_2m[k], Td: h.dew_point_2m[k], low: h.cloud_cover_low[k], vis: h.visibility[k], rr: h.precipitation[k], wc: h.weather_code[k], gust: h.wind_gusts_10m[k], elevFt }, f.ft);
+    pts.forEach((x, i) => { const h = x.ad && adH(x.ad.icao, x.at); if (h) W[i] = lvl(h, h.time.indexOf(roundHour(x.at)), +x.ad.elev || 0); else rest.push(i); });
+    const days = [...new Set(pts.map((x) => x.at.toISOString().slice(0, 10)))].sort();
+    for (let i = 0; i < rest.length; i += 100) {
+      const ch = rest.slice(i, i + 100).map((k) => pts[k]);
       let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${ch.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${ch.map((x) => x.p[1].toFixed(3)).join(',')}`
         + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
       if (!Array.isArray(d)) d = [d];
-      ch.forEach((x, j) => { const h = d[j].hourly, k = h.time.indexOf(roundHour(x.at)), g = (v) => (k < 0 ? null : h[v][k]);
-        W.push(wxLevel({ T: g('temperature_2m'), Td: g('dew_point_2m'), low: g('cloud_cover_low'), vis: g('visibility'), rr: g('precipitation'), wc: g('weather_code'), gust: g('wind_gusts_10m'), elevFt: Math.round((d[j].elevation || 0) * 3.281) }, f.ft)); });
+      ch.forEach((x, j) => { const h = d[j].hourly; W[rest[i + j]] = lvl(h, h.time.indexOf(roundHour(x.at)), Math.round((d[j].elevation || 0) * 3.281)); });
     }
     const pz = ((ZONES && ZONES.data) || []).filter((z) => z.type === 'P' && (parseAlt(z.lower) ?? 0) < f.ft);
     cand.forEach((x, i) => {
@@ -3870,11 +3888,16 @@
     trip.forEach((b) => { [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6].forEach((k) => add(`R${b.stage}-${k}`, `route ${b.f.dep}→${b.f.arr}`, routePosAt(b, b.totDist * k).p, 'route')); add(b.f.arr, b.f.arr, ap(b.f.arr), 'arr'); if (b.f.alt) add(b.f.alt, b.f.alt, ap(b.f.alt), 'alt'); });
     trip.forEach((b) => diversions(b).forEach((x) => x.list.slice(0, 4).forEach((t) => add(t.a.icao, t.a.icao, [+t.a.la, +t.a.lo], 'div'))));
     const P = pts.slice(0, 40), days = [...new Set([b0.depT, trip[trip.length - 1].eta].map((d) => d.toISOString().slice(0, 10)))].sort();
-    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${P.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${P.map((x) => x.p[1].toFixed(3)).join(',')}`
+    // terrains : prévision publiée (adwx.json) si elle couvre la journée ; seuls les points de route (et terrains non couverts) vont à Open-Meteo
+    const dayEnd = Date.parse(days[days.length - 1] + 'T23:00Z'), dayStart = Date.parse(days[0] + 'T00:00Z');
+    P.forEach((x) => { if (x.kind !== 'route') { const h = adH(x.id, Math.max(dayStart, Date.now() - 36e5), Math.min(dayEnd, Date.now() + 60 * 36e5)); if (h) { x.h = h; x.elev = +((A.aptByIcao[x.id] || {}).elev) || 0; } } });
+    const Q = P.filter((x) => !x.h);
+    if (!Q.length) return { pts: P };
+    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${Q.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${Q.map((x) => x.p[1].toFixed(3)).join(',')}`
       + '&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_180m,wind_direction_180m,cape'
       + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
     if (!Array.isArray(d)) d = [d];
-    P.forEach((x, i) => { x.h = d[i].hourly; x.elev = (d[i].elevation || 0) * 3.281; });
+    Q.forEach((x, i) => { x.h = d[i].hourly; x.elev = (d[i].elevation || 0) * 3.281; });
     return { pts: P };
   }
   // conditions à une heure donnée en un point : niveau 0 favorable / 1 marginal / 2 défavorable, et le détail

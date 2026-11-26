@@ -52,7 +52,7 @@ STATUS = {}   # état de chaque fichier pour la surveillance (status.json)
 # tronquée ; on garde alors la version publiée plutôt que d'écraser de bonnes données par un fichier presque vide.
 MIN_ITEMS = {'metar.json': ('data', 5), 'taf.json': ('data', 3), 'notam.json': ('fir', 10), 'supaip.json': ('data', 10),
              'vac.json': ('data', 100), 'zones.json': ('data', 100), 'airspaces.json': ('data', 100), 'escale.json': ('data', 100),
-             'special.json': ('act', 20)}
+             'special.json': ('act', 20), 'adwx.json': ('data', 200)}
 
 
 def suspect(name, obj):
@@ -1439,6 +1439,51 @@ assert parse_firms('latitude,longitude,frp,acq_date,acq_time,confidence\n43.3,-0
                    42.0, -5.4, 49.0, 2.6) == [[43.3, -0.4, 12.5, '2026-07-01 1342']]
 
 
+# ---------------------------------------------------------------- prévision des terrains (Open-Meteo), une fois pour tous les visiteurs
+ADWX_VARS = ['temperature_2m', 'dew_point_2m', 'cloud_cover_low', 'visibility', 'precipitation', 'weather_code',
+             'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'wind_speed_180m', 'wind_direction_180m', 'cape']
+ADWX_EVERY_H = 3   # ~530 appels par mise à jour (439 terrains, 12 variables) : 8 par jour restent sous la limite quotidienne
+
+
+def adwx_pack(blocks):
+    """Réponses Open-Meteo (une par terrain) -> début commun et séries arrondies, dans l'ordre de ADWX_VARS."""
+    start = blocks[0][1]['time'][0]
+    rnd = lambda v, x: None if x is None else (round(x, 1) if v in ('temperature_2m', 'dew_point_2m', 'precipitation') else int(round(x)))  # noqa: E731
+    return start, {icao: [[rnd(v, x) for x in h[v]] for v in ADWX_VARS] for icao, h in blocks if h['time'][0] == start}
+
+
+assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [1.26] for v in ADWX_VARS}})]) == ('2026-11-26T00:00', {'LFBP': [[1.3], [1.3], [1], [1], [1.3], [1], [1], [1], [1], [1], [1], [1]]})
+
+
+def collect_adwx():
+    print('Prévision des terrains (Open-Meteo)')
+    if FALLBACK_URL:
+        try:
+            prev = json.loads(get(f'{FALLBACK_URL}/data/live/adwx.json', timeout=60))
+            if (NOW - datetime.fromisoformat(prev['generated'])).total_seconds() < ADWX_EVERY_H * 3600:
+                save('adwx.json', prev, True)
+                print('  récente : reprise telle quelle')
+                return
+        except Exception:  # noqa: BLE001
+            pass
+    apts = [a for a in aerodromes() if a[0].startswith('LF')]
+    blocks = []
+    try:
+        for i in range(0, len(apts), 100):
+            ch = apts[i:i + 100]
+            url = ('https://api.open-meteo.com/v1/forecast?latitude=' + ','.join(f'{a[2]:.3f}' for a in ch) + '&longitude=' + ','.join(f'{a[3]:.3f}' for a in ch)
+                   + '&hourly=' + ','.join(ADWX_VARS) + '&wind_speed_unit=kn&timezone=UTC&forecast_days=3')
+            d = json.loads(get(url, timeout=120))
+            d = d if isinstance(d, list) else [d]
+            blocks += [(a[0], x['hourly']) for a, x in zip(ch, d)]
+            time.sleep(15)   # limite par minute d'Open-Meteo
+        start, data = adwx_pack(blocks)
+        save('adwx.json', {'generated': NOW.isoformat(), 'source': 'Open-Meteo (modèles « best match »)', 'start': start, 'vars': ADWX_VARS, 'data': data})
+    except Exception as e:  # noqa: BLE001
+        print('  échec', e)
+        fallback('adwx.json')
+
+
 def collect_fires():
     print('Feux actifs (FIRMS)')
     la0, lo0, la1, lo1 = map(float, BBOX.split(','))
@@ -1476,7 +1521,7 @@ def write_status():
 # collecte lente (VAC, zones, OSM, webcams) : une fois par nuit et à chaque modification du code ;
 # la collecte rapide (toutes les 15 min) republie ses fichiers tels quels, sans toucher à leur date de dernier succès
 SLOW_FILES = ['vac.json', 'zones.json', 'airspaces.json', 'special.json', 'cams_status.json', 'osm_near.json']
-FAST = ['metar', 'notam', 'supaip', 'fees', 'pratique', 'vigilance', 'fires']
+FAST = ['metar', 'notam', 'supaip', 'fees', 'pratique', 'vigilance', 'fires', 'adwx']
 
 
 def keep(name):
@@ -1484,12 +1529,12 @@ def keep(name):
     STATUS[name] = 'gardé (collecte lente)' if ok else 'échec (fichier de la collecte lente introuvable)'
 
 
-assert set(FAST) < {'metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires'}
+assert set(FAST) < {'metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires', 'adwx'}
 
 
 if __name__ == '__main__':
     fast = sys.argv[1:] == ['fast']
-    what = FAST if fast else (sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires'])
+    what = FAST if fast else (sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires', 'adwx'])
     if fast:
         print('Collecte rapide : fichiers de la collecte lente repris de la version publiée')
         for f in SLOW_FILES:
@@ -1514,6 +1559,8 @@ if __name__ == '__main__':
         collect_vigilance()
     if 'fires' in what:
         collect_fires()
+    if 'adwx' in what:
+        collect_adwx()
     if os.path.exists(os.path.join(OUT, 'vac.json')):   # extrait léger pour la carte (carburant, paiement) : 700 ko -> quelques dizaines
         vac = json.load(open(os.path.join(OUT, 'vac.json'), encoding='utf-8'))
         if 'osm' in what or not sys.argv[1:]:

@@ -79,3 +79,15 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] N. Branches au-dessus de l'eau : distance à la côte comparée au plané, gilets obligatoires au-delà (`waterOf`).
 - [x] O. Survol d'agglomérations trop bas (taille estimée d'après la population, à vérifier) : `townsLow`. Parc national et ZSM existaient ; réserves naturelles : pas de données.
 - [x] P. RMZ / TMZ traversées : contact radio / transpondeur obligatoire. La frontière (plan de vol) existait.
+
+## Lot du 26/11/2026 (3)
+- [x] Q. Webcams à moins de 5 NM de la route avec l'heure de passage (`routeCams`).
+- [x] R. Soleil bas face à la route (croisière et finale) : `sunPos`, `glareOf`.
+- [x] S. Fiche briefing passagers à imprimer (`paxBrief`).
+- [x] T. Panne radio : 7600, SERA.14083, feux de la tour, espaces contrôlés traversés, consignes des VAC (2 VAC seulement en ont dans leur texte).
+- [x] U. Champs de secours OpenStreetMap à la demande, sur la carte et la coupe (taille approchée par le rectangle englobant).
+- [x] V. Meilleur jour sur 7 jours (une requête, AZBA pour le jour du vol seulement).
+- [x] W. Climatologie sur 10 ans pour un vol au-delà de 15 jours (`climatology`).
+- [x] X. QNH des METAR le long de la route, alerte au-delà de 3 hPa.
+- [x] Y. Thermiques l'été et brise de mer aux terrains côtiers (`thermals`, `seaBreeze`, `seaDir`).
+- [x] Z. Vitesse d'approche corrigée (masse, rafales) : `vappOf`.

@@ -377,9 +377,9 @@
   async function surfaceForecast(list) {
     const ap = list.map(([id]) => A.aptByIcao[id]), days = list.map(([, t]) => t.toISOString().slice(0, 10)).sort();
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${ap.map((a) => (+a.la).toFixed(3)).join(',')}&longitude=${ap.map((a) => (+a.lo).toFixed(3)).join(',')}`
-      + `&hourly=temperature_2m,wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+      + `&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
     if (!Array.isArray(d)) d = [d];
-    return list.map(([, t], i) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { temp: h.temperature_2m[k], wdir: h.wind_direction_10m[k], wspd: h.wind_speed_10m[k] }; });
+    return list.map(([, t], i) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { temp: h.temperature_2m[k], wdir: h.wind_direction_10m[k], wspd: h.wind_speed_10m[k], gust: h.wind_gusts_10m[k] }; });
   }
   async function elevations(points) { // m, par paquets de 100
     const out = [];
@@ -982,6 +982,7 @@
       const trip = await buildTrip(f, (t) => { if (my === runSeq) prog.textContent = t; });
       if (my === runSeq) prog.textContent = 'Créneaux de départ…';
       trip[0].slots = await departureSlots(trip).catch((e) => { console.warn('créneaux', e); return null; });
+      if ((trip[0].depT - Date.now()) / 864e5 > 15) trip[0].clim = await climatology(trip).catch((e) => { console.warn('climatologie', e); return null; });
       if (my !== runSeq) return;   // un calcul plus récent a été lancé entre-temps : on n'affiche pas l'ancien
       // VAC des terrains de la route : mises en cache pour être consultables hors ligne
       if (window.caches) caches.open('aww-offline-vac').then((c) => Promise.all([...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))]
@@ -991,7 +992,7 @@
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
-      out.innerHTML = verdictHtml(trip) + wxStripHtml(trip) + slotsHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
+      out.innerHTML = verdictHtml(trip) + wxStripHtml(trip) + slotsHtml(trip) + climHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
         ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
         : summaryHtml(b, '-' + i)).join('');
       trip.forEach((b, i) => bindSummary(b, '-' + i));
@@ -1020,6 +1021,16 @@
   }
   function bindSummary(b, sfx) {
     const on = (id, fn) => { const el = $('#' + id + sfx); if (el) el.addEventListener('click', fn); };
+    on('pf-pax', () => { const w = window.open('', '_blank'); if (!w) { alert('Fenêtre bloquée : autoriser les fenêtres de ce site.'); return; } w.document.write(paxBrief(b)); w.document.close(); w.focus(); setTimeout(() => w.print(), 300); });
+    on('pf-fields', async () => {
+      const st = $('#pf-fields-st' + sfx), out = $('#pf-fields-out' + sfx); st.textContent = 'Recherche OpenStreetMap…';
+      try {
+        b.fields = await rescueFields(b); st.textContent = '';
+        out.innerHTML = `<p class="meta">🌾 ${b.fields.length ? `${b.fields.length} champs (le plus grand par tranche de 5 NM, à moins de 1,5 NM de la route) : ${b.fields.map((x) => `${x.along.toFixed(0)} NM (${x.L} × ${x.W} m, ${x.d.toFixed(1)} NM)`).join(' · ')}` : 'aucun grand champ trouvé près de la route'}. Repérés sur OpenStreetMap (prairies, cultures) : clôtures, lignes électriques, pente et cultures hautes inconnues — à reconnaître en vol. Taille d'après le rectangle englobant.</p>`;
+        if (routeLayer) b.fields.forEach((x) => L.circleMarker(x.c, { radius: 5, color: '#fff', weight: 1, fillColor: '#2ecc40', fillOpacity: .9 }).bindTooltip(`Champ ${x.L} × ${x.W} m (${esc(x.kind || '')}) — ${x.along.toFixed(0)} NM`, { className: 'tip' }).addTo(routeLayer));
+        const sv = $('#pf-vp' + sfx); if (sv && b.vprofile) { sv.outerHTML = cutSvg(b.vprofile, b, { id: 'pf-vp' + sfx }); cursorOn(b, $('#pf-vp' + sfx), $('#pf-vpinfo' + sfx)); }
+      } catch (e) { st.textContent = '⚠️ ' + (e.message || e); }
+    });
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
@@ -1519,7 +1530,7 @@
       const tod = f.T.takeoff && f.T.takeoff.table ? perfDist(f.T.takeoff.table, pc) : base ? Math.round(base * factor / 10) * 10 : null;
       const ldg = f.T.landing && f.T.landing.table ? perfDist(f.T.landing.table, pc) : null;
       const cons = classifyConsignes(v);
-      return { id, role, a, v, m, rw, len, grass, elev, temp, da, wxSrc: useFc ? 'prévision' : 'METAR', when, tod, ldg, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
+      return { id, role, a, v, m, rw, len, grass, elev, temp, da, wdir, wspd, gust: useFc ? p.gust : m ? m.wgst : null, wxSrc: useFc ? 'prévision' : 'METAR', when, tod, ldg, factor, cons, infos: infosVac(v), notams: (adNotams.find((x) => x.id === id) || {}).list || [] };
     };
     const depInfo = terrain(f.dep, 'DÉPART'), arrInfo = terrain(f.arr, 'ARRIVÉE'), altInfo = f.alt ? terrain(f.alt, 'DÉGAGEMENT') : null;
 
@@ -1702,7 +1713,7 @@
     const nA = nightAlong(b), night = nA != null ? `<rect x="${X(nA)}" y="${T}" width="${X(v.total) - X(nA)}" height="${H - B - T}" fill="#1a237e" fill-opacity=".35"><title>nuit aéronautique à partir de ${nA.toFixed(0)} NM</title></rect><text x="${X(nA) + 3}" y="${T + 10}" font-size="9" fill="#9fa8da">🌙 nuit aéro</text>` : '';
     const ac = opts.pos ? `<g transform="translate(${X(opts.pos.nm).toFixed(1)},${Y(opts.pos.ft).toFixed(1)})"><circle r="6" fill="#00e5ff" stroke="#000"/><line x1="0" x2="0" y1="6" y2="${(H - B - Y(opts.pos.ft)).toFixed(1)}" stroke="#00e5ff" stroke-dasharray="2 2"/></g>` : '';
     return `<svg ${opts.id ? `id="${opts.id}"` : ''} viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:${C.bg};border-radius:6px;display:block;touch-action:pan-y" font-family="Helvetica, Arial, sans-serif">
-      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${ppm}${mk.join('')}${wx}${ac}
+      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${ppm}${(b.fields || []).map((x) => `<path d="M${X(x.along).toFixed(1)},${H - B - 1} l-5,-9 h10 z" fill="#2ecc40"><title>Champ ${x.L} × ${x.W} m à ${x.along.toFixed(0)} NM</title></path>`).join('')}${mk.join('')}${wx}${ac}
       <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>`;
   }
   function profileSvg(v, b, sfx = '') {
@@ -1726,7 +1737,7 @@
       document.getElementById('vp-big')?.remove();
       const d = document.createElement('div'); d.id = 'vp-big';
       d.innerHTML = `<button class="btn" style="float:right">✕ Fermer</button><b>✈️ Coupe ${esc(b.ids.join(' → '))}</b><div class="meta vp-info">Survole ou touche la coupe.</div>`;
-      const c = sv0.cloneNode(true); c.removeAttribute('id'); d.insertBefore(c, d.querySelector('.vp-info'));
+      const c = ($('#pf-vp' + sfx) || sv0).cloneNode(true); c.removeAttribute('id'); d.insertBefore(c, d.querySelector('.vp-info'));
       d.querySelector('button').addEventListener('click', () => d.remove());
       document.body.appendChild(d); cursorOn(b, c, d.querySelector('.vp-info'));
     });
@@ -2559,8 +2570,81 @@
     }
     return out.sort((x, y) => x.along - y.along);
   }
+  // ---------- position du soleil (hauteur et azimut vrai, degrés) — formules simplifiées (précision ~1°)
+  function sunPos(t, la, lo) {
+    const d = (+t - 946728000000) / 864e5, g = rad((357.529 + 0.98560028 * d) % 360), q = (280.459 + 0.98564736 * d) % 360;
+    const L0 = rad(q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)), e = rad(23.439 - 0.00000036 * d);
+    const ra = Math.atan2(Math.cos(e) * Math.sin(L0), Math.cos(L0)), dec = Math.asin(Math.sin(e) * Math.sin(L0));
+    const H = rad(((18.697374558 + 24.06570982441908 * d) % 24) * 15 + lo) - ra, ph = rad(la);
+    const el = Math.asin(Math.sin(ph) * Math.sin(dec) + Math.cos(ph) * Math.cos(dec) * Math.cos(H));
+    return { el: deg(el), az: (deg(Math.atan2(-Math.sin(H), Math.tan(dec) * Math.cos(ph) - Math.sin(ph) * Math.cos(H))) + 360) % 360 };
+  }
+  console.assert((() => { const a = sunPos(Date.UTC(2026, 5, 21, 12, 3), 43.38, -0.42), b = sunPos(Date.UTC(2026, 11, 21, 15, 30), 43.38, -0.42);
+    return a.el > 68 && a.el < 71 && a.az > 165 && a.az < 195 && b.el > 2 && b.el < 12 && b.az > 218 && b.az < 240; })(), 'sunPos');
+  const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+  // soleil bas (0-15°) à moins de 25° de l'axe : en croisière (milieu de chaque branche) et en finale (piste probable à l'arrivée)
+  function glareOf(b) {
+    const out = [];
+    b.legs.forEach((lg) => { const t = lg.eto.getTime() - lg.min * 3e4, p = destPt(lg.a, lg.tc, lg.dist / 2), sp = sunPos(t, p[0], p[1]);
+      if (sp.el > 0 && sp.el <= 15 && angDiff(sp.az, lg.tc) <= 25) out.push({ what: `branche ${lg.from}→${lg.to}`, t: new Date(t), sp, off: angDiff(sp.az, lg.tc) }); });
+    const rw = b.arrInfo && b.arrInfo.rw, a = A.aptByIcao[b.f.arr];
+    if (rw && a) { const qfu = rw.best.qfu, sp = sunPos(b.eta, +a.la, +a.lo); if (sp.el > 0 && sp.el <= 15 && angDiff(sp.az, qfu) <= 25) out.push({ what: `finale piste ${rwyNum(qfu)} à ${b.f.arr}`, t: b.eta, sp, off: angDiff(sp.az, qfu) }); }
+    return out;
+  }
+  // ---------- QNH des METAR dans l'ordre du passage (départ, route, arrivée)
+  function qnhList(b) {
+    const ad = (id) => (b.wx.find((x) => x.id === id) || {}).metar;
+    const l = [[b.f.dep, ad(b.f.dep)], ...b.wxNear.map((x) => [x.m.icaoId, x.m]), [b.f.arr, ad(b.f.arr)]].filter(([, m]) => m && m.altim).map(([id, m]) => ({ id, q: Math.round(m.altim) }));
+    return l.filter((x, i) => !i || x.id !== l[i - 1].id);
+  }
+  // ---------- côte : directions (8) où l'on trouve la mer à 5 NM ; null si terrain à l'intérieur des terres
+  function seaDir(p) {
+    if (!window.FRANCE) return null;
+    const w = [0, 45, 90, 135, 180, 225, 270, 315].filter((az) => { const q = destPt(p, az, 5); return q[0] >= 43.4 && !inFrance(q); });
+    if (!w.length) return null;
+    return (deg(Math.atan2(w.reduce((s, a) => s + Math.sin(rad(a)), 0), w.reduce((s, a) => s + Math.cos(rad(a)), 0))) + 360) % 360;
+  }
+  if (window.FRANCE) console.assert(seaDir([43.38, -0.42]) === null && seaDir([44.596, -1.111]) != null && angDiff(seaDir([47.76, -3.44]), 200) < 45, 'seaDir (Pau, Arcachon)');
+  // ---------- brise de mer à l'arrivée : terrain côtier, printemps / été, après-midi, chaud, vent général faible
+  function seaBreeze(b) {
+    const t = b.arrInfo, a = A.aptByIcao[b.f.arr]; if (!t || !a) return null;
+    const loc = new Date(b.eta), mo = loc.getMonth() + 1, h = loc.getHours();
+    if (mo < 4 || mo > 9 || h < 11 || h > 19 || !(t.temp >= 18) || (t.wspd != null && t.wspd > 12)) return null;
+    const sd = seaDir([+a.la, +a.lo]); if (sd == null) return null;
+    const rw = runwayFor(t.v, sd, 12);
+    return { from: Math.round(sd / 10) * 10, rwy: rw ? rwyNum(rw.best.qfu) : null };
+  }
+  // ---------- thermiques : été, après-midi, chaud et sec en surface -> turbulence sous la base des cumulus (~400 ft par °C d'écart T / Td)
+  function thermals(b) {
+    const P = ((b.wxRoute && b.wxRoute.pts) || []).filter((p) => { const d = new Date(p.at), mo = d.getMonth() + 1, h = d.getHours(); return mo >= 5 && mo <= 9 && h >= 11 && h <= 18 && p.T >= 22 && p.Td != null && p.T - p.Td >= 8; });
+    if (!P.length) return null;
+    const x = P.reduce((m, p) => (p.T > m.T ? p : m));
+    return { T: Math.round(x.T), base: Math.round((x.T - x.Td) * 4) * 100, along: x.along };
+  }
+  // ---------- vitesse d'approche : Vapp de la fiche avion × √(masse / masse max) + la moitié de l'écart de rafale ; sans Vapp : 1,3 VSO (à vérifier)
+  function vappOf(b) {
+    const sp = b.f.T.speeds || {}, k = Object.keys(sp).find((x) => /^Vapp/.test(x)), base = k ? +sp[k] : sp.VSO ? Math.round(1.3 * sp.VSO) : null;
+    if (!base) return null;
+    const t = b.arrInfo || {}, mass = Math.max(0.5, Math.min(1, (b.landMass || b.f.T.mtow) / b.f.T.mtow)), gust = t.gust != null && t.wspd != null ? Math.max(0, Math.round((t.gust - t.wspd) / 2)) : 0;
+    return { v: Math.round(base * Math.sqrt(mass)) + gust, base, src: k || '1,3 × VSO (à vérifier, pas de Vapp dans la fiche avion)', mass: Math.round(b.landMass || 0), gust };
+  }
+  console.assert((() => { const v = vappOf({ f: { T: { mtow: 900, speeds: { VSO: 45, 'Vapp (1,45) volets 1': 75 } } }, landMass: 729, arrInfo: { wspd: 10, gust: 20 } }); return v.v === 68 + 5 && v.gust === 5; })(), 'vappOf');
+  // ---------- webcams à moins de 5 NM de la route, dans l'ordre du passage (hors départ / arrivée, déjà proposées)
+  function routeCams(b) {
+    return (A.SOURCES || []).filter((s) => s.t === 'cam').map((s) => ({ s, r: routeDist([s.la, s.lo], b.pts) })).filter((x) => x.r.d <= 5 && x.r.along > 3 && x.r.along < b.totDist - 3)
+      .sort((x, y) => x.r.along - y.r.along).slice(0, 30).map((x) => ({ ...x, at: routePosAt(b, x.r.along).at }));
+  }
+  // ---------- panne radio : espaces contrôlés traversés + consignes « panne radio » des VAC (départ, arrivée, dégagement)
+  function radioFail(b) {
+    const ctl = [...new Set(b.legs.flatMap((lg) => lg.airspaces.filter((s) => s.kind === 'CTR' || /^[CD]$/.test(s.cls || '')).map((s) => s.name)))];
+    const vac = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean).map((id) => { const v = vacAt(id) || {}, t = `${v.consignes || ''} ${v.infos || ''}`.replace(/\s+/g, ' '), m = t.match(/[^.]{0,160}(?:panne (?:de )?radio|radio[- ]?(?:communication )?failure|COM failure)[^.]{0,260}\.?/i); return m ? [id, m[0].trim()] : null; }).filter(Boolean);
+    return { ctl, vac };
+  }
   function safetyAlerts(b) {
-    const al = [], c = carbOf(b), w = waterOf(b), tl = townsLow(b), seen = new Set();
+    const al = [], c = carbOf(b), w = waterOf(b), tl = townsLow(b), seen = new Set(), q = qnhList(b), th = thermals(b);
+    glareOf(b).forEach((g) => al.push(`Soleil bas face à vous en ${g.what} vers ${utc(g.t)} (hauteur ${Math.round(g.sp.el)}°, à ${Math.round(g.off)}° de l'axe) : éblouissement, trafic et relief difficiles à voir — lunettes de soleil, pare-soleil, pare-brise propre, ou changer d'horaire.`));
+    if (q.length > 1 && Math.max(...q.map((x) => x.q)) - Math.min(...q.map((x) => x.q)) >= 3) { const lo = q.reduce((m, x) => (x.q < m.q ? x : m)), hi = q.reduce((m, x) => (x.q > m.q ? x : m)); al.push(`QNH de ${hi.q} hPa (${hi.id}) à ${lo.q} hPa (${lo.id}) le long de la route : écart ${hi.q - lo.q} hPa, soit ~${(hi.q - lo.q) * 28} ft d'erreur — recaler l'altimètre en route (QNH du SIV ou du terrain le plus proche).`); }
+    if (th) al.push(`Turbulence thermique probable (${th.T} °C, base des cumulus vers ${th.base} ft sol) : ceintures serrées, vitesse réduite en air agité, au-dessus de la base si possible, ou voler le matin.`);
     if (c && Math.max(c.cruise.lv, c.descent.lv) >= 3) al.push(`Givrage carburateur fort probable ${c.cruise.lv >= 3 ? `en croisière (T ${c.cruise.T} °C, point de rosée ${c.cruise.Td} °C vers ${c.cruise.ft} ft)` : `en descente moteur réduit (T ${c.descent.T} °C, point de rosée ${c.descent.Td} °C)`} : réchauffage carburateur régulier, plein chaud avant de réduire.`);
     if (w && w.beyond.length) al.push(`Au-dessus de l'eau vers ${w.worst.along.toFixed(0)} NM : ${w.worst.d.toFixed(0)} NM de la côte pour un plané d'environ ${w.worst.glide.toFixed(0)} NM à ${w.worst.ft} ft — gilets de sauvetage obligatoires pour chaque occupant (NCO.IDE.A.175). Monter plus haut si possible, contact SIV.`);
     if (tl.length) al.push(`Survol d'agglomération trop bas : ${tl.slice(0, 5).map((t) => `${t.n} vers ${t.along.toFixed(0)} NM (~${Math.round(t.h / 100) * 100} ft sol, minimum estimé ${t.need} ft sol)`).join(', ')}${tl.length > 5 ? '…' : ''}. Monomoteur en France : hauteur minimale selon la taille de l'agglomération (arrêté du 10/10/1957, valeurs estimées, à vérifier) et au moins 1000 ft au-dessus de l'obstacle le plus haut (SERA) — contourner ou monter.`);
@@ -2573,8 +2657,62 @@
     const c = carbOf(b), w = waterOf(b), out = [];
     if (c) out.push(`🧊 Givrage carburateur (estimation, diagramme CAA) : croisière <b style="color:${CARBCOL[c.cruise.lv]}">${CARB[c.cruise.lv]}</b> (T ${c.cruise.T} °C, rosée ${c.cruise.Td} °C vers ${c.cruise.ft} ft) · descente moteur réduit <b style="color:${CARBCOL[c.descent.lv]}">${CARB[c.descent.lv]}</b>. ${Math.max(c.cruise.lv, c.descent.lv) >= 2 ? 'Réchauffage carburateur : contrôle régulier en croisière, plein chaud avant de réduire.' : 'Essai du réchauffage au point d\'arrêt, plein chaud en descente.'}`);
     if (w && !w.beyond.length) out.push(`🌊 Au-dessus de l'eau : au plus ${w.worst.d.toFixed(0)} NM de la côte, plané ≈ ${w.worst.glide.toFixed(0)} NM : gilets non obligatoires, mais conseillés.`);
+    const q = qnhList(b), sb = seaBreeze(b), va = vappOf(b);
+    if (q.length > 1) out.push(`🧭 QNH le long de la route (METAR actuels) : ${q.map((x) => `${esc(x.id)} ${x.q}`).join(' → ')} hPa.`);
+    if (sb) out.push(`🌬️ Brise de mer probable à ${esc(b.f.arr)} l'après-midi : vent de mer ~10-15 kt venant du ${sb.from}° environ${sb.rwy ? `, piste ${sb.rwy} probable` : ''} — la piste en service peut changer par rapport au vent prévu.`);
+    if (va) out.push(`🛬 Vitesse d'approche à ${esc(b.f.arr)} : <b>${va.v} kt</b> (${esc(va.src)} ${va.base} kt${va.mass ? `, corrigée pour ${va.mass} kg` : ''}${va.gust ? `, +${va.gust} kt de rafales` : ''}).`);
     return out.map((x) => `<p class="meta">${x}</p>`).join('');
   }
+  function moreHtml(b, sfx) {
+    const cams = routeCams(b), rf = radioFail(b);
+    return `${cams.length ? `<details><summary><b>📷 Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
+      <details><summary><b>📻 Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
+        ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
+        ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
+      <p class="meta"><button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <span id="pf-fields-st${sfx}"></span></p>
+      <div id="pf-fields-out${sfx}"></div>`;
+  }
+  // ---------- fiche briefing passagers (page à imprimer)
+  function paxBrief(b) {
+    const f = b.f, front = f.m2 > 0, rear = f.m3 > 0, w = waterOf(b), canopy = /DR ?4|Robin/i.test(f.T.label);
+    const items = [
+      ['Ceintures', 'Comment les boucler et les ouvrir. Serrées au roulage, au décollage, à l\'atterrissage et dès que l\'air est agité.'],
+      [canopy ? 'Verrière' : 'Portes', `Comment ${canopy ? 'la' : 'les'} ouvrir et fermer (montré au sol). On n'y touche pas en vol sauf si le pilote le demande.`],
+      ['Extincteur', 'Où il se trouve et comment s\'en servir (montré au sol).'],
+      ['Atterrissage d\'urgence', `Ceinture très serrée, tête protégée, objets rangés. ${canopy ? 'Verrière' : 'Porte'} entrouverte avant l'impact si le pilote le demande. Après l'arrêt : sortir vite, s'éloigner de l'avion, au vent.`],
+      ['Interdit', 'Fumer ; toucher les commandes, le palonnier et les manettes ; objets libres dans la cabine ; parler pendant les messages radio, au décollage et à l\'atterrissage.'],
+      ['Bagages', 'Rangés et attachés, dans la limite de masse annoncée par le pilote. Rien sur la tablette arrière qui pourrait tomber.'],
+      ['Mal de l\'air', 'Sacs à portée de main ; regarder l\'horizon, prévenir le pilote tôt.'],
+      ['Trafic', 'Signaler au pilote tout avion ou planeur vu (« avion à 2 heures, plus haut »).'],
+      ...(w && w.beyond.length ? [['Gilets de sauvetage', 'Obligatoires sur ce vol : les mettre avant le départ, ne les gonfler qu\'à la sortie de l\'avion.']] : []),
+    ];
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Briefing passagers</title><style>body{font:15px/1.45 system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:20px}dt{font-weight:bold;margin-top:10px}dd{margin:2px 0 0 0}.m{color:#555}</style></head><body>
+      <h1>Briefing passagers — ${esc(f.ac.reg)} ${esc(f.T.label)}</h1><p class="m">${esc(b.ids.filter((x) => !/^(DT|VL)/.test(x)).join(' → '))} · ${b.depT.toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })} · ${front ? 'passager avant' : ''}${front && rear ? ' et ' : ''}${rear ? 'passagers arrière' : ''}${!front && !rear ? 'sans passager' : ''} · durée prévue ${hhmm(b.totMin)}</p>
+      <dl>${items.map(([t, d]) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`).join('')}</dl><p class="m">À lire avec le pilote avant la mise en route. Emplacements exacts : voir l'avion et son manuel de vol.</p></body></html>`;
+  }
+  // ---------- champs de secours : prairies / cultures OpenStreetMap à moins de 1,5 NM, le plus grand par tranche de 5 NM (taille d'après la boîte englobante)
+  // shortcut: taille = rectangle englobant de la zone OSM (souvent plusieurs parcelles), à remplacer par la géométrie réelle (out geom) si les pilotes s'y fient
+  async function rescueFields(b) {
+    const smp = routeSamples(b, 5), side = (k) => smp.map((x) => destPt(x.p, x.lg.tc + k, 1.5));
+    const poly = [...side(-90), ...side(90).reverse()].map((p) => `${p[0].toFixed(4)} ${p[1].toFixed(4)}`).join(' ');
+    const q = `[out:json][timeout:25];way["landuse"~"^(meadow|farmland|grass)$"](poly:"${poly}");out bb qt;`;
+    let j = null;
+    for (const ep of ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {   // serveurs publics souvent chargés
+      try { const r = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: AbortSignal.timeout(35000) }); if (r.ok) { j = await r.json(); break; } } catch (e) { /* serveur suivant */ }
+    }
+    if (!j) throw new Error('serveurs OpenStreetMap indisponibles, réessayer plus tard');
+    const bins = new Map();
+    for (const e of j.elements || []) {
+      const bb = e.bounds; if (!bb) continue;
+      const c = [(bb.minlat + bb.maxlat) / 2, (bb.minlon + bb.maxlon) / 2], hgt = (bb.maxlat - bb.minlat) * 111e3, wid = (bb.maxlon - bb.minlon) * 111e3 * Math.cos(rad(c[0]));
+      const L1 = Math.max(hgt, wid), W1 = Math.min(hgt, wid); if (L1 < 600 || W1 < 200 || L1 > 2500) continue;   // > 2,5 km : grande zone « cultures » d'OSM (routes, haies, maisons), pas une parcelle
+      const r = routeDist(c, b.pts), k = Math.floor(r.along / 5), cur = bins.get(k), sc = (x, y) => Math.min(x, 1500) * Math.min(y, 500);
+      if (r.d > 1.5) continue;
+      if (!cur || sc(L1, W1) > sc(cur.L, cur.W)) bins.set(k, { c, L: Math.round(L1 / 10) * 10, W: Math.round(W1 / 10) * 10, along: r.along, d: r.d, kind: e.tags && e.tags.landuse });
+    }
+    return [...bins.values()].sort((x, y) => x.along - y.along);
+  }
+
 
   // ---------- zones particulières : ZSM gypaète (STAC), parachutage / voltige (ENR 5.5), cœur du Parc national des Pyrénées
   // cœur du Parc national des Pyrénées : contour INPN (via OpenStreetMap, relation 1024513), simplifié à ~400 m
@@ -3092,36 +3230,63 @@
       <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table></details>`;
 
   // ---------- meilleur créneau de départ (même nav, départ de 7 h à 17 h locales)
+  // créneaux de départ 7 h - 17 h locales, pour le jour du vol et les jours suivants (une requête ; AZBA connue pour le jour du vol seulement)
   async function departureSlots(trip) {
     const b0 = trip[0], bN = trip[trip.length - 1], dur = bN.eta - b0.depT, dep = A.aptByIcao[b0.f.dep], arr = A.aptByIcao[bN.f.arr];
-    const day = b0.depT.toISOString().slice(0, 10), next = new Date(b0.depT.getTime() + 864e5).toISOString().slice(0, 10);
+    const horizon = (b0.depT - Date.now()) / 864e5, nd = Math.max(1, Math.min(7, Math.floor(15 - horizon)));
+    const day = b0.depT.toISOString().slice(0, 10), last = new Date(b0.depT.getTime() + nd * 864e5).toISOString().slice(0, 10);
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+dep.la).toFixed(3)},${(+arr.la).toFixed(3)}&longitude=${(+dep.lo).toFixed(3)},${(+arr.lo).toFixed(3)}`
-      + `&hourly=temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,precipitation&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${next}`);
+      + `&hourly=temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,precipitation&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${last}`);
     if (!Array.isArray(d)) d = [d];
     const at = (i, t) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { t: h.temperature_2m[k], td: h.dew_point_2m[k], ws: h.wind_speed_10m[k], wd: h.wind_direction_10m[k], g: h.wind_gusts_10m[k], vis: h.visibility[k], rr: h.precipitation[k] }; };
     const vw = (b0.f.T.speeds || {})['Vw 90° max'] || 20, dayStart = Date.UTC(b0.depT.getUTCFullYear(), b0.depT.getUTCMonth(), b0.depT.getUTCDate());
-    const loc = new Date(b0.depT), slots = [];
-    for (let h = 7; h <= 17; h++) {
-      loc.setHours(h, 0, 0, 0); const t0 = new Date(loc), t1 = new Date(t0.getTime() + dur);
-      const p = at(0, t0), q = at(1, t1); if (!p || !q) continue;
-      const cross = (x, id) => { const rw = runwayFor(vacAt(id), x.wd, x.ws); return rw ? Math.round(rw.best.cross) : null; };
-      const why = [];
-      for (const [x, id, lbl] of [[p, b0.f.dep, 'départ'], [q, bN.f.arr, 'arrivée']]) {
-        const c = cross(x, id), base = Math.round((x.t - x.td) * 400 / 100) * 100;
-        if (c != null && c > vw) why.push(`travers ${c} kt à l'${lbl}`);
-        if (x.g > 25) why.push(`rafales ${Math.round(x.g)} kt à l'${lbl}`);
-        if (x.vis != null && x.vis < 5000) why.push(`visi ${Math.round(x.vis / 100) / 10} km à l'${lbl}`);
-        if (base < 1500) why.push(`base ~${base} ft à l'${lbl}`);
-        if (x.rr >= 1) why.push(`pluie ${x.rr} mm à l'${lbl}`);
+    const cross = (x, id) => { const rw = runwayFor(vacAt(id), x.wd, x.ws); return rw ? Math.round(rw.best.cross) : null; };
+    const week = [];
+    for (let off = 0; off < nd; off++) {
+      const loc = new Date(b0.depT.getTime() + off * 864e5), slots = [];
+      for (let h = 7; h <= 17; h++) {
+        loc.setHours(h, 0, 0, 0); const t0 = new Date(loc), t1 = new Date(t0.getTime() + dur);
+        const p = at(0, t0), q = at(1, t1); if (!p || !q) continue;
+        const why = [];
+        for (const [x, id, lbl] of [[p, b0.f.dep, 'départ'], [q, bN.f.arr, 'arrivée']]) {
+          const c = cross(x, id), base = Math.round((x.t - x.td) * 400 / 100) * 100;
+          if (c != null && c > vw) why.push(`travers ${c} kt à l'${lbl}`);
+          if (x.g > 25) why.push(`rafales ${Math.round(x.g)} kt à l'${lbl}`);
+          if (x.vis != null && x.vis < 5000) why.push(`visi ${Math.round(x.vis / 100) / 10} km à l'${lbl}`);
+          if (base < 1500) why.push(`base ~${base} ft à l'${lbl}`);
+          if (x.rr >= 1) why.push(`pluie ${x.rr} mm à l'${lbl}`);
+        }
+        const sd = sunTimes(t0, +dep.la, +dep.lo), sa = sunTimes(t1, +arr.la, +arr.lo);   // nuit aéronautique : coucher + 30 min, lever - 30 min
+        if (sd && t0 < sd.rise.getTime() - 18e5) why.push('avant le jour aéronautique');
+        if (sa && t1 > sa.set.getTime() + 18e5) why.push('arrivée de nuit');
+        if (!off && trip.some((b) => b.rtba.some((r) => r.crossed && r.below && r.slots.some((s) => slotOverlap(s, dayStart, t0.getTime(), t1.getTime()))))) why.push('AZBA active sur la route');
+        slots.push({ t0, h, p, q, why, score: why.length * 100 + Math.max(p.ws, q.ws) });
       }
-      if (b0.night && b0.night.day && t0 < b0.night.day) why.push('avant le jour aéronautique');
-      if (bN.night && t1 > bN.night.night) why.push('arrivée de nuit');
-      if (trip.some((b) => b.rtba.some((r) => r.crossed && r.below && r.slots.some((s) => slotOverlap(s, dayStart, t0.getTime(), t1.getTime()))))) why.push('AZBA active sur la route');
-      slots.push({ t0, h, p, q, why, score: why.length * 100 + Math.max(p.ws, q.ws) });
+      if (slots.length) week.push({ day: new Date(loc), slots, best: slots.slice().sort((x, y) => x.score - y.score)[0] });
     }
-    const best = slots.slice().sort((x, y) => x.score - y.score)[0];
-    return { slots, best };
+    if (!week.length) return null;
+    const d0 = week.find((w) => w.day.toDateString() === b0.depT.toDateString()) || { slots: [], best: null };   // jour du vol
+    return { slots: d0.slots, best: d0.best, week, bestDay: week.slice().sort((x, y) => x.best.score - y.best.score)[0] };
   }
+  // climatologie (vol au-delà des prévisions) : jours « VFR possible » à ± 7 jours de la date, sur 10 ans, au départ, au milieu et à l'arrivée
+  // code météo journalier = phénomène le plus fort de la journée : estimation prudente
+  const climDay = (code, rr, g) => (code <= 3 && rr < 1 && g < 25 ? 0 : (code <= 3 || [45, 48, 51, 53, 61, 80].includes(code)) && rr < 5 && g < 35 ? 1 : 2);
+  console.assert(climDay(2, 0, 15) === 0 && climDay(61, 2, 20) === 1 && climDay(95, 0, 20) === 2 && climDay(1, 0, 40) === 2, 'climDay');
+  async function climatology(trip) {
+    const b0 = trip[0], bN = trip[trip.length - 1], dep = A.aptByIcao[b0.f.dep], arr = A.aptByIcao[bN.f.arr], y = b0.depT.getUTCFullYear();
+    const pts = [[+dep.la, +dep.lo], [(+dep.la + +arr.la) / 2, (+dep.lo + +arr.lo) / 2], [+arr.la, +arr.lo]];
+    let d = await omFetch(`https://archive-api.open-meteo.com/v1/archive?latitude=${pts.map((p) => p[0].toFixed(2)).join(',')}&longitude=${pts.map((p) => p[1].toFixed(2)).join(',')}`
+      + `&start_date=${y - 10}-01-01&end_date=${y - 1}-12-31&daily=weather_code,precipitation_sum,wind_gusts_10m_max&wind_speed_unit=kn&timezone=UTC`);
+    if (!Array.isArray(d)) d = [d];
+    const doy = (t) => Math.floor((t - Date.UTC(new Date(t).getUTCFullYear(), 0, 1)) / 864e5), target = doy(b0.depT.getTime()), n = [0, 0, 0];
+    d[0].daily.time.forEach((t, k) => {
+      const dd = Math.abs(doy(Date.parse(t)) - target); if (Math.min(dd, 365 - dd) > 7) return;
+      n[Math.max(...d.map((x) => climDay(x.daily.weather_code[k] ?? 99, x.daily.precipitation_sum[k] ?? 0, x.daily.wind_gusts_10m_max[k] ?? 0)))]++;
+    });
+    const tot = n[0] + n[1] + n[2]; if (!tot) return null;
+    return { ok: Math.round(n[0] / tot * 100), marg: Math.round(n[1] / tot * 100), bad: Math.round(n[2] / tot * 100), days: tot, years: `${y - 10}-${y - 1}` };
+  }
+  const climHtml = (trip) => { const c = trip[0].clim; return c ? `<p class="meta">📊 Climatologie (vol au-delà des prévisions) : à cette période (± 7 jours, ${c.years}), <b>${c.ok} %</b> des jours VFR possibles sur la route, ${c.marg} % marginaux, ${c.bad} % défavorables (pluie, orages, brouillard, vent fort ; ${c.days} jours, départ / milieu / arrivée). Archives Open-Meteo, indicatif.</p>` : ''; };
   function slotsHtml(trip) {
     const s = trip[0].slots; if (!s || !s.slots.length) return '';
     const hl = (x) => `${String(x.h).padStart(2, '0')} h`;
@@ -3130,6 +3295,9 @@
       <table class="legs trip"><tr><th>Départ</th><th>Vent dép.</th><th>Vent arr.</th><th>Base est.</th><th>Visi</th><th>Contraintes</th></tr>
       ${s.slots.map((x) => `<tr${x === s.best ? ' style="font-weight:bold"' : ''}><td>${hl(x)}</td><td>${r3(x.p.wd)}/${Math.round(x.p.ws)}${x.p.g > x.p.ws + 5 ? 'G' + Math.round(x.p.g) : ''}</td><td>${r3(x.q.wd)}/${Math.round(x.q.ws)}</td>
         <td>${Math.round(Math.min(x.p.t - x.p.td, x.q.t - x.q.td) * 4) * 100} ft</td><td>${Math.round(Math.min(x.p.vis, x.q.vis) / 1000)} km</td><td style="text-align:left">${x.why.length ? esc(x.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
+      ${s.week.length > 1 ? `<h4>Meilleur jour (${s.week.length} jours)</h4><table class="legs trip"><tr><th>Jour</th><th>Meilleur départ</th><th>Contraintes</th></tr>
+        ${s.week.map((w) => `<tr${w === s.bestDay ? ' style="font-weight:bold"' : ''}><td>${w.day.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}${w === s.bestDay ? ' ⭐' : ''}</td><td>${hl(w.best)}</td><td style="text-align:left">${w.best.why.length ? esc(w.best.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
+        <p class="meta">AZBA : publiée la veille, comptée pour le jour du vol seulement.</p>` : ''}
       <p class="meta">Prévision Open-Meteo au départ et à l'arrivée (base estimée par l'écart température / point de rosée). Indicatif : confirmer avec TAF, TEMSI et AZBA du jour.</p>`;
   }
 
@@ -3329,6 +3497,7 @@
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       ${safetyHtml(b)}
+      ${moreHtml(b, sfx)}
       ${azbaHtml(b)}
       ${mountainHtml(b)}
       ${diversionsHtml(b)}

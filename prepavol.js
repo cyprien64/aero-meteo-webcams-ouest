@@ -504,6 +504,63 @@
     }
     return { pts: outPts, ids: outIds, detours };
   }
+  function townNear(p, towns) {   // ville la plus proche (cadre de ~6 NM)
+    let t = null;
+    for (const [n, la, lo] of towns) { if (Math.abs(la - p[0]) > .1 || Math.abs(lo - p[1]) > .14) continue; const d = distNm(p, [la, lo]); if (!t || d < t.d) t = { n, d }; }
+    return t;
+  }
+  // route facile : point de contournement remplacé par un point VFR publié à ≤ 3 NM si la route reste hors des zones évitées, sinon nommé d'après la ville la plus proche
+  function nameDetours(r, obs, vfr, towns) {
+    const clear = (a, b) => { const d = distNm(a, b), tc = bearing(a, b), n = Math.max(2, Math.ceil(d / 0.5));
+      for (let k = 1; k <= n; k++) { const p = destPt(a, tc, d * k / n); if (obs.some((o) => inPoly(p, o.z.poly))) return false; } return true; };
+    r.ids.forEach((id, i) => {
+      const d = r.detours.find((x) => x.id === id); if (!d) return;
+      const v = vfr.map((x) => ({ ...x, d: distNm(r.pts[i], x.p) })).filter((x) => x.d <= 3).sort((x, y) => x.d - y.d)
+        .find((x) => clear(r.pts[i - 1], x.p) && clear(x.p, r.pts[i + 1]));
+      if (v) { r.pts[i] = d.p = v.p; r.ids[i] = d.id = v.tok; d.name = v.desc; return; }
+      const t = townNear(r.pts[i], towns);
+      if (t && t.d <= 5) d.name = t.d < 1.5 ? `sur ${t.n}` : `près ${/^[AEIOUYÉÈÂÎH]/i.test(t.n) ? "d'" : 'de '}${t.n}`;
+    });
+    return r;
+  }
+  console.assert((() => { const sq = [[0, -0.1], [0.1, -0.1], [0.1, 0.1], [0, 0.1]], mk = () => ({ pts: [[-0.2, 0], [0.05, 0.13], [0.3, 0]], ids: ['A', 'DT1', 'B'], detours: [{ id: 'DT1', p: [0.05, 0.13] }] });
+    const r1 = nameDetours(mk(), [{ z: { poly: sq } }], [{ tok: 'XX-W', p: [0.05, 0.08], desc: 'dedans' }, { tok: 'XX-E', p: [0.05, 0.16], desc: 'pont' }], []);
+    const r2 = nameDetours(mk(), [{ z: { poly: sq } }], [], [['Ville', 0.05, 0.14, 3000]]);
+    return r1.ids[1] === 'XX-E' && r1.detours[0].name === 'pont' && r2.ids[1] === 'DT1' && r2.detours[0].name === 'sur Ville'; })(), 'nameDetours');
+
+  // route de vallée : dans un couloir de ±15 NM (grille 3 NM), chemin dont le point le plus haut est le plus bas possible ; départ et arrivée au centre
+  function lowPath(el, V) {   // el[colonne][j] en ft
+    const c0 = V.indexOf(0);
+    let best = V.map((_, j) => (j === c0 ? { max: el[0][c0], d: 0, path: [c0] } : null));
+    for (let u = 1; u < el.length; u++) best = V.map((_, j) => {
+      let o = null;
+      for (const k of [j - 1, j, j + 1]) { const p = best[k]; if (!p) continue; const m = Math.max(p.max, el[u][j]), d = p.d + Math.abs(V[j] - V[k]); if (!o || m < o.max - 50 || (m <= o.max + 50 && d < o.d)) o = { max: m, d, path: [...p.path, j] }; }
+      return o;
+    });
+    return best[c0];
+  }
+  console.assert((() => { const r = lowPath([[0, 0, 0], [0, 0, 0], [100, 5000, 9000], [0, 0, 0], [0, 0, 0]], [-3, 0, 3]); return r.max === 100 && r.path[2] === 0 && r.path[4] === 1; })(), 'lowPath');
+  async function valleyRoute(a, b) {
+    const D = distNm(a, b), tc = bearing(a, b), nu = Math.max(4, Math.round(D / 3)), V = [-15, -12, -9, -6, -3, 0, 3, 6, 9, 12, 15];
+    const grid = []; for (let u = 0; u <= nu; u++) { const c = destPt(a, tc, D * u / nu); grid.push(V.map((v) => (v ? destPt(c, tc + 90, v) : c))); }
+    const flat = await elevations(grid.flat()), r = lowPath(grid.map((row, u) => row.map((_, j) => (flat[u * V.length + j] || 0) * 3.281)), V);
+    if (!r) return null;
+    const pts = [];   // points tournants : changements de direction du chemin, espacés d'au moins 6 NM
+    for (let u = 1; u < nu; u++) { const [p0, p1, p2] = r.path.slice(u - 1, u + 2), q = grid[u][p1]; if (p1 - p0 !== p2 - p1 && (!pts.length || distNm(q, pts[pts.length - 1]) >= 6)) pts.push(q); }
+    return { pts: pts.slice(0, 10), maxFt: Math.round(r.max) };
+  }
+  // clairances de la route facile : pour chaque espace C / D / CTR (ou A) coupé à l'altitude prévue, passer dessous si le relief le permet, sinon appeler à 5 NM
+  function clearancesOf(b) {
+    const v = b.vprofile; if (!v) return [];
+    const seen = new Set();
+    return v.conflicts.filter((sg) => /\((?:A|C|D)\)|CTR/.test(sg.name) && !seen.has(sg.name) && seen.add(sg.name)).sort((x, y) => x.from - y.from).map((sg) => {
+      const under = !sg.aglL && sg.lower > 0 ? Math.floor((sg.lower - 500) / 100) * 100 : null;
+      return { name: sg.name, a: /\(A\)/.test(sg.name), under: under != null && under >= Math.max(0, ...sg.ter) + 1000 ? under : null, freq: sg.freq ? String(sg.freq).split(' / ')[0] : null, nm: Math.max(0, sg.from - 5) };
+    });
+  }
+  const clearHtml = (b) => clearancesOf(b).map((c) => `<b>${esc(c.name)}</b> : ${c.a ? 'classe A, interdite en VFR' : `${c.under ? `passer sous ${c.under} ft ou ` : ''}appeler ${c.freq ? esc(c.freq) : '(fréquence : voir carte)'} ${c.nm < 1 ? 'dès le départ' : `à ${c.nm.toFixed(0)} NM`}`}`).join(' · ');
+  console.assert((() => { const c = clearancesOf({ vprofile: { conflicts: [{ name: 'TMA X (D)', from: 59, ter: [500], lower: 3500, aglL: false, freq: '123.930 / 120.000' }, { name: 'TMA X (D)', from: 70, ter: [], lower: 3500 }, { name: 'CTR Y (D)', from: 20, ter: [800], lower: 0, aglL: false }] } });
+    return c.length === 2 && c[0].name === 'CTR Y (D)' && c[0].under === null && c[1].under === 3000 && c[1].freq === '123.930' && c[1].nm === 54; })(), 'clearancesOf');
 
   // ================================================================== VAC : consignes triées
   const EN_WORDS = /\b(the|is|are|with|for|of|to|must|shall|prohibited|runway|aircraft|only|when|be|by|on|at|and|outside|within|except|advised|recommended|airfield|pilots?|should|landing|take-?off|traffic pattern|hours?)\b/gi;
@@ -1270,15 +1327,18 @@
       }
     }
     const directNm = userPts.slice(1).reduce((t, p, i) => t + distNm(userPts[i], p), 0);
-    let routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles) : { pts: userPts, ids: userIds, detours: [] };
+    const mg = f.avoid === 'easy' ? 1 : 2;   // route facile : on longe le bord à 1 NM
+    let routed = obstacles.length ? avoidRoute(userPts, userIds, obstacles, mg) : { pts: userPts, ids: userIds, detours: [] };
     // détour plafonné : au-delà de max(8 NM, 12 %), on renonce aux contournements « de confort » (CTR, C / D), les plus grands d'abord
     const lenOf = (r) => r.pts.slice(1).reduce((t, p, i) => t + distNm(r.pts[i], p), 0), cap = Math.max(8, directNm * 0.12), kept = [];
     let obs = obstacles.slice();
     while (f.avoid === 'easy' && lenOf(routed) - directNm > cap && obs.some((o) => o.comfort)) {
       const big = obs.filter((o) => o.comfort).sort((x, y) => y.z.poly.length - x.z.poly.length)[0];
       kept.push(big.z.id); obs = obs.filter((o) => o !== big);
-      routed = obs.length ? avoidRoute(userPts, userIds, obs) : { pts: userPts, ids: userIds, detours: [] };
+      routed = obs.length ? avoidRoute(userPts, userIds, obs, mg) : { pts: userPts, ids: userIds, detours: [] };
     }
+    if (f.avoid === 'easy') nameDetours(routed, obs, Object.entries((VFR && VFR.data) || {}).flatMap(([ad, l]) => l.filter((v) => !/HEL|hélicoptère|réservé/i.test(v.desc))
+      .map((v) => ({ tok: `${ad.slice(2)}-${v.id}`, p: [v.la, v.lo], desc: v.desc }))), (LANDM && LANDM.towns) || []);
     const pts = routed.pts, ids = routed.ids;
     const adIds = [...new Set([...userIds, f.alt].filter((id) => id && A.aptByIcao[id]))];
     const varDeg = (() => {
@@ -1463,14 +1523,29 @@
       return A.SOURCES.filter((s) => s.t === 'cam').map((s) => ({ s, d: distNm([a.la, a.lo], [s.la, s.lo]) * 1.852 })).filter((x) => x.d <= 15).sort((x, y) => x.d - y.d).slice(0, 5);
     };
 
-    return {
-      f, userIds, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
+    const res = {
+      f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
       profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
+    // route facile en montagne : si la base des nuages passe sous l'altitude de sécurité, on cherche un passage plus bas par les vallées
+    const lowWx = !f._valley && f.avoid === 'easy' && wxRoute && wxRoute.pts
+      ? wxRoute.pts.filter((x) => x.low >= 50 && x.baseAmsl != null && legs[x.leg] && legs[x.leg].safe && legs[x.leg].safe.terrain >= 1500 && legs[x.leg].safe.alt > x.baseAmsl) : [];
+    if (lowWx.length && res.vprofile) {
+      const k = userPts.slice(1).reduce((m, p, i) => (distNm(userPts[i], p) > distNm(userPts[m], userPts[m + 1]) ? i : m), 0);   // branche principale (hors points d'entrée / sortie)
+      const vr = await valleyRoute(userPts[k], userPts[k + 1]).catch(() => null);
+      if (vr && vr.pts.length && vr.maxFt < res.vprofile.maxTer - 500) {
+        const vids = vr.pts.map((p) => { const id = `VL${++customN}`, t = townNear(p, (LANDM && LANDM.towns) || []); CUSTOM[id] = { la: p[0], lo: p[1], name: t && t.d <= 5 ? `vallée, vers ${t.n}` : 'vallée', token: `${p[0].toFixed(4)}/${p[1].toFixed(4)}` }; return id; });
+        const alt = await compute({ ...f, _valley: true }, [...userIds.slice(0, k + 1), ...vids, ...userIds.slice(k + 1)]).catch(() => null);
+        if (alt && alt.vprofile && alt.vprofile.maxTer < res.vprofile.maxTer - 500 && alt.totDist <= res.totDist * 1.4) {
+          return Object.assign(alt, { userPts, directNm, valley: { base: Math.min(...lowWx.map((x) => x.baseAmsl)), from: res.vprofile.maxTer, to: alt.vprofile.maxTer, nm: res.totDist } });
+        }
+      }
+    }
+    return res;
   }
 
   // ================================================================== météo le long de la route
@@ -1930,6 +2005,7 @@
     return { ticks, boxes };
   }
 
+  const ptLabel = (b, id) => { const d = (b.detours || []).find((x) => x.id === id), n = d ? d.name : /^VL/.test(id) && CUSTOM[id] ? CUSTOM[id].name : null; return n ? `${id} (${n})` : id; };
   function drawRoute(b, layer, editable) {
     const routeLayer = layer;
     const shown = new Set();
@@ -1942,6 +2018,8 @@
       L.polygon(x.z.poly, { color: x.z.rtba ? '#ff3b30' : x.z.type === 'P' ? '#ff2d55' : x.z.type === 'D' ? '#ff9f0a' : '#bf5af2', weight: 1.5, fillOpacity: .14 })
         .bindTooltip(`<b>${esc(x.z.id)} ${esc(x.z.name)}</b><br>${esc(x.z.lower)} – ${esc(x.z.upper)}`, { className: 'tip', sticky: true }).addTo(routeLayer);
     });
+    if (b.userPts && (b.detours.length || b.valley)) L.polyline(b.userPts, { color: '#40c4ff', weight: 3, opacity: .9, dashArray: '8 7' })
+      .bindTooltip(`Route directe : ${b.directNm.toFixed(0)} NM (route facile en magenta : ${b.totDist.toFixed(0)} NM)`, { className: 'tip', sticky: true }).addTo(routeLayer);
     L.polyline(b.pts, { color: '#ff2bd6', weight: 4, opacity: .95 }).addTo(routeLayer);
     const mk = routeMarks(b);
     mk.ticks.forEach((t) => {
@@ -1957,11 +2035,11 @@
       const dt = b.ids[i].startsWith('DT'), fixed = i === 0 || i === last;
       if (editable && !fixed) {
         L.marker(p, { draggable: true, icon: L.divIcon({ className: 'wp-drag', html: '', iconSize: [16, 16], iconAnchor: [8, 8] }), zIndexOffset: 500 })
-          .bindTooltip(`${esc(b.ids[i])} <span style="opacity:.7">(glisser pour déplacer)</span>`, { permanent: true, direction: 'right', className: 'tip' })
+          .bindTooltip(`${esc(ptLabel(b, b.ids[i]))} <span style="opacity:.7">(glisser pour déplacer)</span>`, { permanent: true, direction: 'right', className: 'tip' })
           .on('dragend', (e) => editRoute(b, i, e.target.getLatLng(), false)).addTo(routeLayer);
       } else {
         L.circleMarker(p, { radius: dt ? 4 : 6, color: '#fff', weight: 2, fillColor: dt ? '#ffd34d' : '#ff2bd6', fillOpacity: 1 })
-          .bindTooltip(b.ids[i], { permanent: true, direction: 'right', className: 'tip' }).addTo(routeLayer);
+          .bindTooltip(esc(ptLabel(b, b.ids[i])), { permanent: true, direction: 'right', className: 'tip' }).addTo(routeLayer);
       }
     });
     if (editable) b.legs.forEach((lg, i) => {   // poignées au milieu des branches : glisser pour ajouter un point
@@ -2018,7 +2096,7 @@
     }
     if (b.windErr) al.push(b.windErr + ' Temps calculés sans vent.');
     if (b.elevErr) al.push(b.elevErr);
-    if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => d.id).join(', ')}).`);
+    if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => (d.name ? `${d.id} ${d.name}` : d.id)).join(', ')}).`);
     if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
     if (b.sunDep && b.depT < new Date(b.sunDep.rise.getTime() - 30 * 6e4)) al.push('Départ avant le jour aéronautique.');
     (b.vigil || []).forEach((v) => al.push(`Vigilance Météo-France ${v.w.some((x) => x.lvl === 3) ? 'ROUGE' : 'ORANGE'} sur ${v.dep} pendant le vol : ${[...new Set(v.w.map((x) => x.ph))].join(', ')}.`));
@@ -3156,7 +3234,9 @@
       <tr><th>Total</th><th></th><th></th><th></th><th>${b.totDist.toFixed(0)}</th><th></th><th></th><th>${hhmm(b.totMin)}</th><th>${b.totFuel} L</th></tr></table>
       <p class="meta">Arrivée estimée ${utc(b.eta)} · requis ${b.reqFuel} L (étape ${b.totFuel} + dégagement ${b.altLeg ? b.altLeg.fuel : 0} + réserve ${b.resFuel}${b.wxRes ? ` + réserve météo ${b.wxRes.L} L, ${b.wxRes.pct} % car ${esc(b.wxRes.why.join(' et '))}` : ''}) · à bord ${b.loaded} L.
         Masse décollage ${Math.round(b.mb.mass)} kg / ${b.f.T.mtow} kg, centrage ${b.mb.cg != null ? b.mb.cg.toFixed(3) + ' m' : 'à calculer (bras de levier inconnus)'}${b.mb.ldgCg != null ? ` · atterrissage ${Math.round(b.landMass)} kg, centrage ${b.mb.ldgCg.toFixed(3)} m` : ''}.</p>
-      ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}${b.crossedOk && b.crossedOk.length ? ` · traversés plutôt qu'un grand détour (clairance) : ${esc(b.crossedOk.join(', '))}` : ''}. Les TMA à plancher se passent dessous : voir l'altitude optimale.</p>` : ''}
+      ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}${b.crossedOk && b.crossedOk.length ? ` · traversés plutôt qu'un grand détour (clairance) : ${esc(b.crossedOk.join(', '))}` : ''}. Les TMA à plancher se passent dessous : voir l'altitude optimale.${b.detours.length || b.valley ? ' Sur la carte : route facile en magenta, route directe en bleu pointillé.' : ''}</p>
+      ${clearHtml(b) ? `<p class="meta">📻 Clairances à demander : ${clearHtml(b)}</p>` : ''}
+      ${b.valley ? `<p class="meta">⛰️ Plafond bas (base ~${b.valley.base} ft) sur le relief : route par les vallées, point le plus haut sous la route ${b.valley.to} ft au lieu de ${b.valley.from} ft (${b.totDist.toFixed(0)} NM au lieu de ${b.valley.nm.toFixed(0)}). Rester sous la base, garder un demi-tour possible (vallée qui se ferme), vérifier sur la carte OACI.</p>` : ''}` : ''}
       ${crossHtml(b)}
       ${tafHtml(b)}
       ${perfLine(b, sfx)}

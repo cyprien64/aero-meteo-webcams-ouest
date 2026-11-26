@@ -64,3 +64,10 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] 48. Taxes et infos d'escale partagées entre pilotes du club. — Le circuit existait (proposition par e-mail, issues « taxe » / « pratique » validées, fees_club.json) ; ajout du bouton « Proposer » dans la fiche escale de la préparation.
 - [x] 49. Fiche de genou A5 d'une page.
 - [x] E. Bande de carte du PDF : branches nord-sud en bandes verticales côte à côte, étiquettes à la taille du grand côté de l'image.
+
+## Route « VFR facile », lot du 26/11/2026
+- [x] F. Clairances à demander dans le résumé de la route facile (passer sous X ft ou appeler la fréquence à N NM) : `clearancesOf`.
+- [x] G. Contournement au plus près (marge 1 NM) ; points de contournement nommés d'après la ville la plus proche : `nameDetours`.
+- [x] H. Point VFR publié à ≤ 3 NM préféré au point de contournement s'il garde la route hors de la zone (les routes de transit des VAC ne sont pas dans les données).
+- [x] I. Plafond bas sur le relief : route par les vallées (couloir ±15 NM, point le plus haut le plus bas) si elle abaisse le relief sous la route d'au moins 500 ft et rallonge de 40 % au plus : `lowPath`, `valleyRoute`.
+- [x] J. Route directe en bleu pointillé sur la carte à côté de la route facile.

@@ -112,10 +112,10 @@
         <label>Altitude (ft)<input id="ms-ft" type="number" min="500" max="10000" step="500" value="${st.ft}"></label>
         <label>Départ (heure locale)<input id="ms-t" type="datetime-local" value="${esc(st.t && Date.parse(st.t) > Date.now() - 3600e3 ? st.t : localInput(next))}"></label>
       </div>
-      <div class="row" style="margin-top:6px"><button class="btn primary" id="ms-go" ${ms.pts.length < 2 ? 'disabled' : ''}>🌬️ Temps de vol selon le vent prévu (4 modèles)</button>
-        <button class="btn" id="ms-undo" ${ms.pts.length ? '' : 'disabled'}>↶ Dernier point</button><button class="btn" id="ms-clear">🧹 Effacer</button></div>
+      <div class="row" style="margin-top:6px"><button class="btn primary" id="ms-go" ${ms.pts.length < 2 ? 'disabled' : ''}>Temps de vol selon le vent prévu (4 modèles)</button>
+        <button class="btn" id="ms-undo" ${ms.pts.length ? '' : 'disabled'}>Dernier point</button><button class="btn" id="ms-clear">Effacer</button></div>
       <div id="ms-out">${ms.res || ''}</div>
-      ${ms.pts.length > 1 ? '<div class="row" style="margin-top:6px"><button class="btn" id="ms-prep">✈️ Préparer ce vol</button></div>' : ''}
+      ${ms.pts.length > 1 ? '<div class="row" style="margin-top:6px"><button class="btn" id="ms-prep">Préparer ce vol</button></div>' : ''}
       <p class="legend small-print">Le vent vient d'Open-Meteo pour chaque modèle, au niveau de pression le plus proche de l'altitude, à l'heure de passage au milieu de chaque branche. Quand les modèles ne sont pas d'accord, l'écart est signalé : c'est au pilote de trancher (TEMSI, WINTEM, GRAMET, prévisionniste).</p>`);
     $('#ms-go') && $('#ms-go').addEventListener('click', compute);
     $('#ms-undo').addEventListener('click', () => { ms.pts.pop(); ms.res = null; draw(); panel(); });
@@ -178,7 +178,7 @@
         <tr><td>Sans vent</td><td>${Math.round(noWind)} min</td><td>${hm(new Date(t0.getTime() + noWind * 6e4))}</td></tr>
         ${totMin.map((x) => `<tr><td>${esc(x.n)}</td><td${worst && x.m === worst.m ? ' class="dv"' : ''}>${Math.floor(x.min / 60)} h ${pad(Math.round(x.min % 60))}</td><td>${hm(new Date(t0.getTime() + x.min * 6e4))}</td></tr>`).join('')}</table>
         ${worst ? `<p class="meta">Le plus pessimiste : <b>${esc(worst.n)}</b> (${Math.round(worst.min)} min) — prévoir le carburant sur ce cas.</p>` : ''}
-        ${legs.some((l) => l.diverge) ? '<div class="warn">⚠️ Sur au moins une branche les modèles ne sont pas d\'accord : compare avec la carte WINTEM / TEMSI d\'aviation.meteo.fr et garde une marge.</div>' : '<div class="okk">Les 4 modèles sont cohérents sur ce trajet.</div>'}`;
+        ${legs.some((l) => l.diverge) ? '<div class="warn">Sur au moins une branche les modèles ne sont pas d\'accord : compare avec la carte WINTEM / TEMSI d\'aviation.meteo.fr et garde une marge.</div>' : '<div class="okk">Les 4 modèles sont cohérents sur ce trajet.</div>'}`;
       out.innerHTML = ms.res;
     } catch (e) { console.warn('mesure vent', e); out.innerHTML = `<div class="warn">Vent indisponible : ${esc(e.message)}</div>`; }
   }
@@ -273,10 +273,10 @@
     const n = new Date(), h = n.getHours();
     const icao = (A.store.get('favs', ['LFBP'])[0]) || 'LFBP', a = A.aptByIcao[icao];
     const s = a && A.sunTimes(n, a.la, a.lo), m = A.metars[icao];
-    el.innerHTML = `<b>${h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi'} 👋</b>
+    el.innerHTML = `<b>${h < 5 || h >= 18 ? 'Bonsoir' : h < 12 ? 'Bonjour' : 'Bon après-midi'}</b>
       <span>${n.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
-      ${s ? `<span>☀️ ${hm(s.rise)} – ${hm(s.set)} à ${esc(icao)} · nuit aéro ${hm(new Date(+s.set + 30 * 6e4))}</span>` : ''}
-      <span class="hello-warn">⚠️ Outil d'aide : la préparation réglementaire reste SOFIA, le SIA et aviation.meteo.fr.</span>
+      ${s ? `<span>Soleil ${hm(s.rise)} – ${hm(s.set)} à ${esc(icao)} · nuit aéro ${hm(new Date(+s.set + 30 * 6e4))}</span>` : ''}
+      <span class="hello-warn">Outil d'aide : la préparation réglementaire reste SOFIA, le SIA et aviation.meteo.fr.</span>
       ${m ? `<span><i class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</i> ${m.wdir != null ? `vent ${m.wdir === 'VRB' ? 'variable' : String(m.wdir).padStart(3, '0') + '°'} ${m.wspd} kt${m.wgst ? ' rafales ' + m.wgst : ''}` : ''}</span>` : ''}`;
   }
   hello(); setInterval(hello, 60e3); setTimeout(hello, 3000);
@@ -334,7 +334,7 @@
 
   // ================================================================ Visite guidée (au premier lancement, puis bouton « ? »)
   const STEPS = [
-    ['#hello', 'Bienvenue 👋', 'Carte de préparation des vols pour toute la France métropolitaine : webcams, METAR / TAF en direct, NOTAM, vigilance, espaces aériens, briefing PDF et log de nav. <b>C\'est un outil d\'aide</b> : il ne remplace pas la préparation réglementaire sur SOFIA-Briefing, le site du SIA et aviation.meteo.fr.'],
+    ['#hello', 'Bienvenue', 'Carte de préparation des vols pour toute la France métropolitaine : webcams, METAR / TAF en direct, NOTAM, vigilance, espaces aériens, briefing PDF et log de nav. <b>C\'est un outil d\'aide</b> : il ne remplace pas la préparation réglementaire sur SOFIA-Briefing, le site du SIA et aviation.meteo.fr.'],
     ['#presets', 'Que veux-tu voir ?', 'Trois affichages tout prêts : <b>Météo</b> (METAR, webcams, radar), <b>Navigation</b> (NOTAM, espaces aériens, zones) ou <b>Tout</b>. Tu peux ensuite cocher / décocher chaque couche dans les rubriques plus bas.'],
     ['#btn-prep', 'Préparer un vol', 'Départ, arrivée, avion : la route est calculée avec le vent, le relief, les zones, les NOTAM et la nuit. Tu obtiens un briefing PDF et le log de nav Excel du club. Le bouton 📍 permet de choisir les terrains sur la carte.'],
     ['.search-wrap', 'Rechercher', 'Tape un code OACI (LFCP), un nom de terrain ou de ville, ou une webcam : la carte zoome et le terrain clignote en jaune.'],
@@ -380,9 +380,9 @@
       <h4>3. Regarder la carte heure par heure</h4>
       <p>Le <b>curseur horaire</b> en bas de la carte montre les nuages, la pluie et le vent le long de la route. Fais-le glisser jusqu'à ton heure de passage.</p>
       <h4>4. Emporter les documents</h4>
-      <p><b>📄 Briefing PDF + log Excel</b> : le dossier complet et le log de nav du club. <b>↩️ Préparer le retour</b> : la route inverse en un clic. <b>🔗 Partager</b> : un lien qui rouvre la même préparation.</p>
+      <p><b>Briefing PDF + log Excel</b> : le dossier complet et le log de nav du club. <b>Préparer le retour</b> : la route inverse en un clic. <b>Partager</b> : un lien qui rouvre la même préparation.</p>
       <h4>5. Voler sans réseau</h4>
-      <p><b>📴 Garder la carte OACI du trajet</b> (dans le briefing) enregistre la carte autour de la route sur l'appareil. Le dernier briefing reste lisible dans ${icon('#btn-hist')} <b>Historique</b>. En vol, choisis le fond « Carte OACI-VFR ».</p>
+      <p><b>Garder la carte OACI du trajet</b> (dans le briefing) enregistre la carte autour de la route sur l'appareil. Le dernier briefing reste lisible dans ${icon('#btn-hist')} <b>Historique</b>. En vol, choisis le fond « Carte OACI-VFR ».</p>
       <h4>Bon à savoir</h4>
       <p>${icon('#btn-measure')} <b>Mesurer</b> : distance, cap et temps de vol entre des points cliqués. <b>Clic droit</b> (ou appui long) sur la carte : les espaces aériens au-dessus.</p>
       <p class="meta">${esc(window.AWW_LOG.omText())}</p>
@@ -393,11 +393,12 @@
   $('#btn-tour').addEventListener('click', showHelp);
 
   // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
-  const NEWS = { v: 55, items: [
-    '🗺️ Toute la France métropolitaine, une interface plus claire (thème clair, briefing en onglets).',
-    '🕒 Curseur horaire sur la carte : nuages, pluie et vent le long de la route.',
-    '🧭 « Où voler aujourd\'hui ? » et la chance de faire le vol en VFR.',
-    '📴 La carte OACI du trajet peut être gardée pour voler sans réseau.',
+  const NEWS = { v: 56, items: [
+    'Le briefing commence par une phrase qui résume le vol.',
+    'Fiches terrain plus claires : météo, piste conseillée et fréquences en haut, le reste dans des rubriques à déplier.',
+    'Curseur horaire : « Voir le vol » fait parcourir la route à l\'avion, avec l\'heure et la météo de passage.',
+    'Bouton « Bon vol ! » : heures, carburant, pistes et fréquences dans l\'ordre, en gros caractères, écran gardé allumé.',
+    'Nouvelle présentation, plus sobre et plus lisible sur la carte.',
   ] };
   function showNews() {
     A.store.set('newsSeen', NEWS.v);

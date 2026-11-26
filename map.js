@@ -171,7 +171,7 @@
   function showChooser(list, ll) {
     showList(`${list.length} éléments superposés ici`, `<p class="meta">Plusieurs points se chevauchent à cet endroit : choisis celui à ouvrir (ou zoome sur la carte).</p>
       <div class="chooser">${list.map((l, i) => `<button class="btn wide" data-pick="${i}">${esc(l._pick.label)}</button>`).join('')}</div>
-      <div class="row"><button class="btn" id="pick-zoom">🔍 Zoomer ici</button><button class="btn" id="pick-stack">✂️ Espaces aériens au-dessus</button></div>`);
+      <div class="row"><button class="btn" id="pick-zoom">Zoomer ici</button><button class="btn" id="pick-stack">Espaces aériens au-dessus</button></div>`);
     detailBody.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => list[+b.dataset.pick]._pick.action()));
     $('#pick-zoom').addEventListener('click', () => map.flyTo(ll, Math.min(map.getZoom() + 2, 14), { duration: .5 }));
     $('#pick-stack').addEventListener('click', () => showStack(ll.lat, ll.lng));
@@ -621,6 +621,24 @@
   }
   const tafHtml = (raw) => { const p = tafPlain(raw); return p.length ? `<ul class="taf-plain">${p.map((g) => `<li><b>${esc(g.k)}</b>${g.v.length ? ' : ' + esc(g.v.join(', ')) : ''}</li>`).join('')}</ul>` : `<p class="taf-plain">${esc(raw)}</p>`; };
 
+  // Rubrique repliable de la fiche terrain : le titre <h4> du bloc devient la ligne cliquable
+  function fold(key, html) {
+    const m = /^\s*<h4>([\s\S]*?)<\/h4>/.exec(html || ''); if (!m) return html || '';
+    return `<details class="ad-sec" data-sec="${key}"${store.get('adOpen', []).includes(key) ? ' open' : ''}><summary>${m[1]}</summary>${html.slice(m[0].length)}</details>`;
+  }
+  console.assert(fold('x', '') === '' && /^<details class="ad-sec" data-sec="x"><summary>NOTAM \(2\)<\/summary> corps<\/details>$/.test(fold('x', '<h4>NOTAM (2)</h4> corps')), 'fold');
+  // Fréquences du terrain (VAC) en tête de fiche
+  const freqList = (lines) => {
+    const out = new Map();
+    for (const l of lines || []) for (const m of l.matchAll(/\b(ATIS|APP|TWR|GND|SOL|AFIS|A\/A|DEL)\b[^0-9|]*?(1[1-3]\d\.\d{2,3})/g)) out.set(`${m[1]} ${m[2]}`, [m[1] === 'SOL' ? 'GND' : m[1], m[2]]);
+    return [...out.values()];
+  };
+  console.assert(freqList(['APP : PYRENEES Approche / Approach 128.805 - 135.880 (s)', 'TWR : 124.155 - GND (SOL) : 121.755']).map((x) => x.join(' ')).join('|') === 'APP 128.805|TWR 124.155|GND 121.755'
+    && freqList(['AFIS : 119.080. Absence ATS : A/A (119.080) FR seulement /only.']).length === 2, 'freqList');
+  function freqHtml(icao) {
+    const f = freqList((escaleOf(icao) || {}).freqs);
+    return f.length ? `<div class="ad-freqs">${f.slice(0, 6).map(([k, v]) => `<span><small>${esc(k)}</small>${esc(v)}</span>`).join('')}</div>` : '';
+  }
   function showAerodrome(icao, fly = true) {
     const a = aptByIcao[icao]; if (!a) return;
     openedIcao = icao;
@@ -634,7 +652,7 @@
     // format reconnu par meteoblue : lat N, longitude signée E, altitude en m, fuseau (sinon il renvoie vers Paris)
     const mb = `${a.la.toFixed(3)}N${a.lo.toFixed(3)}E${Math.round((+a.elev || 0) / 3.281)}_Europe%2FParis`;
     const links = [
-      ['📈 Météogramme meteoblue', `https://www.meteoblue.com/fr/meteo/prevision/meteogramweb/${mb}`, 1200, 0],
+      ['Météogramme meteoblue', `https://www.meteoblue.com/fr/meteo/prevision/meteogramweb/${mb}`, 1200, 0],
       ['Meteoblue 7 jours', `https://www.meteoblue.com/fr/meteo/semaine/${mb}`, 1200, 0],
       ['Windy', `https://www.windy.com/?${a.la},${a.lo},10`, 1200, 0],
       ['METAR/TAF 12 h', `https://aviationweather.gov/api/data/metar?ids=${icao}&hours=12&sep=true&taf=true`, 1100, 0],
@@ -648,25 +666,29 @@
         <div class="ad-hero-txt"><h3><span class="icao">${icao}</span> ${esc(a.name)} <button class="fav-star${favs().includes(icao) ? ' on' : ''}" id="fav-star" title="Ajouter / retirer des favoris">${favs().includes(icao) ? '★' : '☆'}</button></h3>
         <p>${lat} ${lon}${a.elev !== '' && a.elev != null ? ` · ${a.elev} ft` : ''}</p></div></div>
       ${m ? `<div class="ad-now"><span class="ad-cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span><div>${[m.wdir != null ? `vent ${m.wdir === 'VRB' ? 'variable' : String(m.wdir).padStart(3, '0') + '°'} ${m.wspd} kt${m.wgst ? ` rafales ${m.wgst}` : ''}` : '', m.temp != null ? `${Math.round(m.temp)} °C` : '', m.altim ? `QNH ${Math.round(m.altim)}` : ''].filter(Boolean).map(esc).join(' · ')}<small>METAR ${esc((m.rawOb.match(/\b\d{6}Z\b/) || [''])[0])}</small></div>${rwyDiagram(icao, m)}</div>
-        <h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
-      ${t ? `<h4>TAF <span class="seg" id="taf-mode"><button data-m="clair">En clair</button><button data-m="code">Codé</button></span></h4>
-        <div class="taf-box" data-m="${store.get('tafMode', 'clair')}">${tafHtml(t.rawTAF)}<pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre></div>` : ''}
+        ${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
+      ${freqHtml(icao)}
+      ${m ? fold('metar', `<h4>METAR complet</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}`) : ''}
+      ${t ? fold('taf', `<h4>TAF</h4><span class="seg" id="taf-mode"><button data-m="clair">En clair</button><button data-m="code">Codé</button></span>
+        <div class="taf-box" data-m="${store.get('tafMode', 'clair')}">${tafHtml(t.rawTAF)}<pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre></div>`) : ''}
       ${!m ? nearestMetarHtml(a) : ''}
-      ${escaleHtml(icao)}
+      ${fold('notam', notamAdHtml(icao))}
+      ${fold('escale', escaleHtml(icao))}
       ${pratiqueHtml(icao, a)}
-      ${notamAdHtml(icao)}
-      ${supNearHtml(a)}
-      <h4>Liens météo</h4>
-      <div class="row">${links.map((l, i) => `<button class="btn" data-link="${i}">${esc(l[0])}</button>`).join('')}</div>
-      <h4>Webcams à moins de 25 km (${cams.length})</h4>
+      ${fold('sup', supNearHtml(a))}
+      ${fold('liens', `<h4>Liens météo</h4><div class="row">${links.map((l, i) => `<button class="btn" data-link="${i}">${esc(l[0])}</button>`).join('')}</div>`)}
+      ${fold('cams', `<h4>Webcams à moins de 25 km (${cams.length})</h4>
       ${cams.length ? `<div class="cams">${cams.map((x, i) => `
         <div class="cam" data-cam="${i}" title="${esc(x.s.n)}">
           ${x.s.img && !x.s.oldPreview ? `<img src="${esc(x.s.img)}" loading="lazy" alt="">` : '<div class="noimg">📷</div>'}
           <span>${x.s.dead ? '⛔ ' : x.s.frozen ? '⚠️ figée · ' : ''}${esc(x.s.n)} · ${x.d.toFixed(0)} km</span>
-        </div>`).join('')}</div>` : '<p class="meta">Aucune webcam référencée à proximité.</p>'}
+        </div>`).join('')}</div>` : '<p class="meta">Aucune webcam référencée à proximité.</p>'}`)}
       ${others.length ? `<h4>Observations & vent à proximité</h4><div class="row">${others.map((x, i) => `<button class="btn" data-other="${i}">${x.s.t === 'obs' ? '🚩' : '💨'} ${esc(x.s.n.replace(/\s*\(.*$/, ''))} · ${x.d.toFixed(0)} km</button>`).join('')}</div>` : ''}
     `;
     detailBody.innerHTML = html;
+    detailBody.querySelectorAll('details[data-sec]').forEach((d) => d.addEventListener('toggle', () => {   // rubriques ouvertes : retenues d'une fiche à l'autre
+      const o = new Set(store.get('adOpen', [])); if (d.open) o.add(d.dataset.sec); else o.delete(d.dataset.sec); store.set('adOpen', [...o]);
+    }));
     detailBody.querySelectorAll('img').forEach((img) => img.addEventListener('error', () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'noimg', textContent: '📷' })); }));
     detailBody.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => { const l = links[+b.dataset.link]; openWin(l[1], l[2], l[3]); }));
     detailBody.querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => { const s = cams[+b.dataset.cam].s; openWin(s.u, s.w, s.h); }));
@@ -678,7 +700,7 @@
     bindDocLinks(detailBody);
     const tafBox = detailBody.querySelector('.taf-box');
     if (tafBox) detailBody.querySelectorAll('#taf-mode button').forEach((b) => b.addEventListener('click', () => { tafBox.dataset.m = b.dataset.m; store.set('tafMode', b.dataset.m); }));
-    detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">✂️ Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
+    detailBody.insertAdjacentHTML('beforeend', '<h4>Espaces aériens</h4><button class="btn" id="ad-stack">Coupe des espaces au-dessus du terrain (règles, fréquences)</button>');
     $('#ad-stack').addEventListener('click', () => showStack(a.la, a.lo, `Espaces au-dessus de ${icao}`));
     detail.hidden = false;
     if (fly) map.flyTo([a.la, a.lo], Math.max(map.getZoom(), 9), { duration: .6 });
@@ -730,31 +752,31 @@
   // ---------- Outils (équivalents des boutons du site d'origine) ----------
   const metarIds = () => Object.keys(metars).filter((k) => k.startsWith('LF')).sort().join(',');
   const TOOLS = [
-    ['🛰 Satellite France', 'https://neige.meteociel.fr/satellite/anim_vis_fr.gif', 778, 778],
-    ['🛰 Satellite Europe', 'https://modeles20.meteociel.fr/satellite/animsatviscolmtgeu.gif', 778, 778],
-    ['📡 Radar Sud-Ouest', 'http://international.aero.free.fr/xxx_weather/radar_south-west.html', 839, 601],
-    ['📡 Radar Espagne N.', 'http://international.aero.free.fr/xxx_weather/radar_spain_north.html', 961, 721],
-    ['⚡ Foudre', 'https://map.blitzortung.org/#6.5/46.2/-1.5', 1300, 0],
-    ['🌬 Windy Ouest', 'https://www.windy.com/?46.0,-1.5,6', 1300, 0],
-    ['📋 METAR/TAF zone', () => `https://aviationweather.gov/api/data/metar?ids=${metarIds()}&hours=6&sep=true&taf=true`, 1400, 0],
-    ['✈️ Aeroweb', 'https://aviation.meteo.fr/', 1300, 0],
-    ['📑 SIA (VAC)', 'https://www.sia.aviation-civile.gouv.fr/', 1300, 0],
-    ['⚠️ NOTAM SOFIA', 'https://sofia-briefing.aviation-civile.gouv.fr/', 1300, 0],
-    ['🗺 Carte OACI', 'https://www.geoportail.gouv.fr/carte?c=-1.5,46.2&z=7&l0=GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-OACI::GEOPORTAIL:OGC:WMTS(1)&permalink=yes', 1400, 0],
-    ['🛩 SafeSky', 'https://live.safesky.app/map?lat=46.2&lng=-1.5&zoom=6.5', 1440, 0],
-    ['🪂 Planeurs (Flarm)', 'https://live.glidernet.org/#c=46.2,-1.5&z=7&s=1', 1440, 0],
-    ['📡 Flightradar24', 'https://www.flightradar24.com/46.2,-1.5/7', 1440, 0],
-    ['🏠 Site Inter Aéro', 'http://international.aero.free.fr/webcams/lfdt.html', 0, 0],
-    ['⚠️ NOTAM carte (notaminfo)', 'https://www.notaminfo.com/francemap', 1400, 0],
-    ['⚠️ Suivi NOTAM (Amenai)', 'https://notam.amenai.net/mobile/tracking', 1200, 0],
-    ['🛩 Spotair (trafic)', 'https://www.spotair.mobi/', 1400, 0],
-    ['💨 Balises Holfuy', 'https://holfuy.com/fr/map', 1300, 0],
-    ['📷 Webcams Infoclimat', 'https://www.infoclimat.fr/annuaire-webcams-meteo.html', 1300, 0],
-    ['📷 Webcams aéroports (Worldcam)', 'https://fr.worldcam.eu/webcams/category/airports', 1300, 0],
-    ['📷 Webcams aéroports (OpenCCTV)', 'https://opencctv.org/cameras/category/airport', 1300, 0],
-    ['📷 Webcams Catalogne (FAC)', 'https://federacioaeria.cat/serveis/meteo/webcams/', 1300, 0],
-    ['🌌 Caméras « all-sky »', 'https://www.thomasjacquin.com/allsky-map/', 1300, 0],
-    ['🦺 Sécurité des vols (VFR-pilote)', 'https://vfr-pilote.fr/security/', 1200, 0],
+    ['Satellite France', 'https://neige.meteociel.fr/satellite/anim_vis_fr.gif', 778, 778],
+    ['Satellite Europe', 'https://modeles20.meteociel.fr/satellite/animsatviscolmtgeu.gif', 778, 778],
+    ['Radar Sud-Ouest', 'http://international.aero.free.fr/xxx_weather/radar_south-west.html', 839, 601],
+    ['Radar Espagne N.', 'http://international.aero.free.fr/xxx_weather/radar_spain_north.html', 961, 721],
+    ['Foudre', 'https://map.blitzortung.org/#6.5/46.2/-1.5', 1300, 0],
+    ['Windy Ouest', 'https://www.windy.com/?46.0,-1.5,6', 1300, 0],
+    ['METAR/TAF zone', () => `https://aviationweather.gov/api/data/metar?ids=${metarIds()}&hours=6&sep=true&taf=true`, 1400, 0],
+    ['Aeroweb', 'https://aviation.meteo.fr/', 1300, 0],
+    ['SIA (VAC)', 'https://www.sia.aviation-civile.gouv.fr/', 1300, 0],
+    ['NOTAM SOFIA', 'https://sofia-briefing.aviation-civile.gouv.fr/', 1300, 0],
+    ['Carte OACI', 'https://www.geoportail.gouv.fr/carte?c=-1.5,46.2&z=7&l0=GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-OACI::GEOPORTAIL:OGC:WMTS(1)&permalink=yes', 1400, 0],
+    ['SafeSky', 'https://live.safesky.app/map?lat=46.2&lng=-1.5&zoom=6.5', 1440, 0],
+    ['Planeurs (Flarm)', 'https://live.glidernet.org/#c=46.2,-1.5&z=7&s=1', 1440, 0],
+    ['Flightradar24', 'https://www.flightradar24.com/46.2,-1.5/7', 1440, 0],
+    ['Site Inter Aéro', 'http://international.aero.free.fr/webcams/lfdt.html', 0, 0],
+    ['NOTAM carte (notaminfo)', 'https://www.notaminfo.com/francemap', 1400, 0],
+    ['Suivi NOTAM (Amenai)', 'https://notam.amenai.net/mobile/tracking', 1200, 0],
+    ['Spotair (trafic)', 'https://www.spotair.mobi/', 1400, 0],
+    ['Balises Holfuy', 'https://holfuy.com/fr/map', 1300, 0],
+    ['Webcams Infoclimat', 'https://www.infoclimat.fr/annuaire-webcams-meteo.html', 1300, 0],
+    ['Webcams aéroports (Worldcam)', 'https://fr.worldcam.eu/webcams/category/airports', 1300, 0],
+    ['Webcams aéroports (OpenCCTV)', 'https://opencctv.org/cameras/category/airport', 1300, 0],
+    ['Webcams Catalogne (FAC)', 'https://federacioaeria.cat/serveis/meteo/webcams/', 1300, 0],
+    ['Caméras « all-sky »', 'https://www.thomasjacquin.com/allsky-map/', 1300, 0],
+    ['Sécurité des vols (VFR-pilote)', 'https://vfr-pilote.fr/security/', 1200, 0],
   ];
   const toolsEl = $('#tools');
   for (const [label, url, w, h] of TOOLS) {
@@ -926,7 +948,7 @@
         <input id="fee-in" placeholder="ex. 10 € TTC, gratuit…" value="${fee && fee.source === 'saisie personnelle' ? esc(fee.tarif) : ''}" style="flex:1;min-width:140px;margin:0">
         <button class="btn" id="fee-save">Enregistrer la taxe</button>
       </div>
-      ${CFG.contact ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">📤 Proposer ce tarif au club</button><span class="meta" style="flex:1">envoyé par e-mail, publié après vérification</span></div>` : ''}
+      ${CFG.contact ? `<div class="row" style="margin-top:4px"><button class="btn" id="fee-share">Proposer ce tarif au club</button><span class="meta" style="flex:1">envoyé par e-mail, publié après vérification</span></div>` : ''}
       ${pprHtml(icao, e)}
       <div class="row" style="margin-top:4px">
         <button class="btn" data-ext="https://airfield.directory/airfield/${icao}">Tarifs (airfield.directory)</button>
@@ -941,19 +963,19 @@
     let note = ''; try { note = localStorage.getItem('aww.prat.' + icao) || ''; } catch { /* ignore */ }
     const enc = encodeURIComponent, pj = (q) => `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${enc(q)}&ou=${enc(ville)}`;
     const links = [
-      ['🚕 Taxis', pj('taxi')], ['🚗 Location de voiture', pj('location de voitures')],
-      ['🚆 Bus / train vers ' + ville, `https://www.google.com/maps/dir/?api=1&origin=${a.la},${a.lo}&destination=${enc(ville)}&travelmode=transit`],
-      ['🏨 Hébergement', `https://www.google.com/maps/search/h%C3%B4tel/@${a.la},${a.lo},13z`], ['🍽️ Restaurants', `https://www.google.com/maps/search/restaurant/@${a.la},${a.lo},14z`],
+      ['Taxis', pj('taxi')], ['Location de voiture', pj('location de voitures')],
+      ['Bus / train vers ' + ville, `https://www.google.com/maps/dir/?api=1&origin=${a.la},${a.lo}&destination=${enc(ville)}&travelmode=transit`],
+      ['Hébergement', `https://www.google.com/maps/search/h%C3%B4tel/@${a.la},${a.lo},13z`], ['Restaurants', `https://www.google.com/maps/search/restaurant/@${a.la},${a.lo},14z`],
     ];
-    const vac = [['📍 Situation', p.situation], ['🚌 Transports', p.transports], ['🍽️ Hôtels, restaurants', p.hotels], ['ℹ️ Divers', p.divers]].filter((x) => x[1]);
-    return `<details class="pratique"><summary>🧳 Vie pratique : taxis, transports, restos</summary>
+    const vac = [['Situation', p.situation], ['Transports', p.transports], ['Hôtels, restaurants', p.hotels], ['ℹ️ Divers', p.divers]].filter((x) => x[1]);
+    return `<details class="pratique ad-sec"><summary>Vie pratique : taxis, transports, restos</summary>
       ${vac.length ? `<dl class="decoded">${vac.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl><p class="meta small-print">D'après la VAC.</p>` : ''}
       ${(PRAT[icao] || []).map((x) => `<div class="okk">👥 ${esc(x.txt)} <span class="meta">(club, ${esc(x.maj)})</span></div>`).join('')}
       <div class="row">${links.map(([l, u]) => `<button class="btn" data-ext="${esc(u)}">${esc(l)}</button>`).join('')}</div>
       ${osmHtml(a, e.osm || {})}
       <h4>Mes contacts pour ce terrain</h4>
       <textarea id="prat-note" rows="3" placeholder="Taxi : 06 … · Code portail … · Restaurant …">${esc(note)}</textarea>
-      <div class="row"><button class="btn" id="prat-save">💾 Enregistrer sur cet appareil</button>${CFG.contact ? '<button class="btn" id="prat-share">📤 Proposer au club</button>' : ''}</div>
+      <div class="row"><button class="btn" id="prat-save">Enregistrer sur cet appareil</button>${CFG.contact ? '<button class="btn" id="prat-share">Proposer au club</button>' : ''}</div>
     </details>`;
   }
   // taxis, gares, loueurs collectés une fois par cycle dans OpenStreetMap (les serveurs publics sont trop lents pour une requête en direct)
@@ -985,14 +1007,14 @@
     return `<h4>PPR / stationnement</h4>
       ${(e.ppr || []).length ? `<ul class="ppr">${e.ppr.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '<p class="meta">Pas de consigne PPR relevée dans la VAC.</p>'}
       ${e.exploitant ? `<p class="meta">Exploitant : ${esc(e.exploitant)}</p>` : ''}
-      ${e.mail_escale ? `<p style="margin:4px 0"><b>Contact pour l'escale :</b> <button class="btn primary" data-ppr-mail="${esc(e.mail_escale)}">✉️ ${esc(e.mail_escale)}</button>
+      ${e.mail_escale ? `<p style="margin:4px 0"><b>Contact pour l'escale :</b> <button class="btn primary" data-ppr-mail="${esc(e.mail_escale)}">${esc(e.mail_escale)}</button>
         <span class="meta">${esc(((e.contacts || []).find((c) => c.m === e.mail_escale) || {}).r || '')}${((e.contacts || []).find((c) => c.m === e.mail_escale) || {}).src ? ' · relevé hors VAC, à vérifier' : ' · VAC'}</span></p>`
         : '<p class="meta">Pas d\'e-mail d\'escale publié : appeler le terrain (numéros ci-dessous).</p>'}
       <div class="row">
-        ${(e.contacts || mails.map((m) => ({ m }))).filter((c) => c.m !== e.mail_escale).map((c) => `<button class="btn" data-ppr-mail="${esc(c.m)}">✉️ ${esc(c.m)}${c.r ? ` <small>(${esc(c.r)})</small>` : ''}</button>`).join('')}
+        ${(e.contacts || mails.map((m) => ({ m }))).filter((c) => c.m !== e.mail_escale).map((c) => `<button class="btn" data-ppr-mail="${esc(c.m)}">${esc(c.m)}${c.r ? ` <small>(${esc(c.r)})</small>` : ''}</button>`).join('')}
         ${tels.map((t) => `<a class="btn" href="tel:${esc(t.replace(/\s/g, ''))}">📞 ${esc(t)}</a>`).join('')}
-        ${web.map((u) => `<button class="btn" data-ext="${esc(u)}">🌐 ${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40))}</button>`).join('')}
-        <button class="btn" data-ppr-copy="1">📋 Copier une demande type</button>
+        ${web.map((u) => `<button class="btn" data-ext="${esc(u)}">${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40))}</button>`).join('')}
+        <button class="btn" data-ppr-copy="1">Copier une demande type</button>
       </div>
       <p class="meta small-print">Contacts recopiés automatiquement de la VAC (ils peuvent concerner la douane, le carburant ou l'exploitant) : choisir le bon interlocuteur et vérifier sur la VAC.</p>`;
   }
@@ -1050,7 +1072,7 @@
     return `<h4>SUP AIP à proximité (${near.length})</h4>${near.map(supHtml).join('')}`;
   }
   function supHtml(s) {
-    return `<div class="sup"><button class="btn" data-doc="${esc(s.url)}">📄 SUP ${esc(s.num)}</button>
+    return `<div class="sup"><button class="btn" data-doc="${esc(s.url)}">SUP ${esc(s.num)}</button>
       <span>${esc(s.title)}</span><div class="nv">du ${esc(s.from || '?')} au ${esc(s.to || '?')}${s.vfr ? ' · VFR' : ''}${s.ifr ? ' · IFR' : ''}</div></div>`;
   }
   function bindDocLinks(el) {
@@ -1116,7 +1138,7 @@
     const inZone = SUP.filter((s) => s.places.length), other = SUP.filter((s) => !s.places.length && !s.outside);
     showList('SUP AIP Métropole', `
       <p class="meta">${SUP.length} SUP AIP en vigueur ou à venir · ${inZone.length} localisés dans la zone (d'après leur titre — vérifier le PDF).</p>
-      <h4>Dans la zone (${inZone.length})</h4>${inZone.map((s) => supHtml(s) + `<div class="row">${s.places.map((p) => `<button class="btn small-btn" data-flyto="${p.la},${p.lo}">📍 ${esc(p.n)}</button>`).join('')}</div>`).join('')}
+      <h4>Dans la zone (${inZone.length})</h4>${inZone.map((s) => supHtml(s) + `<div class="row">${s.places.map((p) => `<button class="btn small-btn" data-flyto="${p.la},${p.lo}">${esc(p.n)}</button>`).join('')}</div>`).join('')}
       <h4>Non localisés / national (${other.length})</h4>${other.map(supHtml).join('')}
       <p class="meta small-print">Liste complète : <button class="btn" data-doc="https://www.sia.aviation-civile.gouv.fr/documents/supaip/aip/id/6">site du SIA</button></p>`);
   }
@@ -1129,7 +1151,7 @@
     const byCat = (a, b) => (a.q || '').localeCompare(b.q || '');
     showList('NOTAM en route — FIR Brest & Bordeaux', `
       <p class="meta">${NOTAM.fir.length} NOTAM (${NOTAM.horizon || 24} h, SFC–FL195) · ${inView.length} dans la vue actuelle${w ? ' et actifs pendant ton vol' : ' et actifs dans les 24 h'} · collecte ${fmtT(NOTAM.generated)}.</p>
-      ${inView.sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0) || byCat(a, b)).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">📍 voir</button></div>`).join('')}
+      ${inView.sort((a, b) => (b.isNew ? 1 : 0) - (a.isNew ? 1 : 0) || byCat(a, b)).map((n) => notamHtml(n, true) + `<div class="row"><button class="btn small-btn" data-flyto="${n.la},${n.lo}">voir</button></div>`).join('')}
       ${NOTAM.fir.some((n) => n.r > 30) ? `<p class="meta small-print">Les NOTAM de rayon &gt; 30 NM ne sont pas dessinés sur la carte mais figurent dans cette liste.</p>` : ''}
       ${noPos.length ? `<h4>Sans position (${noPos.length})</h4>${noPos.map((n) => notamHtml(n, true)).join('')}` : ''}
       <p class="meta small-print">Données SOFIA-Briefing (SIA/DGAC). Outil d'aide : faire un dossier de vol officiel sur SOFIA.</p>`);
@@ -1456,7 +1478,7 @@
     const hadCtrl = !!navigator.serviceWorker.controller;   // sinon c'est la toute première installation, rien à proposer
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hadCtrl || $('#update-bar')) return;
-      document.body.insertAdjacentHTML('beforeend', '<div id="update-bar" class="glass">✨ Nouvelle version du site disponible <button id="upd-go">Recharger</button><button class="x" id="upd-x" title="Plus tard">✕</button></div>');
+      document.body.insertAdjacentHTML('beforeend', '<div id="update-bar" class="glass">Nouvelle version du site disponible <button id="upd-go">Recharger</button><button class="x" id="upd-x" title="Plus tard">✕</button></div>');
       $('#upd-go').addEventListener('click', () => location.reload());
       $('#upd-x').addEventListener('click', () => $('#update-bar').remove());
     });
@@ -1514,8 +1536,9 @@
   console.assert((() => { const now = Date.parse('2026-11-26T12:00:00Z'), r = staleSources({ run: '2026-11-26T11:45:00Z', files: { 'metar.json': { state: 'échec', last_ok: '2026-11-26T06:00:00Z' }, 'taf.json': { state: 'ok', last_ok: '2026-11-26T11:45:00Z' } } }, now);
     return r.length === 1 && /METAR : dernière collecte réussie il y a 6 h, dernier essai : échec/.test(r[0]); })(), 'staleSources');
   async function loadSourceStatus() {
-    const bad = staleSources(await getLive('status.json'));
-    if (bad.length) throw new Error(`données anciennes, à vérifier sur les sites officiels — ${bad.join(' ; ')}`);
+    const bad = staleSources(await getLive('status.json')), key = bad.filter((x) => /^(METAR|TAF|NOTAM) :/.test(x));
+    bad.filter((x) => !key.includes(x)).forEach((x) => console.warn('donnée ancienne (secondaire) :', x));   // visible dans le journal seulement
+    if (key.length) throw new Error(`météo ou NOTAM anciens, à vérifier sur les sites officiels — ${key.join(' ; ')}`);
   }
   const T = window.AWW_LOG.task;
   drawAerodromes();
@@ -1529,7 +1552,7 @@
   setInterval(() => { T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
   $('#btn-log').addEventListener('click', () => {
     showList('Signaler un problème', `<p>Le <b>journal</b> est un petit fichier texte qui liste ce qui a chargé ou échoué sur cet appareil. Il aide à trouver la panne.</p>
-      <div class="row"><button class="btn${CFG.contact ? '' : ' primary'}" id="rep-log">📋 Télécharger le journal</button>${CFG.contact ? '<button class="btn primary" id="rep-mail">✉️ Écrire un e-mail</button>' : ''}</div>
+      <div class="row"><button class="btn${CFG.contact ? '' : ' primary'}" id="rep-log">Télécharger le journal</button>${CFG.contact ? '<button class="btn primary" id="rep-mail">Écrire un e-mail</button>' : ''}</div>
       <p class="meta">${esc(window.AWW_LOG.omText())}</p>
       <p class="meta">${CFG.contact ? 'L\'e-mail contient déjà les dernières erreurs. Décris ce que tu faisais et, si possible, joins le journal.' : 'Envoie ce fichier, avec deux mots sur ce que tu faisais, à la personne qui t\'a partagé le site.'}</p>`);
     $('#rep-log').addEventListener('click', () => window.AWW_LOG.download());

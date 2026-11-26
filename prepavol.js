@@ -219,7 +219,7 @@
     return r[0][1] === 'FHAFF' && /1 \/ ZZZZ \/ L/.test(r[2][1]) && /LFBP \/ 0905/.test(r[4][1]) && /N0100 \/ A035/.test(r[5][1]) && /0105/.test(r[6][1]) && /E\/0300 · P\/1/.test(r[8][1]) && /TYP\/DR400 ROTAX 912IS/.test(r[7][1]); })(), 'fplFields');
   function fplHtml(b, sfx) {
     const F = fplFields(b);
-    return `<details><summary><b>🗂️ Plan de vol pré-rempli</b> (cases OACI à recopier dans SOFIA)</summary><table class="legs">${F.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left"><code>${esc(r[1])}</code></td></tr>`).join('')}</table>
+    return `<details><summary><b>Plan de vol pré-rempli</b> (cases OACI à recopier dans SOFIA)</summary><table class="legs">${F.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left"><code>${esc(r[1])}</code></td></tr>`).join('')}</table>
       <p class="meta">Type d'avion : code OACI non saisi dans la fiche avion, d'où ZZZZ + TYP/ (accepté). Heure : décollage prévu, à ajuster en heure de départ du parking. Vérifier chaque case avant le dépôt.</p></details>`;
   }
 
@@ -665,7 +665,7 @@
     A.showPanel('Préparation de vol', `
       <p class="meta">Route directe entre les terrains (codes OACI), contournement automatique des zones interdites et des RTBA actives.</p>
       <datalist id="apt-list">${aptOptions()}</datalist>
-      ${store.get('favs', []).length ? `<div class="row" style="margin:4px 0"><label>⭐ Mes navs <select id="pf-fav"><option value="">— choisir —</option>${store.get('favs', []).map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join('')}</select></label><button type="button" class="btn" id="pf-fav-del">🗑️</button></div>` : ''}
+      ${store.get('favs', []).length ? `<div class="row" style="margin:4px 0"><label>⭐ Mes navs <select id="pf-fav"><option value="">— choisir —</option>${store.get('favs', []).map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join('')}</select></label><button type="button" class="btn" id="pf-fav-del">️</button></div>` : ''}
       <div class="steps" role="tablist"><button type="button" class="step on" data-step="1"><i>1</i>Trajet</button><button type="button" class="step" data-step="2"><i>2</i>Avion et chargement</button><button type="button" class="step" data-step="3"><i>3</i>Pilote</button></div>
       <div class="prep-form pf-step on" data-stepp="1">
         <label>Départ <button type="button" class="pick-btn" data-pick="pf-dep" title="Choisir sur la carte">📍</button><input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
@@ -720,12 +720,12 @@
         <label>Licence / prorogation SEP valable jusqu'au<input id="pf-lic" type="date"></label>
         <label>Certificat médical valable jusqu'au<input id="pf-med" type="date"></label>
         <label><input id="pf-nuit" type="checkbox"> Qualification vol de nuit</label>
-        <details class="full" id="pf-logbox"><summary>📓 Carnet de vol récent (expérience récente, prorogation SEP)</summary>
+        <details class="full" id="pf-logbox"><summary>Carnet de vol récent (expérience récente, prorogation SEP)</summary>
           <div id="pf-log"></div>
           <div class="row"><input id="pf-log-d" type="date"><input id="pf-log-n" type="number" min="1" max="20" value="1" style="width:60px" title="atterrissages"> atterrissage(s)
             <label><input id="pf-log-i" type="checkbox"> avec instructeur</label><button type="button" class="btn" id="pf-log-add">Ajouter</button></div>
         </details>
-        <details class="full arms-box" id="pf-arms-box"><summary>⚖️ Bras de levier et enveloppe de centrage (fiche de pesée)</summary>
+        <details class="full arms-box" id="pf-arms-box"><summary>Bras de levier et enveloppe de centrage (fiche de pesée)</summary>
           <p class="meta">Valeurs en mètres depuis la référence du manuel de vol. Vide = valeur par défaut (indiquée en grisé). Mémorisé pour chaque avion sur cet appareil.</p>
           <div class="prep-form" id="pf-arms"></div>
         </details>
@@ -733,10 +733,10 @@
       </div>
       <div class="prep-actions">
         <button class="btn primary" id="pf-calc">Calculer la route</button>
-        <button class="btn" id="pf-pdf">📄 Briefing PDF + log Excel</button>
-        <button class="btn" id="pf-xlsx">📊 Log Excel seul</button>
-        <button class="btn" id="pf-train">🎲 Nav d'entraînement</button>
-        <button class="btn" id="pf-fav-save">⭐ Enregistrer cette nav</button>
+        <button class="btn" id="pf-pdf">Briefing PDF + log Excel</button>
+        <button class="btn" id="pf-xlsx">Log Excel seul</button>
+        <button class="btn" id="pf-train">Nav d'entraînement</button>
+        <button class="btn" id="pf-fav-save">Enregistrer cette nav</button>
       </div>
       <div class="row" style="margin:4px 0"><label>🧭 Où voler ? Temps aller max (min) <input id="pf-where-min" type="number" min="15" max="240" step="5" value="60"></label><button class="btn" id="pf-where">Chercher les destinations</button></div>
       <div class="row" style="margin:4px 0"><label>⚖️ Comparer avec un autre départ <input id="pf-cmp-time" type="datetime-local"></label><button class="btn" id="pf-cmp">Comparer</button></div>
@@ -964,7 +964,7 @@
       const cmp = (x, y) => (x < y ? 1 : y < x ? 2 : 0);
       const score = (s) => s.stop * 100 + s.imp * 50 + s.wx * 20 + (s.azba ? 30 : 0) + (s.night ? 20 : 0) + s.fuel + Math.max(0, s.head);
       const best = cmp(score(A1), score(B1));
-      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>⚖️ Comparaison de deux départs</h4><table class="legs"><tr><th></th><th>Départ 1</th><th>Départ 2</th></tr>
+      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>Comparaison de deux départs</h4><table class="legs"><tr><th></th><th>Départ 1</th><th>Départ 2</th></tr>
         ${row('Départ → arrivée (UTC)', `${utc(A1.dep)} → ${utc(A1.eta)}`, `${utc(B1.dep)} → ${utc(B1.eta)}`)}
         ${row('Temps de vol', hhmm(A1.min), hhmm(B1.min), cmp(A1.min, B1.min))}${row('Carburant', A1.fuel + ' L', B1.fuel + ' L', cmp(A1.fuel, B1.fuel))}
         ${row('Vent de face moyen', A1.head + ' kt', B1.head + ' kt', cmp(A1.head, B1.head))}${row('Météo en route', WXTXT[A1.wx], WXTXT[B1.wx], cmp(A1.wx, B1.wx))}
@@ -1125,9 +1125,39 @@
     say(bad ? `⚠️ ${ok} / ${tiles.length} morceaux gardés, ${bad} manquants (réseau ?). Clique à nouveau pour compléter.`
       : `✔ Carte OACI du trajet gardée sur cet appareil (${ok} morceaux, environ ${Math.max(1, Math.round(ok * 0.025))} Mo). Sans réseau, choisis le fond « Carte OACI-VFR ».`);
   }
+  // ---------------------------------------------------------------- écran « Bon vol ! » : l'essentiel en gros caractères, écran gardé allumé
+  function goFreqs(b) {   // fréquences dans l'ordre du vol, sans doublon
+    const seen = new Set();
+    return radioCard(b).filter((r) => /\d{3}\.\d/.test(r[1]) && !seen.has(r[1]) && seen.add(r[1])).map((r) => [r[0].replace(/ · .*$/, ''), r[1]]);
+  }
+  async function goCard(b) {
+    const f = b.f, F = fuelLines(b), loc = (d) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const rw = (i) => (i && i.rw ? rwyNum(i.rw.best.qfu) : '—'), qnh = (A.metars[f.dep] || {}).altim;
+    const box = document.createElement('div'); box.id = 'gocard'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Bon vol');
+    box.innerHTML = `<div class="go-in">
+      <header><div><small>${esc(f.ac.reg)} · ${esc(f.T.label)}</small><h2>${esc(f.dep)} → ${esc(f.arr)}</h2></div><button class="btn" id="go-x">Fermer</button></header>
+      <div class="go-grid">
+        <div><small>Décollage</small><b>${loc(b.depT)}</b><span>${utc(b.depT)}</span></div>
+        <div><small>Arrivée</small><b>${loc(b.eta)}</b><span>${utc(b.eta)} · ${hhmm(Math.round((b.eta - b.depT) / 6e4))} de vol</span></div>
+        <div><small>Carburant à bord</small><b>${F.loaded} L</b><span class="${F.margin < 0 ? 'bad' : ''}">nécessaire ${F.total} L · marge ${F.margin} L</span></div>
+        <div><small>Croisière</small><b>${f.ft} ft</b><span>${b.night ? `nuit aéro ${utc(b.night.night)}` : ''}</span></div>
+        <div><small>Piste départ</small><b>${rw(b.depInfo)}</b><span>${qnh ? `QNH actuel ${Math.round(qnh)}` : 'QNH : écouter l\'ATIS / la tour'}</span></div>
+        <div><small>Piste arrivée</small><b>${rw(b.arrInfo)}</b><span>${f.alt ? `dégagement ${esc(f.alt)}` : ''}</span></div>
+      </div>
+      <h3>Fréquences dans l'ordre</h3>
+      <ol class="go-freq">${goFreqs(b).map(([k, v]) => `<li><span>${esc(k)}</span><b>${esc(v)}</b></li>`).join('') || '<li>Voir la VAC</li>'}</ol>
+      <p class="go-note">Piste conseillée d'après le vent prévu. Vérifie l'ATIS, les NOTAM du jour et la VAC. Bon vol !</p></div>`;
+    document.body.appendChild(box);
+    let lock = null; try { lock = navigator.wakeLock ? await navigator.wakeLock.request('screen') : null; } catch { /* refusé : l'écran peut se mettre en veille */ }
+    const close = () => { box.remove(); if (lock) lock.release().catch(() => {}); document.removeEventListener('keydown', key); };
+    const key = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', key);
+    $('#go-x').addEventListener('click', close); $('#go-x').focus();
+  }
   function bindSummary(b, sfx) {
     const on = (id, fn) => { const el = $('#' + id + sfx); if (el) el.addEventListener('click', fn); };
     on('pf-offline', () => saveOfflineMap(b, sfx));
+    on('pf-go', () => goCard(b));
     on('pf-back', () => {   // vol retour : route inversée, départ à l'arrivée prévue + durée d'escale
       const f = b.f, t = new Date(b.eta.getTime() + (f.turn || 45) * 6e4);
       store.set('form', { ...store.get('form', {}), dep: f.arr, arr: f.dep, ...revLeg(f), stages: '', rt: false, alt: '' });
@@ -1241,7 +1271,7 @@
       <table class="legs trip"><tr><th>#</th><th>Étape</th><th>Départ</th><th>Arrivée</th><th>Durée</th><th>À bord</th><th>Conso</th><th>Reste</th><th>Dernier déc.</th><th>Masse · centrage déc.</th><th>à l'atterr.</th></tr>${rows}
       <tr><th></th><th>Total</th><th></th><th></th><th>${hhmm(totMin)}</th><th></th><th>${totFuel} L</th><th></th><th></th><th></th><th></th></tr></table>
       <p class="meta">${totDist.toFixed(0)} NM · escale ${last.f.turn} min · ${last.f.refuel ? 'plein à chaque escale' : 'sans avitaillement aux escales'} · « Dernier déc. » = dernier décollage pour arriver avant la nuit aéronautique (coucher du soleil + 30 min).</p>
-      ${notes}${warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Carburant, centrage et horaires compatibles sur toutes les étapes.</div>'}`;
+      ${notes}${warn.map((w) => `<div class="warn">${esc(w)}</div>`).join('') || '<div class="okk">Carburant, centrage et horaires compatibles sur toutes les étapes.</div>'}`;
   }
   window.addEventListener('aww-clear', () => { if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; } stopPick(); timeSlider(null); });
   // ---------- curseur horaire : départ simulé, avis VFR et vent à l'heure de passage de chaque point de la route (données de dayWx, sans nouvel appel)
@@ -1281,13 +1311,15 @@
   // couleur de la pluie (mm/h) et des orages, comme un radar
   const rainCol = (rr, storm) => (storm ? '#ff2d55' : rr >= 4 ? '#7b2ff7' : rr >= 1.5 ? '#2f6bff' : rr >= .4 ? '#3aa0ff' : rr >= .1 ? '#8fd3ff' : null);
   console.assert(rainCol(0, false) === null && rainCol(.2, false) === '#8fd3ff' && rainCol(5, false) === '#7b2ff7' && rainCol(0, true) === '#ff2d55', 'rainCol');
+  // avion léger vu de dessus, nez vers le haut (le curseur horaire le tourne selon la route)
+  const PLANE_SVG = '<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2.4h2l.5 4.6H22v3h-8.4l-.5 7.2H16v2h-3.3L12 21.6l-.7-2.4H8v-2h2.9l-.5-7.2H2V7h8.5z" fill="#fff" stroke="#0b2a44" stroke-width="1.3" stroke-linejoin="round"/></svg>';
   function timeSlider(trip) {
     document.getElementById('tslider')?.remove(); if (tsLayer) { map.removeLayer(tsLayer); tsLayer = null; }
     const P = trip ? slidePts(trip) : []; if (P.length < 2) return;
     const b0 = trip[0], dur = trip[trip.length - 1].eta - b0.depT, day = new Date(b0.depT); day.setHours(0, 0, 0, 0);
     const lo = 6 * 60, hi = Math.max(lo + 60, 20 * 60 - Math.ceil(dur / 6e4)), cur = Math.round((b0.depT - day) / 6e4 / 15) * 15;
     const el = document.createElement('div'); el.id = 'tslider'; el.className = 'glass';
-    el.innerHTML = `<div class="ts-row"><b>Départ simulé</b><output id="ts-out"></output><button type="button" class="btn" id="ts-use" title="Recalculer la préparation avec cette heure">Utiliser</button><button type="button" class="icon-btn" id="ts-x" title="Fermer" aria-label="Fermer le curseur horaire">✕</button></div>
+    el.innerHTML = `<div class="ts-row"><b>Départ simulé</b><output id="ts-out"></output><button type="button" class="btn" id="ts-use" title="Recalculer la préparation avec cette heure">Utiliser</button><button type="button" class="btn" id="ts-play" title="Faire parcourir la route à l'avion, à l'heure choisie">Voir le vol</button><button type="button" class="icon-btn" id="ts-x" title="Fermer" aria-label="Fermer le curseur horaire">✕</button></div>
       <input type="range" id="ts-r" min="${lo}" max="${hi}" step="15" value="${Math.min(hi, Math.max(lo, cur))}" aria-label="Heure de départ simulée">
       <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p><p class="ts-why" id="ts-grid">Bouge le curseur pour afficher aussi la pluie et le vent sur la carte.</p>`;
     document.body.appendChild(el);
@@ -1325,8 +1357,31 @@
       $('#ts-out').innerHTML = `<b style="color:${WXCOL[lv]}">●</b> ${hm(m)} → ${hm(m + Math.round(dur / 6e4))} · ${esc(WXTXT[lv])}`;
       $('#ts-why').textContent = why.slice(0, 4).join(', ') || 'rien de signalé sur la route';
     };
-    $('#ts-r').addEventListener('input', () => { loadGrid(); draw(); }); draw();
-    $('#ts-x').addEventListener('click', () => timeSlider(null));
+    // avion qui parcourt la route à l'heure choisie (6 s), avec l'heure de passage et la météo du point le plus proche
+    let anim = null;
+    const total = trip.reduce((x, b) => x + b.totDist, 0), still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const plane = L.marker(P[0].pt.p, { interactive: false, zIndexOffset: 900, icon: L.divIcon({ className: 'ts-plane', iconSize: [30, 30], iconAnchor: [15, 15], html: PLANE_SVG }) });
+    const stop = () => { if (anim) cancelAnimationFrame(anim); anim = null; $('#ts-play').textContent = 'Voir le vol'; };
+    const fly = () => {
+      if (anim) { stop(); plane.remove(); draw(); return; }
+      const m = +$('#ts-r').value, shift = day.getTime() + m * 6e4 - b0.depT.getTime(), R = at(m), t0 = performance.now(), D = still ? 1 : 6000;
+      plane.addTo(tsLayer); $('#ts-play').textContent = 'Arrêter';
+      const step = (now) => {
+        const f = Math.min(1, (now - t0) / D); let along = f * total, b = trip[0];
+        for (const x of trip) { b = x; if (along <= x.totDist) break; along -= x.totDist; }
+        along = Math.min(along, b.totDist);
+        const here = routePosAt(b, along), hd = along < 1 ? bearing(here.p, routePosAt(b, 1).p) : bearing(routePosAt(b, along - 1).p, here.p), t = here.at.getTime() + shift;
+        plane.setLatLng(here.p); const svg = plane.getElement() && plane.getElement().firstChild; if (svg) svg.style.transform = `rotate(${hd}deg)`;
+        const near = R.reduce((a, x) => (Math.abs(x.t - t) < Math.abs(a.t - t) ? x : a), R[0]);
+        $('#ts-why').textContent = `En vol ${hm(Math.round((t - day) / 6e4))} · ${Math.round(f * total)} / ${Math.round(total)} NM${near.w ? ` · ${WXTXT[near.w.lv]}, vent ${String(Math.round(near.w.wd)).padStart(3, '0')}° ${Math.round(near.w.ws)} kt` : ''}`;
+        anim = f < 1 ? requestAnimationFrame(step) : null;
+        if (!anim) $('#ts-play').textContent = 'Revoir le vol';
+      };
+      anim = requestAnimationFrame(step);
+    };
+    $('#ts-play').addEventListener('click', fly);
+    $('#ts-r').addEventListener('input', () => { stop(); loadGrid(); draw(); }); draw();
+    $('#ts-x').addEventListener('click', () => { stop(); timeSlider(null); });
     $('#ts-use').addEventListener('click', () => { const t = new Date(day.getTime() + +$('#ts-r').value * 6e4), i = $('#pf-time'); if (!i) return; i.value = localInput(t); timeSlider(null); run(false); });
   }
   function drawTrip(trip) {
@@ -1391,7 +1446,7 @@
     if (!fresh.length) return;
     const x = fresh[0], txt = `Ta nav ${x.s.title} (${new Date(x.dep).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}) : ${x.ch.join(', ')}.`;
     document.getElementById('remind-bar')?.remove();
-    document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">🔔 ${esc(txt)} <button id="rm-go">🔄 Recalculer</button>${'Notification' in window && Notification.permission === 'default' ? '<button id="rm-notif">Me prévenir aussi par notification</button>' : ''}<button class="x" id="rm-x" title="Vu">✕</button></div>`);
+    document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">🔔 ${esc(txt)} <button id="rm-go">Recalculer</button>${'Notification' in window && Notification.permission === 'default' ? '<button id="rm-notif">Me prévenir aussi par notification</button>' : ''}<button class="x" id="rm-x" title="Vu">✕</button></div>`);
     const done = () => { fresh.forEach((y) => { seen[y.k] = y.ch.join('|'); }); store.set('remindSeen', seen); document.getElementById('remind-bar')?.remove(); };
     $('#rm-x').onclick = done;
     $('#rm-go').onclick = () => { done(); store.set('form', { ...store.get('form', {}), ...x.s.form }); openForm(); $('#pf-time').value = localInput(new Date(x.dep)); run(false); };
@@ -1421,7 +1476,7 @@
       if (d.length) {
         const txt = `Ta nav ${watch.title} : ${d.join(', ')}.`;
         document.getElementById('remind-bar')?.remove();
-        document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">⚠️ ${esc(txt)} <button id="rm-go">🔄 Voir</button><button class="x" id="rm-x" title="Vu">✕</button></div>`);
+        document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">⚠️ ${esc(txt)} <button id="rm-go">Voir</button><button class="x" id="rm-x" title="Vu">✕</button></div>`);
         $('#rm-x').onclick = () => document.getElementById('remind-bar')?.remove();
         $('#rm-go').onclick = () => { document.getElementById('remind-bar')?.remove(); store.set('form', { ...store.get('form', {}), ...watch.form }); openForm(); $('#pf-time').value = localInput(new Date(watch.dep)); run(false); };
         if ('Notification' in window && Notification.permission === 'granted') try { new Notification('Aéro Météo — météo dégradée', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notifications */ }
@@ -1467,7 +1522,7 @@
   function changesHtml(b) {
     if (!b.changes) return '';
     const c = b.changes, when = c.since.toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    return `<h4>🔄 Changements depuis le briefing du ${esc(when)}</h4>${c.trend ? `<div class="${c.trend === 'dégradation' ? 'warn' : 'okk'}">${c.trend === 'dégradation' ? '📉 La situation se dégrade' : c.trend === 'amélioration' ? '📈 La situation s\'améliore' : '➡️ Situation stable'} depuis cette préparation.</div>` : ''}${c.list.length ? c.list.map((x) => `<div class="${x.k === 'add' ? 'warn' : 'okk'}">${x.k === 'add' ? '🆕' : x.k === 'del' ? '🗑️' : 'ℹ️'} ${esc(x.t)}</div>`).join('') : '<div class="okk">Aucun changement détecté (NOTAM, AZBA, météo, alertes).</div>'}`;
+    return `<h4>Changements depuis le briefing du ${esc(when)}</h4>${c.trend ? `<div class="${c.trend === 'dégradation' ? 'warn' : 'okk'}">${c.trend === 'dégradation' ? '📉 La situation se dégrade' : c.trend === 'amélioration' ? '📈 La situation s\'améliore' : '➡️ Situation stable'} depuis cette préparation.</div>` : ''}${c.list.length ? c.list.map((x) => `<div class="${x.k === 'add' ? 'warn' : 'okk'}">${x.k === 'add' ? '🆕' : x.k === 'del' ? '🗑️' : 'ℹ️'} ${esc(x.t)}</div>`).join('') : '<div class="okk">Aucun changement détecté (NOTAM, AZBA, météo, alertes).</div>'}`;
   }
   // Rappels calendrier J-1 / J (4)
   function exportIcs(b) {
@@ -2017,7 +2072,7 @@
     const conf = new Set(v.conflicts), pad = v.total / Math.max(1, v.profile.length - 1) / 2, best = cutGeom(v, b).opt;
     const nA = nightAlong(b), nt = b.night, marg = nt ? Math.round((nt.night - b.eta) / 6e4) : null;
     return `<div class="vp-wrap">${cutSvg(v, b, { id: 'pf-vp' + sfx })}
-      <div class="meta" id="pf-vpinfo${sfx}" style="min-height:2.6em">Survole ou touche la coupe pour voir le relief et les espaces à cet endroit (le point s'affiche aussi sur la carte). <button class="btn" id="pf-vp-big${sfx}">🔍 Agrandir</button></div>
+      <div class="meta" id="pf-vpinfo${sfx}" style="min-height:2.6em">Survole ou touche la coupe pour voir le relief et les espaces à cet endroit (le point s'affiche aussi sur la carte). <button class="btn" id="pf-vp-big${sfx}">Agrandir</button></div>
       ${nt ? `<p class="meta">${nA != null ? `🌙 <b>Nuit aéronautique à partir de ${nA.toFixed(0)} NM</b>` : `☀️ Vol de jour : arrivée ${utc(b.eta)}, nuit aéro à ${esc(b.f.arr)} ${utc(nt.night)}`}${marg != null && marg > 0 ? ` — marge ${hhmm(marg)} : départ au plus tard ${utc(nt.latestDep)}` : ''}.</p>` : ''}
       <p class="meta"><span style="color:#ff2bd6">━</span> profil prévu${best ? ` · <span style="color:#2ecc40">╌</span> profil conseillé` : ''} · <span style="color:#4fc3f7">╌</span> isotherme 0 °C · nuages en gris (rouge clair : givrage possible) ·
         espaces : <span style="color:${ASP_COL.A}">A</span> <span style="color:${ASP_COL.C}">C</span> <span style="color:${ASP_COL.D}">D</span> <span style="color:${ASP_COL.E}">E</span>, zones <span style="color:#ff3b30">AZBA</span> <span style="color:#d81b60">P</span> <span style="color:#8e24aa">R</span> <span style="color:#fb8c00">D</span> · contour rouge = traversé à l'altitude prévue · 📞 = appeler pour la clairance (5 NM avant).</p></div>
@@ -2032,7 +2087,7 @@
     $('#pf-vp-big' + sfx).addEventListener('click', () => {
       document.getElementById('vp-big')?.remove();
       const d = document.createElement('div'); d.id = 'vp-big';
-      d.innerHTML = `<button class="btn" style="float:right">✕ Fermer</button><b>✈️ Coupe ${esc(b.ids.join(' → '))}</b><div class="meta vp-info">Survole ou touche la coupe.</div>`;
+      d.innerHTML = `<button class="btn" style="float:right">Fermer</button><b>✈️ Coupe ${esc(b.ids.join(' → '))}</b><div class="meta vp-info">Survole ou touche la coupe.</div>`;
       const c = ($('#pf-vp' + sfx) || sv0).cloneNode(true); c.removeAttribute('id'); d.insertBefore(c, d.querySelector('.vp-info'));
       d.querySelector('button').addEventListener('click', () => d.remove());
       document.body.appendChild(d); cursorOn(b, c, d.querySelector('.vp-info'));
@@ -2293,8 +2348,8 @@
   ];
   function mountainHtml(b) {
     const m = b.mountain; if (!m) return '';
-    return `<h4>⛰️ Vol en montagne</h4>
-      ${m.warn.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('')}
+    return `<h4>Vol en montagne</h4>
+      ${m.warn.map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
       <table class="legs"><tr><th>Branche</th><th>Relief max</th><th>Franchir à</th><th>Vent crêtes</th><th>0 °C</th></tr>
       ${m.legs.map((x) => `<tr><td>${esc(x.lg.from)}→${esc(x.lg.to)}</td><td>${x.hi.ft} ft (${Math.round(x.hi.along - x.along0)} NM)</td><td><b>${x.minAlt} ft</b></td><td>${x.wind ? `${r3(x.wind.dir)}/${Math.round(x.wind.spd)} kt` : '–'}</td><td>${x.iso0 != null ? Math.round(x.iso0 / 100) * 100 + ' ft' : '–'}</td></tr>`).join('')}</table>
       ${m.legs.map((x) => `${x.cols.length ? `<p class="meta"><b>Cols près de ${esc(x.lg.from)}→${esc(x.lg.to)}</b> : ${x.cols.map((c) => `${esc(c.n)} ${c.ft} ft`).join(' · ')}</p>` : ''}
@@ -2494,12 +2549,12 @@
   }
   function perfFuelHtml(b) {
     const F = fuelLines(b), P = perfWorst(b);
-    return `<details><summary><b>⛽ Carburant minimal détaillé</b> — requis ${F.total} L, à bord ${F.loaded} L, marge <span style="color:${F.margin < 0 ? '#ff6b6b' : 'inherit'}">${F.margin} L</span></summary>
+    return `<details><summary><b>Carburant minimal détaillé</b> — requis ${F.total} L, à bord ${F.loaded} L, marge <span style="color:${F.margin < 0 ? '#ff6b6b' : 'inherit'}">${F.margin} L</span></summary>
       <table class="legs"><tr><th>Poste</th><th>Litres</th><th>Détail</th></tr>${F.rows.map((r) => `<tr><td style="text-align:left">${esc(r[0])}</td><td>${r[1]}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}
       <tr><th>Total requis</th><th>${F.total}</th><th></th></tr></table>
-      ${F.short ? `<div class="warn">⚠️ Réserve finale ${b.f.res} min inférieure au minimum légal de ${F.legal} min.</div>` : ''}
+      ${F.short ? `<div class="warn">Réserve finale ${b.f.res} min inférieure au minimum légal de ${F.legal} min.</div>` : ''}
       <p class="meta">Carburant inutilisable non compté : voir le manuel de vol. Pas d'imprévus de 5 % imposés en NCO, mais une marge reste prudente.</p></details>
-      ${P.length ? `<details><summary><b>🛬 Performances au plus défavorable et altitude-densité</b></summary>
+      ${P.length ? `<details><summary><b>Performances au plus défavorable et altitude-densité</b></summary>
       <table class="legs"><tr><th>Terrain</th><th>Prévu</th><th>Défavorable</th><th>Avec marge</th><th>Piste</th><th>Alt.-densité</th></tr>
       ${P.map((x) => `<tr${x.ok ? '' : ' style="color:#ff6b6b;font-weight:bold"'}><td>${esc(x.t.id)} ${x.k === 'tod' ? 'décollage' : 'atterrissage'}</td>${x.normal ? `<td>${x.normal} m</td><td>${x.worst} m <small>(${x.tMax} °C${x.wet ? ', herbe mouillée' : ''}, sans vent de face)</small></td><td>${x.need} m <small>(×${String(x.fac).replace('.', ',')})</small></td>` : '<td colspan="3">pas de tableau dans le manuel saisi : voir le manuel de vol</td>'}<td>${x.t.len ?? '?'} m</td><td>${x.daNow ?? '–'} ft <small>(${x.da} ft au plus chaud)</small></td></tr>`).join('')}</table>
       <p class="meta">Défavorable : température maximale du jour au terrain, pas de vent de face, herbe mouillée s'il pleut dans les 6 h (+10 % au décollage, +15 % à l'atterrissage). Marges recommandées par l'UK CAA (Safety Sense 7). Pente de piste non comptée : voir la VAC.</p></details>` : ''}`;
@@ -2518,7 +2573,7 @@
     b.legs[0].a = [43, 0]; b.legs[0].tc = 90; const r = arrivalPlan(b); return r.tdpFt === 1000 && r.vs === 500 && Math.round(r.nm * 10) === 117; })(), 'arrivalPlan');
   function arrivalHtml(b) {
     const x = arrivalPlan(b), vp = x.entry ? resolvePt(x.entry) : null;
-    return `<details><summary><b>🛬 Arrivée à ${esc(b.f.arr)}</b> — descente vers ${x.todAlong.toFixed(0)} NM (${utc(x.tod.at)}), tour de piste ${x.tdpFt} ft</summary>
+    return `<details><summary><b>Arrivée à ${esc(b.f.arr)}</b> — descente vers ${x.todAlong.toFixed(0)} NM (${utc(x.tod.at)}), tour de piste ${x.tdpFt} ft</summary>
       <p class="meta">📉 <b>Début de descente</b> : ${x.drop ? `à ${x.nm.toFixed(1)} NM ${x.entry ? `avant ${esc(x.entry)}` : 'du terrain (3 NM avant)'}, soit vers ${x.todAlong.toFixed(0)} NM du départ (${utc(x.tod.at)}), de ${x.cruise} à ${x.tdpFt} ft à ${x.vs} ft/min (pente de 3° : ${x.vs3} ft/min à cette vitesse sol)` : 'pas de descente : croisière déjà à l\'altitude du tour de piste'}.</p>
       <p class="meta">🧭 <b>Intégration</b> : ${x.entry ? `par ${esc(x.entry)}${vp && vp.desc ? ` (${esc(vp.desc)})` : ''}` : 'en direct (pas de point d\'entrée publié choisi)'} · tour de piste <b>${esc(x.tdpTxt || x.tdpFt + ' ft')}</b> · ${esc(x.side)}
         · piste probable <b>${x.rw ? x.rw.best.qfu : '?'}</b>${x.rw && x.rw.best.head != null ? ` (vent ${x.rw.best.head >= 0 ? 'de face' : 'arrière'} ${Math.abs(Math.round(x.rw.best.head))} kt, travers ${Math.round(x.rw.best.cross)} kt)` : ''}.
@@ -2537,9 +2592,9 @@
       ['Contact', e.mail_escale ? `${e.mail_escale} (${c.r || 'VAC'})` : ''] , ['Téléphone', (e.tel_ad || []).join(' / ')],
       ['Situation', [pr.situation, pr.transport, pr.restaurant, pr.hotel].filter(Boolean).join(' · ')],
     ].filter((r) => r[1]);
-    return `<details><summary><b>🏁 Fiche escale ${esc(id)}</b> ${esc((A.aptByIcao[id] || {}).name || '')}</summary><table class="legs">${rows.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left">${esc(r[1])}</td></tr>`).join('')}</table>
+    return `<details><summary><b>Fiche escale ${esc(id)}</b> ${esc((A.aptByIcao[id] || {}).name || '')}</summary><table class="legs">${rows.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left">${esc(r[1])}</td></tr>`).join('')}</table>
       <p class="meta">Relevé automatique de la VAC et des fiches du site : vérifier sur la VAC et auprès du terrain.
-        ${(window.AWW_CONFIG || {}).contact ? `<button class="btn" data-propose="${esc(id)}">📤 Proposer la taxe / une info au club</button> (publiée pour tous les pilotes après vérification)` : ''}</p>
+        ${(window.AWW_CONFIG || {}).contact ? `<button class="btn" data-propose="${esc(id)}">Proposer la taxe / une info au club</button> (publiée pour tous les pilotes après vérification)` : ''}</p>
       <label class="meta">📝 Mes notes sur ${esc(id)} (gardées sur cet appareil, rappelées à chaque préparation)<textarea id="pf-note-${esc(id)}${sfx}" rows="2" style="width:100%">${esc(adNote(id))}</textarea></label><button class="btn" data-note="${esc(id)}">Enregistrer la note</button></details>`;
   }
   // ---------- meilleur dégagement (28) : terrains à moins de 40 NM de l'arrivée, ouverts, sans fermeture NOTAM, TAF correct, piste assez longue, carburant
@@ -2638,7 +2693,7 @@
   }
   function freqHtml(b) {
     const F = freqTimeline(b);
-    return `<details><summary><b>📻 Fréquences dans l'ordre du vol</b> (${F.length})</summary><table class="legs"><tr><th>Heure</th><th>NM</th><th>Où</th><th>Fréquence</th><th>Quoi</th></tr>
+    return `<details><summary><b>Fréquences dans l'ordre du vol</b> (${F.length})</summary><table class="legs"><tr><th>Heure</th><th>NM</th><th>Où</th><th>Fréquence</th><th>Quoi</th></tr>
       ${F.map((x) => `<tr><td>${utc(x.at)}</td><td>${x.nm.toFixed(0)}</td><td style="text-align:left">${esc(x.where)}</td><td style="text-align:left">${esc(x.freq)}</td><td style="text-align:left">${esc(x.what)}</td></tr>`).join('')}</table>
       <p class="meta">Ordre calculé sur la route et l'altitude prévues. Fréquences des espaces : données OpenAir FFVP et VAC, à vérifier sur la carte.</p></details>`;
   }
@@ -2659,7 +2714,7 @@
     const ac = FLEET.find((x) => x.reg === $('#pf-reg').value) || FLEET[0], T = TYPES[ac.type];
     const ids = [...new Set([$('#pf-dep').value, $('#pf-arr').value, $('#pf-alt').value, ...$('#pf-stages').value.split(/[\s,;]+/), ...$('#pf-wps').value.split(/[\s,;]+/)].map((x) => (x || '').trim().toUpperCase()).filter((x) => /^LF[A-Z]{2}$/.test(x)))];
     const bad = ids.map((id) => adCheck(id, T)).filter(Boolean);
-    box.innerHTML = bad.length ? bad.map((x) => `<div class="warn" style="margin:2px 0">⚠️ ${esc(x.id)} pour ${esc(ac.reg)} : ${esc(x.why.join(' ; '))}</div>`).join('') : '';
+    box.innerHTML = bad.length ? bad.map((x) => `<div class="warn" style="margin:2px 0">${esc(x.id)} pour ${esc(ac.reg)} : ${esc(x.why.join(' ; '))}</div>`).join('') : '';
   }
   // ---------- notes personnelles par terrain (47), gardées sur l'appareil
   const adNote = (id) => (store.get('adnotes', {})[id] || '');
@@ -2683,7 +2738,7 @@
     } catch (e) { console.warn('météo vol local', e); }
     const ad = vacAt(f.dep) || {}, notes = adNote(f.dep);
     const vis = (x) => `${x.lower} – ${x.upper}`;
-    return `<h4>🛩️ Vol local au départ de ${esc(f.dep)} ${esc(a.name)} — ${hhmm(dur)}, zone de ${R} NM</h4>
+    return `<h4>Vol local au départ de ${esc(f.dep)} ${esc(a.name)} — ${hhmm(dur)}, zone de ${R} NM</h4>
       ${notes ? `<div class="okk">📝 ${esc(notes)}</div>` : ''}
       <p class="meta">⛽ Carburant : vol ${fuelNeed} L (roulage compris) + réserve finale ${res} L = <b>${fuelNeed + res} L</b> ; à bord ${loaded} L, marge <b style="color:${loaded - fuelNeed - res < 0 ? '#ff6b6b' : 'inherit'}">${loaded - fuelNeed - res} L</b>, autonomie ${hhmm(Math.floor((loaded - TAXI_L) / f.ff * 60))}.
         ⚖️ Masse ${Math.round(mb.mass)} / ${f.T.mtow} kg${mb.cg != null ? `, centrage ${mb.cg.toFixed(3)} m ${mb.inEnv(mb.cg, mb.mass) ? '✅' : '❌ hors limites'}` : ''}.</p>
@@ -2737,6 +2792,16 @@
     return { lv, reasons: reasons.slice(0, 3), n: reasons.length };
   }
   console.assert((() => { const pick = (st, wh, wa, n) => (st || wh ? 2 : wa || n > 12 ? 1 : 0); return pick(1, 0, 0, 1) === 2 && pick(0, 0, 1, 1) === 1 && pick(0, 0, 0, 3) === 0; })(), 'verdict niveaux');
+  // phrase de tête du briefing : avis, deux raisons principales, durée
+  function oneLine(lv, reasons, min, nAll) {
+    const head = ['Vol faisable', 'Vol possible avec prudence', 'Vol déconseillé en l\'état'][lv];
+    const r = reasons.slice(0, 2).map((x) => x.replace(/\s+—.*$/, '').replace(/\s*\([^)]*\)/g, '').replace(/[.\s]+$/, ''));   // phrase courte : détails dans les onglets
+    const more = nAll > 2 ? ` (${nAll - 2} autre${nAll > 3 ? 's' : ''} point${nAll > 3 ? 's' : ''} dans les onglets)` : '';
+    return `${head}${r.length ? ' : ' + r.join(' et ') + more : ', aucune alerte importante'}. ${hhmm(Math.round(min))} de vol.`;
+  }
+  console.assert(oneLine(1, ['vent traversier 14 kt à LFBZ', 'météo marginale sur la route'], 65, 4) === 'Vol possible avec prudence : vent traversier 14 kt à LFBZ et météo marginale sur la route (2 autres points dans les onglets). 1h05 de vol.'
+    && oneLine(2, ['Zone R 40 A DAX (SFC – 2000ft AMSL) active pendant le vol (NOTAM R354/26) et traversée à 2500 ft — contourner.'], 38, 1) === 'Vol déconseillé en l\'état : Zone R 40 A DAX active pendant le vol et traversée à 2500 ft. 0h38 de vol.'
+    && oneLine(0, [], 40, 0) === 'Vol faisable, aucune alerte importante. 0h40 de vol.' && oneLine(2, ['carburant insuffisant (-3 L)'], 60, 1).startsWith('Vol déconseillé en l\'état : carburant insuffisant.'), 'oneLine');
   function verdictHtml(trip) {
     const V = trip.map(verdict), lv = Math.max(...V.map((v) => v.lv)), r = V.flatMap((v, i) => v.reasons.map((x) => (trip.length > 1 ? `étape ${i + 1} : ` : '') + x)).slice(0, 3);
     const lbl = ['On peut partir', 'À surveiller', 'Ne pas partir en l\'état'][lv], col = ['#34c759', '#ff9500', '#ff3b30'][lv];
@@ -2746,8 +2811,9 @@
       <text x="40" y="${e != null ? 44 : 49}" text-anchor="middle" class="vr-t">${e != null ? e + '%' : ['✓', '!', '✕'][lv]}</text>${e != null ? '<text x="40" y="57" text-anchor="middle" class="vr-s">VFR</text>' : ''}</svg>`;
     const dist = trip.reduce((x, b) => x + b.totDist, 0), nt = bN.night;
     const facts = [['Départ', utc(b0.depT)], ['Arrivée', utc(bN.eta)], ['Trajet', `${dist.toFixed(0)} NM · ${hhmm(Math.round((bN.eta - b0.depT) / 6e4))}`], ...(nt ? [['Nuit aéro', utc(nt.night)]] : [])];
+    const nAll = V.reduce((x, v) => x + v.n, 0);
     return `<div class="verdict v${lv}">${ring}<div class="vd-txt"><b style="color:${col}">${lbl}</b>
-        ${r.length ? `<ul>${r.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>Aucune alerte importante.</p>'}
+        <p class="vd-line">${esc(oneLine(lv, r, (bN.eta - b0.depT) / 6e4, nAll))}</p>
         <div class="vd-facts">${facts.map(([k, v]) => `<span><small>${k}</small>${esc(v)}</span>`).join('')}</div></div></div>
       <p class="meta">Synthèse automatique des alertes${e != null ? ` · anneau : probabilité VFR (${b0.ens.n} scénarios ECMWF)` : ''} : la décision reste celle du pilote (TEMSI, TAF, NOTAM du jour).</p>`;
   }
@@ -2764,7 +2830,7 @@
   }
   function whatIfHtml(b, sfx) {
     if (b.stage > 1) return '';
-    return `<details><summary><b>🔮 Et si…</b> (départ retardé, passager en plus, vent plus fort)</summary>
+    return `<details><summary><b>Et si…</b> (départ retardé, passager en plus, vent plus fort)</summary>
       <div class="row" style="gap:8px;flex-wrap:wrap"><label>Départ retardé de <select data-wi="delay"><option>0</option><option>30</option><option>60</option><option>90</option><option>120</option></select> min</label>
       <label>Masse en plus <select data-wi="kg"><option>0</option><option>20</option><option>75</option><option>150</option></select> kg</label>
       <label>Vent plus fort de <select data-wi="wind"><option>0</option><option>5</option><option>10</option><option>15</option><option>20</option></select> kt</label></div>
@@ -3026,7 +3092,7 @@
     const L0 = [...b.adNotams.flatMap((x) => x.list.map((n) => ({ n, where: x.id }))), ...b.enroute.concat(b.obst).map((x) => ({ n: x.n, where: `en route, ${x.along.toFixed(0)} NM` })), ...b.general.map((n) => ({ n, where: 'FIR' }))]
       .filter((x) => x.n && x.n.ref).map((x) => ({ ...x, k: notamKind(x.n) })).sort((x, y) => x.k - y.k);
     if (!L0.length) return '';
-    return `<details><summary><b>📋 NOTAM de la nav en français simple</b> (${L0.length}, triés : fermetures, zones actives, obstacles, informations)</summary>
+    return `<details><summary><b>NOTAM de la nav en français simple</b> (${L0.length}, triés : fermetures, zones actives, obstacles, informations)</summary>
       ${L0.map((x) => `<p class="meta" style="margin:3px 0" title="${esc(x.n.e || '')}">${NOTAM_KIND[x.k]} · <b>${esc(x.n.ref)}</b> (${esc(x.where)}, ${fmtNotamT(x.n)}) : ${esc(notamPlain(x.n.efr || x.n.e).slice(0, 300))}</p>`).join('')}
       <p class="meta">Abréviations traduites automatiquement (texte d'origine au survol) : le NOTAM officiel fait foi (SOFIA).</p></details>`;
   }
@@ -3175,13 +3241,13 @@
     const aq = b.aq, hz = hazeLevel(aq);
     return `${hz === 1 ? `<p class="meta">🌫️ Légère brume sèche possible (épaisseur optique ${aq.aod.toFixed(2)}) : visibilité un peu réduite, horizon moins net.</p>` : ''}
       ${notamsHtml(b)}
-      ${cams.length ? `<details><summary><b>📷 Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
-      <details><summary><b>📻 Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
+      ${cams.length ? `<details><summary><b>Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
+      <details><summary><b>Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
         ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
         ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
-      <p class="meta"><button class="btn" id="pf-back${sfx}">↩️ Préparer le retour</button> <button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span><br><button class="btn" id="pf-offline${sfx}">📴 Garder la carte OACI du trajet (vol sans réseau)</button> <span id="pf-offline-st${sfx}"></span></p>
+      <p class="meta"><button class="btn" id="pf-back${sfx}">Préparer le retour</button> <button class="btn" id="pf-pax${sfx}">Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span><br><button class="btn primary" id="pf-go${sfx}">Bon vol !</button> <button class="btn" id="pf-offline${sfx}">Garder la carte OACI du trajet (vol sans réseau)</button> <span id="pf-offline-st${sfx}"></span></p>
       <div id="pf-fields-out${sfx}"></div><div id="pf-efato-out${sfx}"></div><div id="pf-obst-out${sfx}"></div>
-      <details id="pf-photo-box${sfx}"><summary><b>📸 Photo du terrain d'arrivée et schéma du tour de piste</b></summary><div id="pf-photo${sfx}" class="meta">Ouvrir pour charger la photo…</div></details>`;
+      <details id="pf-photo-box${sfx}"><summary><b>Photo du terrain d'arrivée et schéma du tour de piste</b></summary><div id="pf-photo${sfx}" class="meta">Ouvrir pour charger la photo…</div></details>`;
   }
   // ---------- fiche briefing passagers (page à imprimer)
   function paxBrief(b) {
@@ -3322,7 +3388,7 @@
     });
     cand.sort((x, y) => x.score - y.score || y.d - x.d);
     const dot = (l) => `<span style="color:${WXCOL[l.level]}">●</span>`;
-    return `<h4>🧭 Où voler au départ de ${esc(f.dep)} (${utc(depT)}, ${maxMin} min aller au plus, ${Math.round(f.tas)} kt)</h4>
+    return `<h4>Où voler au départ de ${esc(f.dep)} (${utc(depT)}, ${maxMin} min aller au plus, ${Math.round(f.tas)} kt)</h4>
       <table class="legs"><tr><th>Terrain</th><th>NM</th><th>Aller</th><th>Route</th><th>Arrivée</th><th style="text-align:left">À savoir</th><th></th></tr>
       ${cand.slice(0, 25).map((x) => { const why = [...new Set([...x.wm.why, ...x.wa.why])], note = [x.closed && `fermé à ${utc(x.eta)} (${x.closed.win})`, x.pz && `zone P ${x.pz.id} sur la ligne directe`, x.rwy && x.rwy.why[0], x.fee && x.fee.tarif && `taxe ${x.fee.tarif}`].filter(Boolean);
         return `<tr><td style="text-align:left"><b>${esc(x.a.icao)}</b> ${esc(x.a.name)}</td><td>${x.d.toFixed(0)}</td><td>${Math.round(x.min)}′</td><td title="${esc(x.wm.why.join(', '))}">${dot(x.wm)}</td><td title="${esc(x.wa.why.join(', '))}">${dot(x.wa)}</td>
@@ -3352,7 +3418,7 @@
       const rows = F.map(([k, l]) => { const m = mine[k], r = ref[k]; if (r == null) return null; const e = m == null ? null : (k === 'rm' || k === 'cm' ? ang(m, r) : Math.abs(m - r));
         return `<tr><td style="text-align:left">${l}</td><td>${m ?? '–'}</td><td>${k === 'rm' || k === 'cm' ? r3(r) : Math.round(r)}</td><td>${e == null ? '–' : e <= tol[k] ? '✅' : `❌ (${Math.round(e)})`}</td></tr>`; }).filter(Boolean);
       const ok = F.filter(([k]) => mine[k] != null && ref[k] != null && (k === 'rm' || k === 'cm' ? ang(mine[k], ref[k]) : Math.abs(mine[k] - ref[k])) <= tol[k]).length;
-      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>🎲 Résultat de l'exercice : ${ok}/${F.length}</h4><table class="legs"><tr><th>Valeur</th><th>Toi</th><th>Calcul</th><th>Écart</th></tr>${rows.join('')}</table>
+      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>Résultat de l'exercice : ${ok}/${F.length}</h4><table class="legs"><tr><th>Valeur</th><th>Toi</th><th>Calcul</th><th>Écart</th></tr>${rows.join('')}</table>
         <p class="meta">Tolérances : ±5° pour la route et le cap, ±2 NM, ±3 min, ±3 L, ±200 ft. Temps et carburant du site : roulage, montée et vent prévu compris.</p>`);
     });
   }
@@ -3496,7 +3562,7 @@
   function optAltHtml(b, sfx = '') {
     const o = b.optAlt; if (!o) return '';
     const d = o.cur ? o.cur.fuel - o.uni.fuel : null;
-    return `<h4>🎯 Altitude optimale par branche</h4>
+    return `<h4>Altitude optimale par branche</h4>
       <table class="legs"><tr><th>Branche</th><th>Altitude</th><th>Vent</th><th>Plancher</th><th>Plafond</th><th>À noter</th></tr>
       ${o.plan.map((c) => `<tr${c.hard.length ? ' style="color:#ff6b6b"' : ''}><td>${esc(c.lg.from)}→${esc(c.lg.to)}</td><td><b>${c.hard.length ? '⛔ impossible' : c.alt + ' ft'}</b></td><td>${c.w ? `${r3(c.w.dir)}/${Math.round(c.w.spd)}` : '–'}</td>
         <td style="text-align:left">${c.floor ? `${c.floor.alt} ft : ${esc(c.floor.why)}` : '–'}</td><td style="text-align:left">${c.ceil ? `${c.ceil.alt} ft : ${esc(c.ceil.why)}` : '9500 ft'}</td>
@@ -3550,7 +3616,7 @@
   }
   function landmarksHtml(b) {
     const L0 = landmarksOf(b); if (!L0.some((x) => x.list.length)) return '';
-    return `<details><summary><b>🏘️ Repères visuels par branche</b> (minute depuis le début de la branche)</summary>
+    return `<details><summary><b>Repères visuels par branche</b> (minute depuis le début de la branche)</summary>
       ${L0.map((x) => `<p class="meta" style="margin:2px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> : ${x.list.map((t) => `${t.k} ${t.min}' ${esc(t.n)} <small>(${t.side}${t.side === 'croisée' || t.side === 'dessous' ? '' : `, ${t.d.toFixed(1)} NM`})</small>`).join(' · ') || 'peu de repères (campagne)'}</p>`).join('')}
       <p class="meta">Villes de plus de 1500 habitants, autoroutes, rivières principales et lacs (OpenStreetMap). À compléter avec la carte OACI (châteaux d'eau, lignes HT, voies ferrées).</p></details>`;
   }
@@ -3575,7 +3641,7 @@
     const L1 = landmarkRoute(b), L2 = landmarkRoute(b, 12, 6);
     if (!L1.length && !L2.length) return '';
     const one = (L0, id, lbl) => L0.length ? `<p class="meta">${lbl} : ${L0.map((c) => `<b>${esc(c.n)}</b> (${c.along.toFixed(0)} NM)`).join(' → ')} <button class="btn" data-wps="${esc(L0.map((c) => c.tok).join(' '))}" id="${id}${sfx}">Utiliser</button></p>` : '';
-    return `<details><summary><b>📍 Points tournants sur des repères évidents</b></summary>
+    return `<details><summary><b>Points tournants sur des repères évidents</b></summary>
       ${one(L1, 'pf-lmk1', '22 · Repères tous les ~17 NM, à moins de 3 NM de la route directe')}
       ${one(L2, 'pf-lmk2', 'Itinéraire « élève » : un repère tous les ~12 NM, quitte à s\'écarter jusqu\'à 6 NM')}
       <p class="meta">Villes de plus de 3000 habitants et grands lacs. « Utiliser » remplace les points tournants du formulaire et recalcule (points libres PT1, PT2… dans le log).</p></details>`;
@@ -3589,7 +3655,7 @@
   }
   function drHtml(b) {
     const R = deadReckoning(b); if (!R.some((x) => x.cps.length)) return '';
-    return `<details><summary><b>⏱️ Contrôle de l'estime</b> (repères attendus et conduite à tenir)</summary>
+    return `<details><summary><b>Contrôle de l'estime</b> (repères attendus et conduite à tenir)</summary>
       ${R.map((x) => `<p class="meta" style="margin:3px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> · Cm ${r3(x.lg.hm)}° · ${x.lg.min} min${x.cps.length ? '<br>' + x.cps.map((c) => `${utc(c.at)} (+${c.min}') : ${c.k} ${esc(c.n)} ${esc(c.side)} — si rien à +2 min : vérifier cap, conservateur et vent ; à +5 min : ${c.next ? `chercher ${esc(c.next.n)} (+${c.next.min}')` : `revenir au dernier repère sûr`} ou demander l'aide du SIV`).join('<br>') : ' — peu de repères : tenir le cap et le temps, demander l\'aide du SIV en cas de doute'}</p>`).join('')}
       <p class="meta">Heures UTC calculées au vent prévu. Garder la carte en main : ces repères complètent l'estime, ils ne la remplacent pas.</p></details>`;
   }
@@ -3603,7 +3669,7 @@
       const res = [];
       for (const [n, fv] of variants) { prog.textContent = `Comparaison des routes : ${n}…`; const t = await buildTrip(fv); res.push([n, fv, t[0]]); }
       const row = (l, f2) => `<tr><td style="text-align:left">${l}</td>${res.map(([, , b]) => `<td>${f2(b)}</td>`).join('')}</tr>`;
-      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>🗺️ Comparaison des routes</h4><table class="legs"><tr><th></th>${res.map(([n]) => `<th>${esc(n)}</th>`).join('')}</tr>
+      $('#pf-out').insertAdjacentHTML('afterbegin', `<h4>Comparaison des routes</h4><table class="legs"><tr><th></th>${res.map(([n]) => `<th>${esc(n)}</th>`).join('')}</tr>
         ${row('Distance', (b) => b.totDist.toFixed(0) + ' NM')}${row('Temps', (b) => hhmm(b.totMin))}${row('Carburant', (b) => b.totFuel + ' L')}
         ${row('Espaces traversés à l\'altitude prévue', (b) => (b.vprofile ? b.vprofile.conflicts.length : '?'))}${row('Zones R / D / ZRT traversées', (b) => b.zones.filter((x) => x.crossed && x.below && x.z.type !== 'P').length)}
         ${row('Relief max', (b) => (b.vprofile ? b.vprofile.maxTer + ' ft' : '?'))}${row('Plus loin d\'un terrain', (b) => Math.max(...diversions(b).map((x) => x.worst.d)).toFixed(0) + ' NM')}
@@ -3644,7 +3710,7 @@
       return ` <span title="${esc(WXTXT[w.lv])}${w.why.length ? ' : ' + esc(w.why.join(', ')) : ''}" style="color:${WXCOL[w.lv]}">●</span>`; };
     const html = dv.map((x) => `<p class="meta" style="margin:2px 0"><b>${esc(x.lg.from)}→${esc(x.lg.to)}</b> : ${x.list.length ? x.list.slice(0, 6).map((t) => `${esc(t.a.icao)} ${esc(t.a.name)} (${t.d.toFixed(0)} NM, à ${t.along.toFixed(0)} NM)${tag(x, t)}`).join(' · ') : 'aucun terrain à moins de 10 NM'}
         — terrain le plus éloigné : <b>${x.worst.d.toFixed(0)} NM</b>${x.glide != null ? ` (plané ≈ ${x.glide.toFixed(0)} NM depuis ${b.f.ft} ft)` : ''}</p>
-        ${x.worst.d > DIVERT_NM ? `<div class="warn">⚠️ ${esc(x.lg.from)}→${esc(x.lg.to)} : jusqu'à ${x.worst.d.toFixed(0)} NM de tout terrain (à ${x.worst.at.toFixed(0)} NM de ${esc(x.lg.from)}) — repérer les champs utilisables sur la carte.</div>` : ''}`).join('');
+        ${x.worst.d > DIVERT_NM ? `<div class="warn">${esc(x.lg.from)}→${esc(x.lg.to)} : jusqu'à ${x.worst.d.toFixed(0)} NM de tout terrain (à ${x.worst.at.toFixed(0)} NM de ${esc(x.lg.from)}) — repérer les champs utilisables sur la carte.</div>` : ''}`).join('');
     return `<h4>Terrains de déroutement le long de la route</h4>${html}
       ${all ? `<p class="meta">● météo prévue au terrain à l'heure de passage (vert favorable, orange marginal, rouge défavorable) : <b>${ok} sur ${all}</b> restent utilisables. Survole le point pour le détail.</p>` : ''}`;
   }
@@ -3732,11 +3798,11 @@
   }
   function costDetailHtml(trip) {
     const R = costRows(trip), n = Math.max(1, trip[0].f.share || 1), tot = R.reduce((s, r) => s + (r.fly || 0) + r.fee + (r.fuelEur || 0), 0);
-    return `<details><summary><b>💶 Coût détaillé par étape</b> — total ${tot} €${n > 1 ? `, ${Math.round(tot / n)} € par personne (${n})` : ''}</summary>
+    return `<details><summary><b>Coût détaillé par étape</b> — total ${tot} €${n > 1 ? `, ${Math.round(tot / n)} € par personne (${n})` : ''}</summary>
       <table class="legs"><tr><th>Étape</th><th>Temps</th><th>Heures de vol</th><th>Taxe à l'arrivée</th><th>Carburant pris</th></tr>
       ${R.map((r) => `<tr><td>${esc(r.b.f.dep)}→${esc(r.b.f.arr)}</td><td>${hhmm(r.min)}</td><td>${r.fly != null ? r.fly + ' €' : '?'}</td><td>${r.fee ? r.fee + ' €' : esc(r.feeTxt)}</td><td>${r.fuelL ? `${r.fuelL} L${r.fuelEur != null ? ` · ${r.fuelEur} €` : ''}` : '–'}</td></tr>`).join('')}</table>
       <p class="meta">Carburant acheté aux escales : avancé par le pilote, remboursement selon les règles du club (tarif horaire « carburant compris »). Prix au litre : champ « Prix du carburant aux escales ». Taxes : tableau du club ou relevé sur le site, sinon à demander au terrain.
-        <button class="btn" id="pf-cost-csv">📤 Export pour le club (CSV)</button></p></details>`;
+        <button class="btn" id="pf-cost-csv">Export pour le club (CSV)</button></p></details>`;
   }
   function costCsv(trip) {
     const f = trip[0].f, rows = [['Date', 'Avion', 'Pilote', 'Étape', 'Départ UTC', 'Arrivée UTC', 'Temps (min)', 'Heures de vol (€)', "Taxe d'atterrissage (€)", 'Carburant pris (L)', 'Carburant (€)']];
@@ -3782,7 +3848,7 @@
     }
     return rows.sort((x, y) => x.nm - y.nm).map((x) => x.r);   // tri stable : à NM égal, l'ordre d'ajout reste
   }
-  const radioHtml = (b) => `<details><summary><b>📻 Fiche radio de l'étape</b> (messages types, à adapter aux consignes de la VAC)</summary>
+  const radioHtml = (b) => `<details><summary><b>Fiche radio de l'étape</b> (messages types, à adapter aux consignes de la VAC)</summary>
       <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table></details>`;
 
   // ---------- meilleur créneau de départ (même nav, départ de 7 h à 17 h locales)
@@ -3902,7 +3968,7 @@
     const ids = [...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))];
     const rows = ids.map((id) => { const m = A.metars[id], t = A.tafs[id], tw = tafWords(t);
       return (m || tw.length) ? `<p class="meta" style="margin:3px 0"><b>${esc(id)}</b>${m ? ` — observé à ${hLoc(m.obsTime * 1000)} : ${esc(metarWords(m))}.` : ''}${tw.length ? `<br>${tw.map(esc).join('<br>')}` : ' — pas de TAF.'}</p>` : ''; }).join('');
-    return rows ? `<details><summary><b>🗣️ METAR et TAF en clair</b> (heures locales)</summary>${rows}<p class="meta">Traduction automatique : en cas de doute, le texte brut fait foi.</p></details>` : '';
+    return rows ? `<details><summary><b>METAR et TAF en clair</b> (heures locales)</summary>${rows}<p class="meta">Traduction automatique : en cas de doute, le texte brut fait foi.</p></details>` : '';
   }
 
   // prévision horaire du jour aux terrains, le long de la route et aux déroutements
@@ -3955,7 +4021,7 @@
     const cell = (ps, t) => { const r = ps.map((x) => wxAt(x, t)).filter(Boolean); if (!r.length) return '<td></td>'; const lv = Math.max(...r.map((x) => x.lv)), why = [...new Set(r.flatMap((x) => x.why))];
       const mark = t <= b0.depT.getTime() && b0.depT.getTime() < t + 3600e3 ? '🛫' : t <= bN.eta.getTime() && bN.eta.getTime() < t + 3600e3 ? '🛬' : '';
       return `<td title="${esc(hLoc(t))} : ${esc(WXTXT[lv])}${why.length ? ' — ' + esc(why.join(', ')) : ''}" style="background:${WXCOL[lv]};color:#000;min-width:20px">${mark}</td>`; };
-    return `<h4>🌤️ Fenêtre météo du jour (heure locale)</h4><div style="overflow-x:auto"><table class="legs" style="font-size:11px"><tr><th></th>${hours.map((t) => `<th>${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', timeZone: 'Europe/Paris' }).replace(/\D.*$/, '')}</th>`).join('')}</tr>
+    return `<h4>Fenêtre météo du jour (heure locale)</h4><div style="overflow-x:auto"><table class="legs" style="font-size:11px"><tr><th></th>${hours.map((t) => `<th>${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', timeZone: 'Europe/Paris' }).replace(/\D.*$/, '')}</th>`).join('')}</tr>
       ${rows.filter((r) => r[1].length).map(([l, ps]) => `<tr><td style="text-align:left;white-space:nowrap">${esc(l)}</td>${hours.map((t) => cell(ps, t)).join('')}</tr>`).join('')}</table></div>
       <p class="meta">Vert : VFR favorable · orange : marginal · rouge : défavorable (visibilité, plafond, brouillard, orage, pluie, rafales). 🛫 départ prévu, 🛬 arrivée. Survole une case pour le détail. Modèle Open-Meteo : confirmer avec TAF et TEMSI.</p>`;
   }
@@ -4007,7 +4073,7 @@
   function altCmpHtml(b) {
     const c = b.altCmp; if (!c || !c.best) return '';
     const d = c.cur ? { min: c.cur.min - c.best.min, fuel: c.cur.fuel - c.best.fuel } : null;
-    return `<details><summary><b>🧭 Altitude de croisière selon le vent</b> — ${c.best.alt === b.f.ft ? `${b.f.ft} ft est déjà la meilleure` : `à ${c.best.alt} ft${d ? ` tu gagnes ${d.min} min et ${d.fuel} L` : ''}`}</summary>
+    return `<details><summary><b>Altitude de croisière selon le vent</b> — ${c.best.alt === b.f.ft ? `${b.f.ft} ft est déjà la meilleure` : `à ${c.best.alt} ft${d ? ` tu gagnes ${d.min} min et ${d.fuel} L` : ''}`}</summary>
       <table class="legs"><tr><th>Altitude</th><th>Temps</th><th>Carburant</th><th>Régime</th><th>Remarque</th></tr>
       ${c.rows.map((r) => `<tr${r === c.best ? ' style="font-weight:bold"' : ''}><td>${r.alt} ft${r.cur ? ' (prévue)' : ''}</td><td>${hhmm(r.min)}</td><td>${r.fuel} L</td><td>${esc(r.rg.name || r.rg)}</td><td style="text-align:left">${[r.low && `sous l'alti sécu (${c.maxSafe} ft)`, !r.semi && 'hors règle semi-circulaire au-dessus de 3000 ft sol'].filter(Boolean).join(', ') || '✅'}</td></tr>`).join('')}</table>
       <p class="meta">Vent Open-Meteo à l'heure de passage, montée comprise. Choisir aussi selon les espaces aériens, la base des nuages et le givrage.</p></details>`;
@@ -4058,7 +4124,7 @@
       res: `
       ${changesHtml(b)}
       ${notesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-knee${sfx}">🗒️ Fiche de genou A5</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">🗺️ Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">Mode en vol (GPS)</button><button class="btn" id="pf-knee${sfx}">Fiche de genou A5</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
       <table class="legs"><tr><th>Branche</th><th>Alt.</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
@@ -4083,10 +4149,10 @@
       <h4>GRAMET — coupe météo de la route</h4>
       ${b.gramet && !b.gramet.err ? `<canvas id="pf-gramet${sfx}" class="gramet-cv" width="1000" height="470"></canvas>` : ''}
       <p class="meta">${grametSummary(b.gramet, b)} Modèle Open-Meteo à l'heure de passage.</p>
-      <div class="row">${b.gramet && !b.gramet.err ? `<button class="btn" id="pf-gramet-big${sfx}">🔍 Agrandir</button>` : ''}<a class="btn" href="${esc(ogimetUrl(b))}" target="_blank" rel="noopener">GRAMET Ogimet (GFS)</a><a class="btn" href="https://aviation.meteo.fr" target="_blank" rel="noopener">TEMSI / WINTEM (aviation.meteo.fr)</a></div>
+      <div class="row">${b.gramet && !b.gramet.err ? `<button class="btn" id="pf-gramet-big${sfx}">Agrandir</button>` : ''}<a class="btn" href="${esc(ogimetUrl(b))}" target="_blank" rel="noopener">GRAMET Ogimet (GFS)</a><a class="btn" href="https://aviation.meteo.fr" target="_blank" rel="noopener">TEMSI / WINTEM (aviation.meteo.fr)</a></div>
       ${mountainHtml(b)}`,
       route: `
-      <h4>✈️ Coupe verticale de la route</h4>
+      <h4>Coupe verticale de la route</h4>
       ${profileSvg(b.vprofile, b, sfx)}
       ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
       ${crossHtml(b)}
@@ -4115,7 +4181,7 @@
       ${fplHtml(b, sfx)}`,
       sec: `
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
-      ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
+      ${al.map((w) => `<div class="warn">${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       ${safetyHtml(b)}
       ${moreHtml(b, sfx)}
       ${whatIfHtml(b, sfx)}`,
@@ -4984,7 +5050,7 @@
       ${cutNowHtml(lg, best, altFt)}
       ${devHtml(lg, best, p)}
       ${fm.divert ? divertHtml(p, v, lg) : ''}
-      <div class="if-row"><button class="btn" id="if-follow">${fm.follow ? '🔒 Suivi' : '🎯 Recentrer'}</button><button class="btn" id="if-div">${fm.divert ? '✕ Fermer déroutement' : '🛬 Dérouter'}</button><button class="btn" id="if-cock">${fm.cockpit ? '🗺️ Normal' : '🖥️ Cockpit'}</button><button class="btn" id="if-stop">✕ Quitter</button></div>
+      <div class="if-row"><button class="btn" id="if-follow">${fm.follow ? '🔒 Suivi' : '🎯 Recentrer'}</button><button class="btn" id="if-div">${fm.divert ? '✕ Fermer déroutement' : '🛬 Dérouter'}</button><button class="btn" id="if-cock">${fm.cockpit ? '🗺️ Normal' : '🖥️ Cockpit'}</button><button class="btn" id="if-stop">Quitter</button></div>
       <div class="if-note">Aide à la navigation de secours — ne remplace ni la carte, ni l'estime, ni les instruments.</div>`;
     fm.box.querySelector('#if-stop').onclick = stopFlight;
     fm.box.querySelector('#if-follow').onclick = () => { fm.follow = true; map.setView(p, Math.max(map.getZoom(), 10)); };
@@ -5047,7 +5113,7 @@
         <div><b>${esc(e.title)}</b> · ${esc(e.reg)}</div>
         <div class="meta">Vol du ${esc(new Date(e.dep).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · préparé le ${esc(new Date(e.at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</div>
         <div class="row">${e.files.map((n, j) => `<button class="btn" data-hf="${i}:${j}">${/\.pdf$/.test(n) ? '📄 PDF' : '📊 Excel'}${e.files.filter((x) => x.slice(-4) === n.slice(-4)).length > 1 ? ' ' + esc(n.split('_')[2] || '') : ''}</button>`).join('')}
-          <button class="btn" data-redo="${i}">↻ Refaire</button><button class="btn" data-del="${i}">🗑️</button></div>
+          <button class="btn" data-redo="${i}">Refaire</button><button class="btn" data-del="${i}">️</button></div>
       </div>`).join('') + '<p class="meta small-print">Conservé sur cet appareil (25 dernières préparations).</p>' : '<p class="meta">Aucune préparation enregistrée : l\'historique se remplit à chaque génération de PDF ou de log Excel.</p>');
     const body = document.getElementById('detail-body');
     body.querySelectorAll('[data-hf]').forEach((x) => x.addEventListener('click', () => { const [i, j] = x.dataset.hf.split(':').map(Number); histFile(list[i].id, list[i].files[j]); }));

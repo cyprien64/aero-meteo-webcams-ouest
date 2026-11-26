@@ -63,6 +63,7 @@
 
   // ---------- Indicateur de chargement ----------
   let bar = null, timer = null;
+  const QUIET = /^(Balises vent|Fiches escale|Vigilance|Préparation de vol)/;   // utiles mais pas indispensables au vol
   const SLOW = 20000;
   function ensureBar() {
     if (bar || !document.body) return bar;
@@ -82,8 +83,12 @@
     if (!ensureBar()) return;
     const now = performance.now();
     const list = [...LOG.tasks.values()];
-    const run = list.filter((t) => t.state === 'en cours');
-    const bad = list.filter((t) => !t.seen && (t.state === 'erreur' || (t.state === 'en cours' && now - t.start > SLOW)));
+    // la barre ne parle que de ce qui compte pour le vol ; le reste allume une pastille sur « Signaler un problème »
+    const quiet = (t) => QUIET.test(t.name);
+    const lb = document.getElementById('btn-log'), nq = list.filter((t) => quiet(t) && t.state === 'erreur').length;
+    if (lb) { lb.dataset.issues = nq || ''; lb.title = nq ? `${nq} chargement(s) secondaire(s) en échec : voir le journal` : 'Quelque chose ne marche pas ? Journal des erreurs et contact'; }
+    const run = list.filter((t) => t.state === 'en cours' && !quiet(t) && now - t.start > 2500);   // pas de clignotement pour un chargement rapide
+    const bad = list.filter((t) => !t.seen && !quiet(t) && (t.state === 'erreur' || (t.state === 'en cours' && now - t.start > SLOW)));
     if (!run.length && !bad.length) { bar.hidden = true; clearInterval(timer); timer = null; return; }
     bar.hidden = false;
     const runTxt = run.length ? `<span class="spin"></span> Chargement : ${run.map((t) => `${t.name} <i>${Math.round((now - t.start) / 1000)} s</i>`).join(' · ')}` : '';

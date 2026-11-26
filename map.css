@@ -418,7 +418,7 @@ details.sec { border-radius: 16px; padding: 2px 14px 12px; }
 :root[data-theme="light"] .notam { background: rgba(118,118,128,.08); }
 :root[data-theme="light"] ul.ppr, :root[data-theme="light"] .asp-lim, :root[data-theme="light"] #loadbar .lb-bad { color: #3a3a3c; }
 :root[data-theme="light"] .asp-card, :root[data-theme="light"] details.stage, :root[data-theme="light"] .hist, :root[data-theme="light"] details.pratique { background: rgba(118,118,128,.08); }
-:root[data-theme="light"] details.pratique > summary { color: #c93400; }
+:root[data-theme="light"] details.pratique > summary { color: var(--text); }
 :root[data-theme="light"] .leaflet-control-zoom a { color: #1d1d1f !important; border-color: rgba(0,0,0,.08) !important; }
 :root[data-theme="light"] .leaflet-control-attribution { background: rgba(255,255,255,.75) !important; color: #3a3a3c !important; }
 :root[data-theme="light"] .leaflet-control-attribution a { color: #0066cc !important; }
@@ -569,3 +569,54 @@ body:has(#tslider) #update-bar, body:has(#tslider) #remind-bar { bottom: 150px; 
 .help-ico .ico { width: 15px; height: 15px; color: #fff; stroke: #fff; }
 .news { margin: 6px 0 10px; padding-left: 4px; list-style: none; }
 .news li { margin: 7px 0; line-height: 1.4; }
+
+#btn-log[data-issues]:not([data-issues=""])::after { content: attr(data-issues); display: inline-block; margin-left: 6px; min-width: 16px; padding: 0 4px; border-radius: 99px; background: #ff9500; color: #000; font-size: 10px; line-height: 16px; text-align: center; }
+
+/* ================================================================ v56 : surfaces pleines et sobres (lisibles par-dessus la carte)
+   Une seule couleur d'action (bleu), gris neutres, pas de dégradés ni de reflets ; chiffres alignés. */
+:root { --glass: rgba(20, 30, 44, .97); --glass-solid: rgb(20, 30, 44); --glass-line: rgba(255,255,255,.08); --sec-line: rgba(255,255,255,.08); }
+:root[data-theme="light"] { --glass: rgba(255,255,255,.98); --glass-solid: #fff; --glass-line: rgba(0,0,0,.07); --sec-line: rgba(0,0,0,.07); }
+html, body { font-variant-numeric: tabular-nums; }
+.glass, .leaflet-tooltip.tip, #loadbar, #inflight, #pick-banner { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.28) !important; }
+:root[data-theme="light"] .glass, :root[data-theme="light"] .leaflet-tooltip.tip, :root[data-theme="light"] #loadbar, :root[data-theme="light"] #pick-banner { box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.08) !important; }
+.glass::before { display: none; }
+#topbar .tb-main, :root[data-theme="light"] #topbar .tb-main { background: var(--blue); box-shadow: none; }
+#panel .logo, :root[data-theme="light"] #panel .logo { background: var(--blue); box-shadow: none; }
+.hello, :root[data-theme="light"] .hello { background: transparent; border: 0; border-bottom: 1px solid var(--sec-line); border-radius: 0; padding: 4px 2px 12px; }
+.btn.on { background: var(--blue) !important; color: #fff !important; }
+#detail h4 { color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .06em; }
+details.pratique > summary { color: var(--text); }
+/* fiche terrain : l'essentiel en haut, le reste en rubriques repliées */
+.ad-freqs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.ad-freqs span { display: flex; flex-direction: column; padding: 5px 10px; border-radius: 10px; background: var(--card); font: 600 14px/1.2 "SF Mono", Menlo, Consolas, monospace; }
+.ad-freqs small { font: 600 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: .05em; color: var(--muted); }
+details.ad-sec { border-top: 1px solid var(--sec-line); }
+details.ad-sec:last-of-type { border-bottom: 1px solid var(--sec-line); }
+details.ad-sec > summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 11px 2px; cursor: pointer; font-weight: 600; font-size: 13px; }
+details.ad-sec > summary::-webkit-details-marker { display: none; }
+details.ad-sec > summary::after { content: ''; margin-left: auto; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; }
+details.ad-sec[open] > summary::after { transform: rotate(45deg); }
+details.ad-sec[open] { padding-bottom: 10px; }
+details.ad-sec + details.pratique, details.pratique { margin-top: 0; border-radius: 0; background: transparent; border-top: 1px solid var(--sec-line); padding: 0 2px 4px; }
+details.pratique > summary { padding: 11px 0; font-weight: 600; }
+/* briefing : phrase de tête */
+.vd-txt p.vd-line { font-size: 13.5px; line-height: 1.4; color: var(--text); margin: 4px 0 8px; }
+/* curseur horaire : avion */
+.ts-plane { transition: none; } .ts-plane svg { transition: transform .15s linear; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+/* écran « Bon vol ! » */
+#gocard { position: fixed; inset: 0; z-index: 3000; background: var(--glass-solid); color: var(--text); overflow: auto; }
+#gocard .go-in { max-width: 760px; margin: 0 auto; padding: 22px 20px 30px; }
+#gocard header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+#gocard header small, #gocard .go-grid small { color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+#gocard h2 { margin: 2px 0 14px; font-size: 30px; letter-spacing: -.01em; }
+#gocard h3 { margin: 20px 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.go-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--sec-line); border: 1px solid var(--sec-line); border-radius: 14px; overflow: hidden; }
+.go-grid > div { background: var(--glass-solid); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.go-grid b { font-size: 34px; line-height: 1.1; font-weight: 700; }
+.go-grid span { color: var(--muted); font-size: 13px; min-height: 1em; } .go-grid span.bad { color: #ff453a; font-weight: 600; }
+.go-freq { list-style: none; counter-reset: f; margin: 0; padding: 0; border-top: 1px solid var(--sec-line); }
+.go-freq li { counter-increment: f; display: flex; align-items: baseline; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--sec-line); font-size: 15px; }
+.go-freq li::before { content: counter(f); color: var(--muted); width: 1.4em; font-size: 13px; }
+.go-freq b { margin-left: auto; font: 700 24px "SF Mono", Menlo, Consolas, monospace; }
+.go-note { color: var(--muted); font-size: 12.5px; margin-top: 16px; }
+.btn.primary { background: var(--blue); color: #fff; border-color: transparent; font-weight: 600; } .btn.primary:hover { background: var(--blue); filter: brightness(1.08); }

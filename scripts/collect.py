@@ -1574,5 +1574,5 @@ if __name__ == '__main__':
             save('vfr_points.json', {'source': f"SIA - VAC du cycle {vac.get('cycle')} (+ export XML SIA du {old.get('effDate')} pour {len(kept)} terrains)",
                                      'effDate': vac.get('cycle'), 'data': {**kept, **pts}})
         save('escale.json', {'generated': vac.get('generated'), 'cycle': vac.get('cycle'),
-                             'data': {k: {'escale': with_manual(k, {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or [], 'pratique': vie_pratique(v), 'osm': osm.get(k, {})})} for k, v in (vac.get('data') or {}).items()}})
+                             'data': {k: {'escale': with_manual(k, {**(v.get('escale') or {}), **ppr_contacts(v), 'qfu': v.get('qfu') or [], 'freqs': v.get('freqs') or [], 'pratique': vie_pratique(v), 'osm': osm.get(k, {})})} for k, v in (vac.get('data') or {}).items()}})
     write_status()

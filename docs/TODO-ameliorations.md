@@ -145,3 +145,11 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] BL. Aide intégrée (bouton « ? ») : préparer une nav en 5 étapes, avec les icônes des boutons ; visite guidée et nouveautés depuis l'aide.
 - [x] BM. Carte OACI du trajet gardée sur l'appareil (zoom 6 à 11, 10 NM autour de la route et du dégagement, cache `aww-tiles` lu par sw.js ; une seule route à la fois).
 - [ ] NOTAM allégés au démarrage : abandonné pour l'instant, le fichier fait 107 ko compressé (texte anglais + français = 60 %) ; gain ~60 ko contre un risque de texte tronqué dans les fiches.
+
+## Lot du 26/11/2026 nuit (6)
+- [x] BN. Phrase de tête du briefing (`oneLine` : avis + 2 raisons principales sans parenthèses + durée).
+- [x] BO. Fiche terrain : METAR résumé, piste conseillée, fréquences (VAC, `freqs` ajouté à escale.json) en haut ; METAR complet, TAF, NOTAM, escale, SUP, liens, webcams repliés (`fold`, état retenu).
+- [x] BP. Barre de chargement : seulement METAR / TAF / NOTAM / espaces ; le secondaire (balises, vigilance, escale, données anciennes hors METAR/TAF/NOTAM) va au journal avec une pastille sur « Signaler un problème » ; pas d'affichage pour un chargement de moins de 2,5 s.
+- [x] BQ. Curseur horaire : « Voir le vol », avion animé le long de la route (6 s, `routePosAt`), heure et météo de passage.
+- [x] BR. Écran « Bon vol ! » : heures, carburant, croisière, pistes, QNH actuel, fréquences dans l'ordre (radioCard), écran gardé allumé (Wake Lock).
+- [x] BS. Présentation : surfaces pleines (plus de verre transparent ni reflets), bleu unique pour les actions, titres gris, chiffres alignés, 118 emojis retirés des boutons et titres.

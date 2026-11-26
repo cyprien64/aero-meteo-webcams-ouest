@@ -1,7 +1,7 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v48';
+const VERSION = 'aww-v49';
 const SHELL = [
-  './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'log.js', 'config.js', 'app.webmanifest',
+  './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'theme.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
   'lib/pdf/pdf-lib.min.js', 'lib/pdf/jszip.min.js', 'data/basemap.js', 'data/sources.js', 'data/france.js', 'data/aircraft.js',
   'data/vfr_points.json', 'data/fees.json', 'data/landmarks.json', 'data/template/log_nav_acb.xlsx', 'data/template/log_meta.json',

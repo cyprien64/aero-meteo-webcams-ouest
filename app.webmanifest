@@ -1,7 +1,7 @@
 {
-  "name": "Aéro Météo Ouest — Pyrénées → Bretagne",
-  "short_name": "Aéro Ouest",
-  "description": "Webcams, météo, NOTAM, SUP AIP et préparation de vol (log de nav, briefing) — Pyrénées → Bretagne",
+  "name": "Aéro Météo — France",
+  "short_name": "Aéro Météo",
+  "description": "Webcams, météo, NOTAM, SUP AIP et préparation de vol (log de nav, briefing) — France métropolitaine",
   "start_url": "map.html",
   "scope": "./",
   "display": "standalone",

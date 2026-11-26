@@ -1,11 +1,11 @@
-/* Aéro Météo Webcams — Pyrénées → Bretagne
+/* Aéro Météo Webcams — France métropolitaine
  * Carte interactive inspirée de international.aero.free.fr/webcams/lfdt.html
  * étendue à tout l'Ouest de la France.
  */
 (() => {
   'use strict';
 
-  const BBOX = { s: 42.0, w: -5.4, n: 49.0, e: 2.6 };
+  const BBOX = { s: 41.3, w: -5.6, n: 51.2, e: 9.7 };   // France métropolitaine
   const REFRESH_MS = 10 * 60 * 1000;
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -35,7 +35,7 @@
   tick(); setInterval(tick, 1000);
 
   // ---------- Carte ----------
-  const view = store.get('view', { c: [45.9, -1.4], z: 7 });
+  const view = store.get('view', { c: [46.6, 2.4], z: 6 });
   const map = L.map('map', { zoomSnap: 0.5, minZoom: 5, maxZoom: 15, worldCopyJump: false, preferCanvas: true })
     .setView(view.c, view.z);
   map.on('moveend', () => {
@@ -896,7 +896,7 @@
         <dt>Paiement</dt><dd>${pay}</dd>
         ${e && e.texte ? `<dt>Détail (VAC)</dt><dd style="font-size:11px">${esc(e.texte)}</dd>` : ''}
         ${e && e.exploitant ? `<dt>Exploitant</dt><dd style="font-size:11px">${esc(e.exploitant)}</dd>` : ''}
-        ${tels.length ? `<dt>Téléphone</dt><dd>${[...new Set(tels)].map((t) => `<a href="tel:${esc(t.replace(/\s/g, ''))}" style="color:#fff">${esc(t)}</a>`).join(' · ')}</dd>` : ''}
+        ${tels.length ? `<dt>Téléphone</dt><dd>${[...new Set(tels)].map((t) => `<a href="tel:${esc(t.replace(/\s/g, ''))}" style="color:inherit">${esc(t)}</a>`).join(' · ')}</dd>` : ''}
         <dt>Taxe d'atterrissage</dt><dd>${fee ? `<b>${esc(fee.tarif)}</b>${fee.note ? ' — ' + esc(fee.note) : ''} <span class="meta">(${esc(fee.source || 'tableau du club')}${fee.maj ? ', ' + esc(fee.maj) : ''})</span>` : '<span class="meta">non renseignée</span>'}</dd>
       </dl>
       <div class="row" style="margin-top:4px">
@@ -942,7 +942,7 @@
     return `<h4>Autour du terrain</h4>${html || '<p class="meta">Rien de référencé à proximité dans OpenStreetMap.</p>'}<p class="meta small-print">© contributeurs OpenStreetMap — données libres, parfois incomplètes.</p>`;
   }
   // e-mail pré-rempli vers l'adresse de config.js (aucun lien vers le dépôt GitHub dans le site partagé)
-  const mailTo = (subject, body) => { location.href = `mailto:${CFG.contact}?subject=${encodeURIComponent('[Aéro Météo Ouest] ' + subject)}&body=${encodeURIComponent(body)}`; };
+  const mailTo = (subject, body) => { location.href = `mailto:${CFG.contact}?subject=${encodeURIComponent('[Aéro Météo] ' + subject)}&body=${encodeURIComponent(body)}`; };
   function bindPratique(el, icao, a) {
     const save = el.querySelector('#prat-save');
     if (save) save.addEventListener('click', () => {

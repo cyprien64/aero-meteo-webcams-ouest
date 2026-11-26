@@ -2,8 +2,8 @@
 """Collecte des données « en direct » de la carte Aéro Météo Webcams Ouest.
 
 Produit dans data/live/ :
-  metar.json, taf.json   — aviationweather.gov (zone Pyrénées → Bretagne)
-  notam.json             — NOTAM SOFIA (SIA) : FIR Brest + Bordeaux et aérodromes de la zone
+  metar.json, taf.json   — aviationweather.gov (France métropolitaine)
+  notam.json             — NOTAM SOFIA (SIA) : 5 FIR françaises et aérodromes de la zone
   supaip.json            — liste des SUP AIP métropole (SIA), géolocalisés d'après leur titre
 
 Bibliothèque standard uniquement. Utilisé par la GitHub Action (.github/workflows/pages.yml).
@@ -28,7 +28,7 @@ os.makedirs(OUT, exist_ok=True)
 VACDIR = os.path.join(ROOT, 'data', 'vac')   # copies des VAC publiées avec le site (le SIA bloque leur téléchargement depuis une page web)
 FALLBACK_URL = os.environ.get('FALLBACK_URL', '').rstrip('/')
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
-BBOX = '42.0,-5.4,49.0,2.6'
+BBOX = '41.3,-5.6,51.2,9.7'   # France métropolitaine (Corse comprise)
 SOFIA = 'https://sofia-briefing.aviation-civile.gouv.fr'
 NOW = datetime.now(timezone.utc)
 
@@ -98,13 +98,10 @@ def fallback(name):
 
 
 def in_zone(la, lo):
-    if la < 42.0 or la > 48.95 or lo < -5.4:
-        return False
-    if la < 46.0:
-        return lo <= 2.6
-    if la < 48.0:
-        return lo <= 2.0
-    return lo <= 0.6
+    return 41.3 <= la <= 51.2 and -5.6 <= lo <= 9.7
+
+
+assert in_zone(43.3, -0.4) and in_zone(48.6, 7.7) and in_zone(42.5, 9.4) and not in_zone(40.4, -3.7)
 
 
 def aerodromes():
@@ -190,7 +187,7 @@ def collect_notam():
         get(SOFIA + '/sofia/pages/prepavol.html', timeout=60)  # cookie de session
         # Horizon : 72 h si SOFIA l'accepte (préparation la veille / l'avant-veille), sinon 48 h puis 24 h
         area = lambda d: sofia_post({':operation': 'postAreaPibRequest', 'duration': d, 'traffic': 'VI',  # noqa: E731
-                                     'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB']})
+                                     'fl_lower': '000', 'fl_upper': '195', 'fir[]': ['LFRR', 'LFBB', 'LFFF', 'LFEE', 'LFMM']})
         fir, dur = area('2400'), '2400'          # indispensable
         for d in ('7200', '4800'):                # en plus si SOFIA l'accepte (jusqu'à 96 h d'après le formulaire)
             try:
@@ -200,7 +197,7 @@ def collect_notam():
                 print(f'  durée {d} refusée : {e}')
         horizon = int(dur[:2])
         fir_list = {n['id']: slim_notam(n) for n in walk_notams(fir.get('listnotams', {}))}
-        print(f'  FIR LFRR+LFBB : {len(fir_list)} NOTAM sur {horizon} h')
+        print(f'  FIR France : {len(fir_list)} NOTAM sur {horizon} h')
 
         ad = {}
         icaos = [a[0] for a in aerodromes() if a[0].startswith('LF')]
@@ -550,7 +547,7 @@ def collect_zones(folder, cycle):
             continue
         la = sum(p[0] for p in poly) / len(poly)
         lo = sum(p[1] for p in poly) / len(poly)
-        if not (41.5 < la < 49.5 and -6.5 < lo < 3.5):
+        if not (41.0 < la < 51.6 and -6.5 < lo < 10.0):
             continue
         tail = text[end:]
         m = re.match(r'\s*(.+?)\s*-{4,}\s*(.+?(?:ASFC|AMSL|AGL|SFC|UNL|FL ?\d{2,3}))', tail)
@@ -794,7 +791,7 @@ def parse_openair(txt):
             continue
         la = sum(p[0] for p in a['poly']) / len(a['poly'])
         lo = sum(p[1] for p in a['poly']) / len(a['poly'])
-        if not (41.8 < la < 49.6 and -6.5 < lo < 3.6):
+        if not (41.0 < la < 51.6 and -6.5 < lo < 10.0):
             continue
         a['kind'] = kind
         a['poly'] = [[round(p[0], 4), round(p[1], 4)] for p in a['poly']]
@@ -833,7 +830,7 @@ def collect_siv(folder, cycle):
         call = re.search(r'([A-ZÀ-Ü][A-ZÀ-Ü\' -]+ INFO)', after[:120])
         la = sum(p[0] for p in poly) / len(poly)
         lo = sum(p[1] for p in poly) / len(poly)
-        if not (41.8 < la < 49.6 and -6.5 < lo < 3.6) or not freqs:
+        if not (41.0 < la < 51.6 and -6.5 < lo < 10.0) or not freqs:
             continue
         out.append({'kind': 'SIV', 'cls': 'G/E', 'name': name, 'upper': upper[:30], 'lower': lower[:30],
                     'freq': ' / '.join(dict.fromkeys(freqs[:3])), 'call': call.group(1).strip() if call else name.replace('SIV', '').split(' partie')[0].strip() + ' INFO',
@@ -947,7 +944,7 @@ def parse_activities(page):
         if not pts:
             continue
         la, lo = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-        if not (41.5 < la < 49.5 and -6.5 < lo < 3.5):
+        if not (41.0 < la < 51.6 and -6.5 < lo < 10.0):
             continue
         clean = lambda v: re.sub(r'\s+', ' ', v).strip()  # noqa: E731
         z = {'num': num, 'kind': kind[1], 'name': clean(' '.join(span(blk, r'NOM_USUEL')))[:60],
@@ -971,7 +968,7 @@ def parse_zsm(kml):
             continue
         pts = [tuple(map(float, q.split(',')[:2])) for q in c.group(1).split()]
         poly = [[round(la, 4), round(lo, 4)] for lo, la in pts[::max(1, len(pts) // 24)]]
-        if len(poly) < 3 or not (41.5 < poly[0][0] < 49.5 and -6.5 < poly[0][1] < 3.5):
+        if len(poly) < 3 or not (41.0 < poly[0][0] < 51.6 and -6.5 < poly[0][1] < 10.0):
             continue
         try:
             ft = round(float(g('h_survol_ft')) / 100) * 100
@@ -1153,7 +1150,7 @@ def collect_osm(cycle):
         except Exception:  # noqa: BLE001
             pass
     q = ('[out:json][timeout:180];(nwr["amenity"~"^(taxi|car_rental|bicycle_rental)$"]({b});nwr["railway"~"^(station|halt)$"]({b}););out center tags;'
-         .format(b='42.0,-5.4,49.2,2.7'))
+         .format(b='41.3,-5.6,51.2,9.7'))
     els = None
     for ep in ('https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter') * 2:   # serveurs publics souvent chargés
         try:

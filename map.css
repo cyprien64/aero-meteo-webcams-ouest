@@ -1,4 +1,4 @@
-/* Aéro Météo Ouest — feuille de style unique (thème « ForeFlight × Liquid Glass »).
+/* Aéro Météo — feuille de style unique : thème sombre « Liquid Glass » et thème clair façon Apple (selon l'appareil ou le bouton 🌓).
    Ordre : variables · base · verre · barre du haut · panneaux · commandes · fiche · carte · modules. */
 
 /* ================================================================ variables */
@@ -8,6 +8,7 @@
   --radius: 22px; --ff-blue: #2f8fff;
   --glass: rgba(16, 26, 42, .64); --glass-solid: rgba(16, 26, 41, .94); --glass-line: rgba(255,255,255,.16);
   --VFR: #2ecc40; --MVFR: #2f8cff; --IFR: #ff4136; --LIFR: #e040fb; --UNK: #9aa;
+  --link: #7cc0ff; --on: #30d158; --blue: #0a84ff;
 }
 
 /* ================================================================ base */
@@ -151,7 +152,7 @@ select.inline { width: auto; margin: 0 0 0 4px; padding: 1px 4px; }
 input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 99px; background: rgba(255,255,255,.18); accent-color: var(--accent);
   position: relative; cursor: pointer; flex: none; margin: 0 2px 0 0; transition: background .15s; }
 input[type=checkbox]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
-input[type=checkbox]:checked { background: var(--ff-blue); }
+input[type=checkbox]:checked { background: var(--on); }
 input[type=checkbox]:checked::after { transform: translateX(12px); }
 input[type=checkbox]:focus-visible { outline: 2px solid #ffb703; outline-offset: 2px; }
 
@@ -216,8 +217,8 @@ details.pratique { margin-top: 14px; background: rgba(255,255,255,.06); border-r
 details.pratique > summary { cursor: pointer; font-weight: 700; padding: 8px 0; color: #ffc23d; }
 details.pratique textarea { width: 100%; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0,0,0,.28); color: #fff; padding: 8px; font: inherit; }
 .osm-cat { margin: 8px 0 2px; font-weight: 700; font-size: 12px; } ul.osm { margin: 0; padding-left: 16px; font-size: 12px; } ul.osm li { margin: 2px 0; }
-ul.osm a { color: #7cc0ff; }
-a.lnk { color: #7cc0ff; cursor: pointer; text-decoration: underline; }
+ul.osm a { color: var(--link); }
+a.lnk { color: var(--link); cursor: pointer; text-decoration: underline; }
 
 /* ================================================================ carte */
 .mk { cursor: pointer; }
@@ -265,7 +266,7 @@ a.lnk { color: #7cc0ff; cursor: pointer; text-decoration: underline; }
 .prep-form input, .prep-form select { width: 100%; margin: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); color: #fff; font: 13px system-ui, sans-serif; }
 .arms-box summary { cursor: pointer; font-size: 12px; color: var(--text); padding: 4px 0; }
 .prep-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-.prep-actions .primary { background: linear-gradient(135deg, #ffc23d, #ff8a1f); color: #2b1600; font-weight: 700; border: 0; }
+.prep-actions .primary { background: var(--blue); color: #fff; font-weight: 600; border: 0; }
 .prep-progress { color: var(--accent); font-size: 12px; margin-top: 6px; }
 table.legs { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; }
 table.legs th, table.legs td { border-bottom: 1px solid rgba(255,255,255,.15); padding: 3px 4px; text-align: right; }
@@ -359,3 +360,74 @@ table.ms td.dv { color: #ffb340; font-weight: 700; }
 #vp-big { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1800; max-height: 70vh; overflow: auto; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: #0d1b2a; color: #fff; border-top: 2px solid #39c; box-shadow: 0 -4px 16px rgba(0,0,0,.5); }
 #vp-big svg { width: 100%; height: auto; max-height: 55vh; margin: 6px 0; }
 #inflight .if-cut svg { max-height: 120px; }
+
+/* ================================================================ finitions communes façon Apple */
+.btn, .tools button, button.small { border-radius: 12px; padding: 7px 10px; font-weight: 500; }
+.prep-actions .btn { padding: 9px 14px; border-radius: 999px; }
+.prep-form input, .prep-form select, input[type=search], select { border-radius: 12px; }
+details.sec { border-radius: 16px; padding: 2px 14px 12px; }
+#detail h4 { font-size: 11.5px; letter-spacing: .06em; }
+.quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 12px; }
+.quick button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 4px 10px; border-radius: 16px; border: 1px solid var(--line2); background: var(--card);
+  color: var(--text); font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; cursor: pointer; transition: transform .12s, background .15s; }
+.quick button b { font-size: 22px; line-height: 1; }
+.quick button:hover { background: var(--card-h); } .quick button:active { transform: scale(.96); }
+.quick button.main { background: var(--blue); border-color: transparent; color: #fff; }
+
+/* ================================================================ thème clair (Apple) : automatique si l'appareil est en clair, ou forcé par 🌓 */
+:root[data-theme="light"] {
+  --text: #1d1d1f; --muted: #6e6e73; --accent: #c93400; --icao: #1f7a35;
+  --card: rgba(118,118,128,.10); --card-h: rgba(118,118,128,.18); --line2: rgba(0,0,0,.08);
+  --glass: rgba(255,255,255,.74); --glass-solid: rgba(250,250,252,.97); --glass-line: rgba(0,0,0,.08);
+  --link: #0066cc; --on: #34c759; --blue: #007aff; --field: rgba(118,118,128,.12);
+}
+:root[data-theme="light"] .glass, :root[data-theme="light"] .leaflet-tooltip.tip, :root[data-theme="light"] #loadbar, :root[data-theme="light"] #pick-banner {
+  box-shadow: 0 8px 30px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.06) !important; color: var(--text); }
+:root[data-theme="light"] .glass::before { display: none; }
+:root[data-theme="light"] body { color: var(--text); }
+:root[data-theme="light"] #topbar .tb { color: #1d1d1f; } :root[data-theme="light"] #topbar .tb span { color: #3a3a3c; }
+:root[data-theme="light"] #topbar .tb:hover { background: rgba(0,0,0,.05); } :root[data-theme="light"] #topbar .tb.on span { color: #fff; }
+:root[data-theme="light"] #topbar .tb-main { background: var(--blue); box-shadow: 0 4px 14px rgba(0,122,255,.3); }
+:root[data-theme="light"] .presets, :root[data-theme="light"] #topbar .presets { background: rgba(118,118,128,.12); }
+:root[data-theme="light"] .presets button { color: #3a3a3c; } :root[data-theme="light"] .presets button:hover { background: rgba(0,0,0,.04); color: #000; }
+:root[data-theme="light"] .presets button.on { background: #fff; color: #000; box-shadow: 0 3px 8px rgba(0,0,0,.12), 0 0 1px rgba(0,0,0,.2); }
+:root[data-theme="light"] #clock { background: rgba(118,118,128,.12); border-color: transparent; color: #1d1d1f; }
+:root[data-theme="light"] #panel .logo { background: linear-gradient(135deg, #5ac8fa, #007aff); box-shadow: 0 4px 12px rgba(0,122,255,.25); }
+:root[data-theme="light"] .glass .meta, :root[data-theme="light"] #panel .sub { color: var(--muted); }
+:root[data-theme="light"] .hello { background: linear-gradient(135deg, #e8f2ff, #f5f9ff); border-color: rgba(0,122,255,.12); color: #3a3a3c; }
+:root[data-theme="light"] .hello b { color: #000; } :root[data-theme="light"] .hello .hello-warn { color: #a05a00; }
+:root[data-theme="light"] details.sec { background: rgba(255,255,255,.7); border-color: rgba(0,0,0,.06); }
+:root[data-theme="light"] details.sec > summary { color: #1d1d1f; }
+:root[data-theme="light"] details.sec label:hover, :root[data-theme="light"] #results li:hover { background: rgba(0,0,0,.04); }
+:root[data-theme="light"] .btn:hover, :root[data-theme="light"] .tools button:hover, :root[data-theme="light"] button.small:hover { border-color: rgba(0,0,0,.15); }
+:root[data-theme="light"] input[type=search], :root[data-theme="light"] select, :root[data-theme="light"] .prep-form input, :root[data-theme="light"] .prep-form select,
+:root[data-theme="light"] .notam-win input, :root[data-theme="light"] .ms-form input, :root[data-theme="light"] #night-ctrl input[type=date], :root[data-theme="light"] details.pratique textarea {
+  background: var(--field); color: #1d1d1f; border-color: transparent; }
+:root[data-theme="light"] input[type=search]::placeholder { color: #8e8e93; }
+:root[data-theme="light"] .icon-btn, :root[data-theme="light"] .pick-btn { background: rgba(118,118,128,.12); border-color: transparent; color: #1d1d1f; }
+:root[data-theme="light"] input[type=checkbox] { background: rgba(120,120,128,.24); }
+:root[data-theme="light"] input[type=checkbox]:checked { background: var(--on); }
+:root[data-theme="light"] #detail h4 { color: #6e6e73; }
+:root[data-theme="light"] #detail pre { background: rgba(118,118,128,.08); border-color: transparent; color: #1d1d1f; }
+:root[data-theme="light"] #detail .cam { background: rgba(118,118,128,.08); }
+:root[data-theme="light"] .warn { background: rgba(255,149,0,.12); border-left-color: #ff9500; color: #3a2a00; }
+:root[data-theme="light"] .okk { background: rgba(52,199,89,.12); border-left-color: #34c759; color: #0d3b1a; }
+:root[data-theme="light"] table.legs th, :root[data-theme="light"] table.legs td, :root[data-theme="light"] table.ms th, :root[data-theme="light"] table.ms td,
+:root[data-theme="light"] table.rwy-w td { border-bottom-color: rgba(0,0,0,.08); }
+:root[data-theme="light"] table.rwy-w tr.best td { color: #1f7a35; } :root[data-theme="light"] table.ms td.dv { color: #c93400; }
+:root[data-theme="light"] .notam { background: rgba(118,118,128,.08); }
+:root[data-theme="light"] ul.ppr, :root[data-theme="light"] .asp-lim, :root[data-theme="light"] #loadbar .lb-bad { color: #3a3a3c; }
+:root[data-theme="light"] .asp-card, :root[data-theme="light"] details.stage, :root[data-theme="light"] .hist, :root[data-theme="light"] details.pratique { background: rgba(118,118,128,.08); }
+:root[data-theme="light"] details.pratique > summary { color: #c93400; }
+:root[data-theme="light"] .leaflet-control-zoom a { color: #1d1d1f !important; border-color: rgba(0,0,0,.08) !important; }
+:root[data-theme="light"] .leaflet-control-attribution { background: rgba(255,255,255,.75) !important; color: #3a3a3c !important; }
+:root[data-theme="light"] .leaflet-control-attribution a { color: #0066cc !important; }
+:root[data-theme="light"] #loadbar { color: #1d1d1f; } :root[data-theme="light"] #loadbar i { color: var(--muted); }
+:root[data-theme="light"] #loadbar button { background: rgba(118,118,128,.12); color: #1d1d1f; border-color: transparent; }
+:root[data-theme="light"] #update-bar, :root[data-theme="light"] #remind-bar { color: #1d1d1f; background: rgba(255,255,255,.92); box-shadow: 0 8px 30px rgba(0,0,0,.15); }
+:root[data-theme="light"] .seg button { color: var(--muted); }
+:root[data-theme="light"] #detail:has(.taf-box[data-m="clair"]) .seg [data-m="clair"], :root[data-theme="light"] #detail:has(.taf-box[data-m="code"]) .seg [data-m="code"] { background: #fff; color: #000; }
+:root[data-theme="light"] .favs button { background: #fff; border-color: rgba(0,0,0,.08); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+/* champs isolés des fiches (Où voler, comparer un départ) */
+#detail .row input:not([type=checkbox]):not([type=range]) { margin-left: 4px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0,0,0,.28); color: var(--text); font: inherit; }
+:root[data-theme="light"] #detail .row input:not([type=checkbox]):not([type=range]) { background: var(--field); border-color: transparent; }

@@ -684,6 +684,7 @@
         <button class="btn" id="pf-train">🎲 Nav d'entraînement</button>
         <button class="btn" id="pf-fav-save">⭐ Enregistrer cette nav</button>
       </div>
+      <div class="row" style="margin:4px 0"><label>🧭 Où voler ? Temps aller max (min) <input id="pf-where-min" type="number" min="15" max="240" step="5" value="60"></label><button class="btn" id="pf-where">Chercher les destinations</button></div>
       <div class="row" style="margin:4px 0"><label>⚖️ Comparer avec un autre départ <input id="pf-cmp-time" type="datetime-local"></label><button class="btn" id="pf-cmp">Comparer</button></div>
       <div class="prep-progress" id="pf-prog"></div>
       <div id="pf-out"></div>`);
@@ -742,6 +743,12 @@
     $('#pf-pdf').addEventListener('click', () => run('pdf'));
     $('#pf-xlsx').addEventListener('click', () => run('xlsx'));
     $('#pf-train').addEventListener('click', trainingStart);
+    $('#pf-where').addEventListener('click', async () => {
+      const prog = $('#pf-prog'), my = ++runSeq;
+      try { const h = await whereToFly(readForm(), +$('#pf-where-min').value || 60, (t) => { if (my === runSeq) prog.textContent = t; }); if (my === runSeq) { $('#pf-out').innerHTML = h; prog.textContent = ''; } }
+      catch (e) { if (my === runSeq) prog.textContent = '⚠️ ' + e.message; }
+    });
+    $('#pf-out').addEventListener('click', (e) => { const x = e.target.closest('[data-goto]'); if (!x) return; $('#pf-arr').value = x.dataset.goto; $('#pf-wps').value = ''; $('#pf-stages').value = ''; $('#pf-alt').value = ''; run(false); });
     ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-stages', '#pf-wps', '#pf-reg'].forEach((x) => $(x) && $(x).addEventListener('change', adCheckHtml));
     loadAip().then(adCheckHtml).catch(() => {});
     // navs enregistrées (sur cet appareil) : tout le formulaire sauf l'heure
@@ -927,7 +934,7 @@
     if (f.rt && (stops[stops.length - 1] || f.arr) !== f.dep) stops.push(f.dep);   // aller-retour : retour au terrain de départ
     const stAlts = (f.stalts || '').split(/[\s,;]+/).filter(Boolean);
     const unknown = [f.dep, f.arr, f.alt, ...stops, ...stAlts].filter((x) => x && !A.aptByIcao[x]);
-    if (unknown.length) throw new Error(`Terrain inconnu : ${unknown.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
+    if (unknown.length) throw new Error(`Terrain inconnu : ${unknown.join(', ')} (zone couverte : France métropolitaine).`);
     say('Chargement des données AIP, espaces aériens…');
     await loadAip();
     // Étapes : départ → arrivée (points tournants du formulaire), puis escales suivantes en direct (points VFR auto)
@@ -1078,7 +1085,7 @@
     document.querySelectorAll('#pf-out [data-note]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { const id = el.dataset.note, ta = document.getElementById('pf-note-' + id + sfx); const all = store.get('adnotes', {}); if (ta.value.trim()) all[id] = ta.value.trim().slice(0, 600); else delete all[id]; store.set('adnotes', all); el.textContent = 'Enregistré ✔'; }));
     document.querySelectorAll('#pf-out [data-propose]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { const id = el.dataset.propose, cfg = window.AWW_CONFIG || {}; if (!cfg.contact) return;
       const tarif = prompt(`Taxe d'atterrissage à ${id} (ex. « 12 € TTC, gratuit FFA ») :`, ''); if (tarif === null) return; const info = prompt('Autre info utile (accueil, carburant, taxi, restaurant…) :', '') || '';
-      location.href = `mailto:${cfg.contact}?subject=${encodeURIComponent(`[Aéro Météo Ouest] Escale ${id}`)}&body=${encodeURIComponent(`Terrain : ${id}\nTaxe : ${tarif}\nInfo : ${info}\nRelevé : ${new Date().toISOString().slice(0, 10)}`)}`; }));
+      location.href = `mailto:${cfg.contact}?subject=${encodeURIComponent(`[Aéro Météo] Escale ${id}`)}&body=${encodeURIComponent(`Terrain : ${id}\nTaxe : ${tarif}\nInfo : ${info}\nRelevé : ${new Date().toISOString().slice(0, 10)}`)}`; }));
     ['pf-lmk1', 'pf-lmk2'].forEach((id) => on(id, (e) => { $('#pf-wps').value = e.target.dataset.wps; $('#pf-exit').value = 'none'; run(false); }));
     on('pf-routes', compareRoutes);
     document.querySelectorAll('#pf-out [data-setalt]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { if (b.stage && b.stage < b.nStages) { const st = ($('#pf-stalts').value || '').split(/\s+/); st[b.stage - 1] = el.dataset.setalt; $('#pf-stalts').value = st.join(' ').trim(); } else $('#pf-alt').value = el.dataset.setalt; run(false); }));
@@ -1208,7 +1215,7 @@
     $('#rm-x').onclick = done;
     $('#rm-go').onclick = () => { done(); store.set('form', { ...store.get('form', {}), ...x.s.form }); openForm(); $('#pf-time').value = localInput(new Date(x.dep)); run(false); };
     if ($('#rm-notif')) $('#rm-notif').onclick = () => Notification.requestPermission().then(() => $('#rm-notif')?.remove());
-    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) try { new Notification('Aéro Météo Ouest', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notification hors service worker */ }
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) try { new Notification('Aéro Météo', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notification hors service worker */ }
   }
   setTimeout(remindCheck, 15000);
   // surveillance jusqu'au départ : nav recalculée en arrière-plan toutes les 30 min (page ouverte), alerte si la situation se dégrade
@@ -1236,7 +1243,7 @@
         document.body.insertAdjacentHTML('beforeend', `<div id="remind-bar" class="glass">⚠️ ${esc(txt)} <button id="rm-go">🔄 Voir</button><button class="x" id="rm-x" title="Vu">✕</button></div>`);
         $('#rm-x').onclick = () => document.getElementById('remind-bar')?.remove();
         $('#rm-go').onclick = () => { document.getElementById('remind-bar')?.remove(); store.set('form', { ...store.get('form', {}), ...watch.form }); openForm(); $('#pf-time').value = localInput(new Date(watch.dep)); run(false); };
-        if ('Notification' in window && Notification.permission === 'granted') try { new Notification('Aéro Météo Ouest — météo dégradée', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notifications */ }
+        if ('Notification' in window && Notification.permission === 'granted') try { new Notification('Aéro Météo — météo dégradée', { body: txt, icon: 'icons/icon192.png' }); } catch { /* navigateur sans notifications */ }
       }
     } catch (e) { console.warn('surveillance', e); }
     if (watch) watch.timer = setTimeout(watchTick, 30 * 6e4);
@@ -1537,6 +1544,7 @@
     // --- Terrains : briefing départ / arrivée
     // réserve météo : +x % du carburant d'étape si vent de face moyen > 15 kt ou météo en route marginale
     const wxRoute = await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message }));
+    const ens = horizon <= 14 && wxRoute && wxRoute.pts && wxRoute.pts.length ? await ensembleProb(wxRoute.pts).catch((e) => ({ err: e.message })) : null;
     const conf = horizon <= 10 && wxRoute && wxRoute.pts && wxRoute.pts.length ? await modelConfidence(wxRoute.pts).catch((e) => ({ err: e.message })) : null;
     const aq = horizon < 4 && wxRoute && wxRoute.pts ? await airQuality(wxRoute.pts).catch((e) => { console.warn('qualité de l\'air', e); return null; }) : null;
     const head = totDist ? legs.reduce((s, lg) => s + (lg.wind ? lg.wind.spd * Math.cos(rad(lg.wind.dir - lg.tc)) : 0) * lg.dist, 0) / totDist : 0;
@@ -1585,7 +1593,7 @@
       f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, mids, depElev: elevOf(f.dep), wxRoute, conf, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
+      profile, mids, depElev: elevOf(f.dep), wxRoute, conf, ens, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -1608,6 +1616,21 @@
 
   // ================================================================== météo le long de la route
   // Prévision modèle (Open-Meteo) à l'heure de passage : plafond estimé (écart T/Td), nuages bas, visibilité, pluie, orages.
+  // avis VFR d'un point de prévision : 0 favorable, 1 marginal, 2 défavorable (plafond estimé par l'écart T / Td)
+  function wxLevel(w, cruiseFt) {
+    const { T, Td, low, vis, rr, wc, gust, elevFt } = w;
+    const baseAgl = T != null && Td != null ? Math.max(0, Math.round((T - Td) * 400 / 100) * 100) : null;
+    const baseAmsl = baseAgl != null ? Math.round((baseAgl + elevFt) / 100) * 100 : null;
+    let level = 0; const why = [];
+    if (vis != null && vis < 5000) { level = 2; why.push(`visi ${Math.round(vis / 100) / 10} km`); } else if (vis != null && vis < 8000) { level = Math.max(level, 1); why.push(`visi ${Math.round(vis / 100) / 10} km`); }
+    if (low != null && low >= 70 && baseAgl != null && baseAgl < 1000) { level = 2; why.push(`plafond ~${baseAgl} ft sol`); }
+    else if (low != null && low >= 50 && baseAgl != null && baseAgl < 2000) { level = Math.max(level, 1); why.push(`nuages bas ~${baseAgl} ft sol`); }
+    if (low != null && low >= 50 && baseAmsl != null && baseAmsl < cruiseFt + 500) { level = Math.max(level, 1); why.push(`base ~${baseAmsl} ft < croisière`); }
+    if (wc != null && wc >= 95) { level = 2; why.push('orages'); } else if (rr != null && rr >= 1) { level = Math.max(level, 1); why.push(`pluie ${rr} mm/h`); }
+    if (gust != null && gust >= 25) { level = Math.max(level, 1); why.push(`rafales ${Math.round(gust)} kt`); }
+    return { ...w, baseAgl, baseAmsl, level, why };
+  }
+  console.assert(wxLevel({ T: 10, Td: 9, low: 90, vis: 20000, rr: 0, wc: 3, gust: 10, elevFt: 0 }, 2500).level === 2 && wxLevel({ T: 15, Td: 5, low: 10, vis: 30000, rr: 0, wc: 1, gust: 10, elevFt: 0 }, 2500).level === 0, 'wxLevel');
   async function routeWeather(pts, legs, depT, cruiseFt) {
     const horizon = (depT - Date.now()) / 864e5;
     if (horizon < -1 || horizon > 15) return { err: 'prévisions disponibles à 16 jours' };
@@ -1628,17 +1651,7 @@
       const h = d[i].hourly, idx = h.time.indexOf(x.at.toISOString().slice(0, 13) + ':00');
       const g = (k) => (idx >= 0 ? h[k][idx] : null);
       const T = g('temperature_2m'), Td = g('dew_point_2m'), low = g('cloud_cover_low'), vis = g('visibility'), rr = g('precipitation'), wc = g('weather_code'), gust = g('wind_gusts_10m');
-      const elevFt = Math.round((d[i].elevation || 0) * 3.281);
-      const baseAgl = T != null && Td != null ? Math.max(0, Math.round((T - Td) * 400 / 100) * 100) : null;
-      const baseAmsl = baseAgl != null ? Math.round((baseAgl + elevFt) / 100) * 100 : null;
-      let level = 0; const why = [];
-      if (vis != null && vis < 5000) { level = 2; why.push(`visi ${Math.round(vis / 100) / 10} km`); } else if (vis != null && vis < 8000) { level = Math.max(level, 1); why.push(`visi ${Math.round(vis / 100) / 10} km`); }
-      if (low != null && low >= 70 && baseAgl != null && baseAgl < 1000) { level = 2; why.push(`plafond ~${baseAgl} ft sol`); }
-      else if (low != null && low >= 50 && baseAgl != null && baseAgl < 2000) { level = Math.max(level, 1); why.push(`nuages bas ~${baseAgl} ft sol`); }
-      if (low != null && low >= 50 && baseAmsl != null && baseAmsl < cruiseFt + 500) { level = Math.max(level, 1); why.push(`base ~${baseAmsl} ft < croisière`); }
-      if (wc != null && wc >= 95) { level = 2; why.push('orages'); } else if (rr != null && rr >= 1) { level = Math.max(level, 1); why.push(`pluie ${rr} mm/h`); }
-      if (gust != null && gust >= 25) { level = Math.max(level, 1); why.push(`rafales ${Math.round(gust)} kt`); }
-      return { ...x, T, Td, low, vis, rr, wc, gust, elevFt, baseAgl, baseAmsl, level, why };
+      return { ...x, ...wxLevel({ T, Td, low, vis, rr, wc, gust, elevFt: Math.round((d[i].elevation || 0) * 3.281) }, cruiseFt) };
     });
     return { pts: pts2, worst: Math.max(0, ...pts2.map((x) => x.level)) };
   }
@@ -1673,6 +1686,33 @@
     const bad = pts.filter((x) => x.why.length);
     return { pts, bad, n: Math.max(0, ...pts.map((x) => x.n)) };
   }
+  // ---------- probabilité (ensemble ECMWF, 51 scénarios) : part des scénarios où toute la route a un plafond > 1500 ft sol et des rafales < 25 kt
+  // M : [scénario][point] = { T, Td, low, gust }
+  function ensStats(M) {
+    const lowCeil = (x) => x.low != null && x.low >= 50 && x.T != null && x.Td != null && (x.T - x.Td) * 400 < 1500, windy = (x) => x.gust != null && x.gust >= 25;
+    const n = M.length, pc = (k) => Math.round(100 * k / n);
+    const ceil = M.filter((m) => !m.some(lowCeil)).length, gust = M.filter((m) => !m.some(windy)).length, both = M.filter((m) => !m.some((x) => lowCeil(x) || windy(x))).length;
+    const pts = (M[0] || []).map((_, i) => pc(M.filter((m) => !lowCeil(m[i])).length));
+    return { n, ceil: pc(ceil), gust: pc(gust), both: pc(both), pts };
+  }
+  console.assert((() => { const ok = { T: 15, Td: 5, low: 80, gust: 10 }, bas = { T: 8, Td: 7, low: 90, gust: 10 }, vent = { T: 15, Td: 5, low: 0, gust: 30 };
+    const r = ensStats([[ok, ok], [ok, bas], [vent, ok], [ok, ok]]); return r.n === 4 && r.ceil === 75 && r.gust === 75 && r.both === 50 && r.pts.join() === '100,75'; })(), 'ensStats');
+  async function ensembleProb(wpts) {
+    const n = Math.min(6, wpts.length), S = Array.from({ length: n }, (_, i) => wpts[Math.round(i * (wpts.length - 1) / Math.max(1, n - 1))]);
+    const days = [...new Set(S.map((x) => x.at.toISOString().slice(0, 10)))].sort();
+    let d = await omFetch(`https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${S.map((x) => x.p[0].toFixed(2)).join(',')}&longitude=${S.map((x) => x.p[1].toFixed(2)).join(',')}`
+      + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,wind_gusts_10m&models=ecmwf_ifs025&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+    if (!Array.isArray(d)) d = [d];
+    const keys = Object.keys(d[0].hourly).filter((k) => /^temperature_2m(_member\d+)?$/.test(k)).map((k) => k.slice('temperature_2m'.length));
+    const M = keys.map((sfx) => S.map((x, i) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(x.at)), g = (v) => (k < 0 ? null : (h[v + sfx] || [])[k] ?? null);
+      return { T: g('temperature_2m'), Td: g('dew_point_2m'), low: g('cloud_cover_low'), gust: g('wind_gusts_10m') }; })).filter((m) => m.every((x) => x.T != null));
+    if (M.length < 10) throw new Error('ensemble incomplet');
+    return { ...ensStats(M), at: S.map((x) => ({ along: x.along, at: x.at })) };
+  }
+  const ensHtml = (b) => { const e = b.ens; if (!e || e.err) return '';
+    const worst = e.pts.map((v, i) => ({ v, x: e.at[i] })).sort((a, c) => a.v - c.v)[0];
+    return `<div class="${e.both >= 80 ? 'okk' : 'warn'}">📊 <b>Probabilité VFR</b> (${e.n} scénarios ECMWF) : <b>${e.both} %</b> de chances d'avoir partout un plafond au-dessus de 1500 ft sol et des rafales sous 25 kt à l'heure de passage
+      (plafond seul : ${e.ceil} %, rafales seules : ${e.gust} %)${worst && worst.v < 90 ? ` · point le plus incertain vers ${worst.x.along.toFixed(0)} NM (${utc(worst.x.at)}) : ${worst.v} %` : ''}. Plafond estimé par l'écart température / point de rosée, indicatif.</div>`; };
   const confHtml = (b) => { const c = b.conf; if (!c || c.err || c.n < 2) return '';
     return c.bad.length ? `<div class="warn">🎲 <b>Prévision incertaine</b> : les modèles (${Object.values(MODELS).join(', ')}) ne sont pas d'accord sur ${c.bad.length} des ${c.pts.length} points comparés — ${esc(c.bad.slice(0, 3).map((x) => `vers ${x.along.toFixed(0)} NM (${utc(x.at)}) : ${x.why.join(' ; ')}`).join(' · '))}. Prévoir une marge, regarder les webcams et la TEMSI avant de partir.</div>`
       : `<p class="meta">🎲 Confiance : ${c.n} modèles (${Object.values(MODELS).join(', ')}) d'accord sur le plafond, le vent et la visibilité aux ${c.pts.length} points comparés.</p>`; };
@@ -2008,7 +2048,7 @@
       ${b.rtba.map((r) => `<div class="${r.conflict && r.crossed ? 'warn' : 'okk'}"><b>${esc(r.z.id)} ${esc(r.z.name)}</b> (${esc(r.z.lower)} – ${esc(r.z.upper)}) ${r.crossed ? '· <b>traversée</b>' : `· à ${r.d.toFixed(0)} NM`}<br>
         ${r.slots.length ? `Créneaux ${esc(r.slots.join(', '))} UTC${r.conflict ? ' — <b>active pendant le vol</b>' : ''}` : 'Aucun créneau publié pour cette date'}</div>`).join('')}
       <p class="meta">Les créneaux AZBA du lendemain sont publiés la veille (en fin d'après-midi) : ${b.azbaKnown && (b.depT.toISOString().slice(0, 10) <= new Date().toISOString().slice(0, 10) || b.rtba.some((r) => r.slots.length)) ? 'créneaux publiés pris en compte.' : '<b>pas encore publiés pour cette date</b> — mettre à jour le briefing la veille au soir (bouton 📅 Rappels).'}
-        Consulter <a href="https://sofia-briefing.aviation-civile.gouv.fr/" target="_blank" rel="noopener" style="color:#9cf">SOFIA-Briefing</a> (rubrique AZBA).</p>`;
+        Consulter <a href="https://sofia-briefing.aviation-civile.gouv.fr/" target="_blank" rel="noopener" style="color:var(--link)">SOFIA-Briefing</a> (rubrique AZBA).</p>`;
   }
   // Cols et passages des Pyrénées (altitude en m, position approximative ± 1 km)
   const COLS = [
@@ -2224,6 +2264,7 @@
     b.zones.filter((x) => x.crossed && x.below && x.act && x.act.st === 'active').forEach((x) => al.push(`⛔ Zone ${x.z.id} ${x.z.name} (${x.z.lower} – ${x.z.upper}) active pendant le vol (${x.act.why}) et traversée à ${b.f.ft} ft — contourner ou passer au-dessus / en dessous, ou obtenir l'accord du gestionnaire.`));
     b.zones.filter((x) => x.crossed && x.below && x.z.sup && x.z.sup.active !== false).forEach((x) => al.push(`${x.z.sup.active ? '⛔ ZRT active pendant le vol' : 'ZRT activable'} : ${x.z.name} (${x.z.id}, ${x.z.lower} – ${x.z.upper}) traversée — ${x.z.sup.active ? 'contournement obligatoire sauf accord du gestionnaire' : 'vérifier son activation (NOTAM, SIV)'} ; ${x.z.rmk.split(' — ')[1] || ''}.`));
     if (b.wxRoute && b.wxRoute.worst) al.push(`Météo en route : ${WXTXT[b.wxRoute.worst]} (${[...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 4).join(', ')}).`);
+    if (b.ens && !b.ens.err && b.ens.both < 50) al.push(`Probabilité VFR faible : ${b.ens.both} % des scénarios ECMWF donnent un plafond au-dessus de 1500 ft sol et des rafales sous 25 kt sur toute la route.`);
     if (b.conf && b.conf.bad && b.conf.bad.length) al.push(`Prévision incertaine : les modèles météo divergent sur ${b.conf.bad.length} des ${b.conf.pts.length} points comparés (${b.conf.bad[0].why[0]}).`);
     if (b.gramet && !b.gramet.err && b.gramet.icing) al.push(`GRAMET : givrage probable près de ${b.f.ft} ft (nuage entre 0 et -15 °C) — vol VFR hors nuages impératif, prévoir une altitude plus basse.`);
     if (b.gramet && !b.gramet.err && b.gramet.storm) al.push('GRAMET : instabilité / orages possibles sur le trajet (voir TEMSI).');
@@ -2300,7 +2341,7 @@
       <p class="meta">🧭 <b>Intégration</b> : ${x.entry ? `par ${esc(x.entry)}${vp && vp.desc ? ` (${esc(vp.desc)})` : ''}` : 'en direct (pas de point d\'entrée publié choisi)'} · tour de piste <b>${esc(x.tdpTxt || x.tdpFt + ' ft')}</b> · ${esc(x.side)}
         · piste probable <b>${x.rw ? x.rw.best.qfu : '?'}</b>${x.rw && x.rw.best.head != null ? ` (vent ${x.rw.best.head >= 0 ? 'de face' : 'arrière'} ${Math.abs(Math.round(x.rw.best.head))} kt, travers ${Math.round(x.rw.best.cross)} kt)` : ''}.
         Fréquence : ${esc(((b.arrInfo.v || {}).freqs || [])[0] || 'A/A 123.500')}.</p>
-      <p class="meta">Consignes particulières et circuit exact : <a href="data/vac/${esc(b.f.arr)}.pdf" target="_blank" rel="noopener" style="color:#9cf">VAC ${esc(b.f.arr)}</a>.</p></details>`;
+      <p class="meta">Consignes particulières et circuit exact : <a href="data/vac/${esc(b.f.arr)}.pdf" target="_blank" rel="noopener" style="color:var(--link)">VAC ${esc(b.f.arr)}</a>.</p></details>`;
   }
   // ---------- fiche escale (26) : horaires du jour, PPR, carburant, paiement, taxe, contact, vie pratique
   function escaleCardHtml(b, sfx = '') {
@@ -3033,6 +3074,47 @@
     return al;
   }
 
+  // ================================================================== « Où voler ? » : terrains atteignables, classés par météo (milieu de route + arrivée), horaires, piste, zones P
+  function whereScore(x) { return Math.max(x.wm.level, x.wa.level) * 10 + (x.closed ? 6 : 0) + (x.pz ? 5 : 0) + (x.rwy ? 3 : 0); }
+  console.assert(whereScore({ wm: { level: 0 }, wa: { level: 1 }, closed: true }) === 16 && whereScore({ wm: { level: 0 }, wa: { level: 0 } }) === 0, 'whereScore');
+  async function whereToFly(f, maxMin, say) {
+    const a0 = A.aptByIcao[f.dep]; if (!a0) throw new Error('Indique un terrain de départ connu.');
+    const depT = new Date(f.time); if (isNaN(depT)) throw new Error('Heure de départ invalide.');
+    say('Chargement des terrains et des zones…'); await loadAip();
+    const maxNm = f.tas * maxMin / 60, P0 = [+a0.la, +a0.lo];
+    const cand = A.APTS.filter((a) => /^LF[A-Z]{2}$/.test(a.icao) && a.icao !== f.dep && vacAt(a.icao)).map((a) => ({ a, d: distNm(P0, [+a.la, +a.lo]) }))
+      .filter((x) => x.d >= 15 && x.d <= maxNm).sort((x, y) => y.d - x.d).slice(0, 40);   // 80 points météo : Open-Meteo compte chaque point comme un appel
+    if (!cand.length) throw new Error(`Aucun terrain avec VAC entre 15 et ${Math.round(maxNm)} NM.`);
+    cand.forEach((x) => { x.min = x.d / f.tas * 60 + 10; x.eta = new Date(depT.getTime() + x.min * 6e4); x.mid = destPt(P0, bearing(P0, [+x.a.la, +x.a.lo]), x.d / 2); });
+    say(`Météo sur ${cand.length} destinations…`);
+    const pts = cand.flatMap((x) => [{ p: x.mid, at: new Date((depT.getTime() + x.eta.getTime()) / 2) }, { p: [+x.a.la, +x.a.lo], at: x.eta }]);
+    const days = [...new Set(pts.map((x) => x.at.toISOString().slice(0, 10)))].sort(), W = [];
+    for (let i = 0; i < pts.length; i += 100) {
+      const ch = pts.slice(i, i + 100);
+      let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${ch.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${ch.map((x) => x.p[1].toFixed(3)).join(',')}`
+        + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+      if (!Array.isArray(d)) d = [d];
+      ch.forEach((x, j) => { const h = d[j].hourly, k = h.time.indexOf(roundHour(x.at)), g = (v) => (k < 0 ? null : h[v][k]);
+        W.push(wxLevel({ T: g('temperature_2m'), Td: g('dew_point_2m'), low: g('cloud_cover_low'), vis: g('visibility'), rr: g('precipitation'), wc: g('weather_code'), gust: g('wind_gusts_10m'), elevFt: Math.round((d[j].elevation || 0) * 3.281) }, f.ft)); });
+    }
+    const pz = ((ZONES && ZONES.data) || []).filter((z) => z.type === 'P' && (parseAlt(z.lower) ?? 0) < f.ft);
+    cand.forEach((x, i) => {
+      x.wm = W[2 * i]; x.wa = W[2 * i + 1];
+      const line = Array.from({ length: Math.ceil(x.d / 2) + 1 }, (_, k) => destPt(P0, bearing(P0, [+x.a.la, +x.a.lo]), Math.min(x.d, k * 2)));
+      x.pz = pz.find((z) => line.some((p) => inPoly(p, z.poly)));
+      x.closed = outsideHours(vacAt(x.a.icao), x.eta); x.rwy = adCheck(x.a.icao, f.T); x.fee = A.feeFor ? A.feeFor(x.a.icao) : null;
+      x.score = whereScore(x);
+    });
+    cand.sort((x, y) => x.score - y.score || y.d - x.d);
+    const dot = (l) => `<span style="color:${WXCOL[l.level]}">●</span>`;
+    return `<h4>🧭 Où voler au départ de ${esc(f.dep)} (${utc(depT)}, ${maxMin} min aller au plus, ${Math.round(f.tas)} kt)</h4>
+      <table class="legs"><tr><th>Terrain</th><th>NM</th><th>Aller</th><th>Route</th><th>Arrivée</th><th style="text-align:left">À savoir</th><th></th></tr>
+      ${cand.slice(0, 25).map((x) => { const why = [...new Set([...x.wm.why, ...x.wa.why])], note = [x.closed && `fermé à ${utc(x.eta)} (${x.closed.win})`, x.pz && `zone P ${x.pz.id} sur la ligne directe`, x.rwy && x.rwy.why[0], x.fee && x.fee.tarif && `taxe ${x.fee.tarif}`].filter(Boolean);
+        return `<tr><td style="text-align:left"><b>${esc(x.a.icao)}</b> ${esc(x.a.name)}</td><td>${x.d.toFixed(0)}</td><td>${Math.round(x.min)}′</td><td title="${esc(x.wm.why.join(', '))}">${dot(x.wm)}</td><td title="${esc(x.wa.why.join(', '))}">${dot(x.wa)}</td>
+          <td style="text-align:left">${esc([...why, ...note].join(' · ') || 'rien de signalé')}</td><td><button class="btn" data-goto="${esc(x.a.icao)}">Préparer</button></td></tr>`; }).join('')}</table>
+      <p class="meta">Ligne directe, vent non compté, 10 min ajoutées pour le départ et l'arrivée. Météo : prévision Open-Meteo au milieu de la route et à l'arrivée (● vert favorable, orange marginal, rouge défavorable). Zones R / D, AZBA et NOTAM sont vérifiés en cliquant « Préparer ».</p>`;
+  }
+
   // ================================================================== mode entraînement : nav tirée au hasard, à préparer seul puis à comparer
   function trainingStart() {
     const dep = A.aptByIcao[$('#pf-dep').value.trim().toUpperCase()] ? $('#pf-dep').value.trim().toUpperCase() : 'LFBP', a0 = A.aptByIcao[dep];
@@ -3714,7 +3796,7 @@
   function escaleMailHtml(b) {
     const ids = [...new Set([b.f.arr, b.f.alt].filter(Boolean))];
     return `<p class="meta">✉️ Infos d'escale : ${ids.map((id) => { const e = (A.escaleOf && A.escaleOf(id)) || {}, c = (e.contacts || []).find((x) => x.m === e.mail_escale) || {};
-      return e.mail_escale ? `<a href="#" data-esc-mail="${esc(id)}" style="color:#9cf">${esc(id)} : ${esc(e.mail_escale)}</a> <small>(${esc(c.r || 'VAC')})</small>` : `${esc(id)} : pas d'e-mail publié${(e.tel_ad || []).length ? `, 📞 ${esc(e.tel_ad[0])}` : ''}`; }).join(' · ')}</p>`;
+      return e.mail_escale ? `<a href="#" data-esc-mail="${esc(id)}" style="color:var(--link)">${esc(id)} : ${esc(e.mail_escale)}</a> <small>(${esc(c.r || 'VAC')})</small>` : `${esc(id)} : pas d'e-mail publié${(e.tel_ad || []).length ? `, 📞 ${esc(e.tel_ad[0])}` : ''}`; }).join(' · ')}</p>`;
   }
   const vacLinks = (b) => escaleMailHtml(b) + `<p class="meta">📄 VAC (copie du cycle en cours, consultable hors ligne après le calcul) : ${[...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].map((id) => `<a href="data/vac/${id}.pdf" target="_blank" rel="noopener">${id}</a>`).join(' · ')}</p>`;
   function summaryHtml(b, sfx = '') {
@@ -3766,6 +3848,7 @@
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
       ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
         <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
+      ${ensHtml(b)}
       ${confHtml(b)}
       <h4>✈️ Coupe verticale de la route</h4>
       ${profileSvg(b.vprofile, b, sfx)}
@@ -4337,6 +4420,7 @@
         p.low != null ? `${p.low} %` : '?', p.baseAgl != null ? `${p.baseAgl} ft sol / ${p.baseAmsl} ft` : '?', p.vis != null ? `${Math.round(p.vis / 1000)} km` : '?',
         p.rr != null ? `${p.rr} mm` : '?', p.gust != null ? `${Math.round(p.gust)} kt` : '?', p.why.join(', ')]), { size: 7 });
       para('Base estimée par l\'écart température / point de rosée (x 400 ft) - indicatif, ne remplace pas les TEMSI.', { size: 7, color: [90, 90, 90] });
+      if (b.ens && !b.ens.err) para(`Probabilité VFR (${b.ens.n} scénarios ECMWF) : ${b.ens.both} % (plafond > 1500 ft sol partout : ${b.ens.ceil} %, rafales < 25 kt partout : ${b.ens.gust} %).`, { size: 7.5, color: b.ens.both >= 80 ? [20, 130, 40] : [190, 90, 0] });
       if (b.conf && b.conf.bad && b.conf.n > 1) para(b.conf.bad.length ? `Prévision incertaine (modèles ${Object.values(MODELS).join(', ')}) : ${b.conf.bad.slice(0, 3).map((x) => `vers ${x.along.toFixed(0)} NM (${utc(x.at)}) : ${x.why.join(' ; ')}`).join(' · ')}.` : `Confiance : ${b.conf.n} modèles d'accord aux ${b.conf.pts.length} points comparés.`, { size: 7.5, color: b.conf.bad.length ? [190, 90, 0] : [20, 130, 40] });
     } else para('Prévision en route indisponible.', { size: 8 });
     h2('Vent et stations le long de la route');

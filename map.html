@@ -2,14 +2,15 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>Aéro Météo Ouest — Pyrénées → Bretagne</title>
+  <title>Aéro Météo — France</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="icons/icon48.png">
   <link rel="manifest" href="app.webmanifest">
   <meta name="theme-color" content="#0b1c2e">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Aéro Ouest">
+  <meta name="apple-mobile-web-app-title" content="Aéro Météo">
   <link rel="apple-touch-icon" href="icons/icon192.png">
+  <script src="theme.js"></script>
   <script src="log.js"></script>
   <link rel="stylesheet" href="lib/leaflet/leaflet.css">
   <link rel="stylesheet" href="lib/cluster/MarkerCluster.css">
@@ -28,6 +29,7 @@
       <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
       <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
     </div>
+    <button id="btn-theme" class="tb" title="Thème clair / sombre">🌓<span>Thème</span></button>
     <div id="clock" title="Heure UTC">--:--:-- UTC</div>
   </nav>
 
@@ -35,8 +37,8 @@
     <header class="brand">
       <div class="logo"><img src="icons/icon48.png" alt="" width="30" height="30"></div>
       <div class="brand-txt">
-        <h1>Aéro Météo Ouest</h1>
-        <p class="sub">Pyrénées → Bretagne · préparation des vols</p>
+        <h1>Aéro Météo</h1>
+        <p class="sub">France métropolitaine · préparation des vols</p>
       </div>
       <button id="btn-tour" class="icon-btn" title="Visite guidée : à quoi servent les boutons">?</button>
       <button id="collapse" class="icon-btn" title="Réduire / agrandir le panneau">–</button>
@@ -44,6 +46,11 @@
 
     <div id="panel-body">
       <div id="hello" class="hello"></div>
+      <div class="quick">
+        <button id="q-prep" class="main" title="Départ, arrivée, avion : route, météo, NOTAM, briefing PDF"><b>✈️</b>Préparer un vol</button>
+        <button id="q-where" title="Terrains atteignables classés selon la météo"><b>🧭</b>Où voler ?</button>
+        <button id="q-measure" title="Distance, cap et temps entre des points de la carte"><b>📏</b>Mesurer</button>
+      </div>
       <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
       <div class="favs" id="favs" title="Terrains favoris : ★ dans la fiche d'un terrain pour en ajouter"></div>
       <div class="search-wrap">

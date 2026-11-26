@@ -105,3 +105,9 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] AH. Indice de confiance : plafond, vent et visibilité comparés entre Météo-France, ICON et GFS sur 8 points de la route ; « prévision incertaine » si désaccord (`modelSpread`, `modelConfidence`).
 - [x] AI. Fiche radio dans l'ordre du vol avec l'heure, appels en route à l'entrée réelle des espaces, vent arrière et finale en auto-information / AFIS (`radioCard` existait).
 - [x] AJ. Vol retour : bouton « Préparer le retour » (route inversée, départ = arrivée + escale) ; l'aller-retour reprend la route de l'aller à l'envers (`revLeg`).
+
+## Lot du 26/11/2026 (6)
+- [x] AK. « Où voler ? » : 40 terrains atteignables au plus dans le temps aller choisi, classés par météo (milieu de route + arrivée), horaires, zones P, piste, taxe ; bouton « Préparer » (`whereToFly`, `wxLevel` extrait de `routeWeather`).
+- [x] AL. Probabilité VFR : ensemble ECMWF (51 scénarios), part des scénarios avec plafond > 1500 ft sol et rafales < 25 kt sur toute la route (`ensStats`, `ensembleProb`).
+- [x] AM. Zone étendue à toute la France métropolitaine : 439 terrains (OurAirports), webcams cam-aero.eu et vision-environnement de toute la France, NOTAM des 5 FIR, bornes de `collect.py` et de la carte, repères visuels OSM.
+- [x] AN. Interface : thème clair façon Apple (automatique selon l'appareil, bouton 🌓), tuiles d'accueil (Préparer, Où voler, Mesurer), boutons bleus, interrupteurs verts ; le thème sombre actuel est gardé.

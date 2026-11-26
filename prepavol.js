@@ -309,7 +309,7 @@
     if (CUSTOM[id]) return { ...CUSTOM[id], id, kind: 'pt' };
     const c = id.match(/^(-?\d{1,2}\.\d+)\/(-?\d{1,3}\.\d+)$/);
     if (c) {
-      const lab = `PT${++customN}`;
+      const lab = Object.keys(CUSTOM).find((k) => CUSTOM[k].token === id) || `PT${++customN}`;   // même point -> même libellé (calculs simultanés, comparaison)
       CUSTOM[lab] = { la: +c[1], lo: +c[2], name: `Point libre ${(+c[1]).toFixed(3)} ${(+c[2]).toFixed(3)}`, token: id };
       return { ...CUSTOM[lab], id: lab, kind: 'pt' };
     }
@@ -405,7 +405,9 @@
       while ((m = re.exec(t))) out.push({ zone: m[1].replace(/\s/g, ''), name: m[2].trim(), slots: m[3].match(/\d{4}-\d{4}/g), from: n.from, to: n.to });
     }
     return out;
-  }
+  }  console.assert((() => { const r = rtbaActivations([{ e: 'ZONES AIRFORCE RTBA ACT ZONE R45A PYRENEES 0900-1100:ACTIVE 1300-1500:ACTIVE ZONE R 46 E CORBIERES 0800-0930:ACTIVE' }]);
+    return r.length === 2 && r[0].zone === 'R45A' && r[0].slots.join() === '0900-1100,1300-1500' && r[1].zone === 'R46E' && r[1].slots.join() === '0800-0930'; })(), 'rtbaActivations');
+
   function slotOverlap(slot, dayStartMs, t0, t1) {
     const s = +slot.slice(0, 2) * 60 + +slot.slice(2, 4), e = +slot.slice(5, 7) * 60 + +slot.slice(7, 9);
     const a = dayStartMs + s * 6e4, b = dayStartMs + (e <= s ? e + 1440 : e) * 6e4;
@@ -925,7 +927,6 @@
     if (unknown.length) throw new Error(`Terrain inconnu : ${unknown.join(', ')} (zone couverte : Pyrénées → Bretagne).`);
     say('Chargement des données AIP, espaces aériens…');
     await loadAip();
-    CUSTOM = {}; customN = 0;
     // Étapes : départ → arrivée (points tournants du formulaire), puis escales suivantes en direct (points VFR auto)
     const legsDef = [{ dep: f.dep, arr: f.arr, wps: f.wps, exit: f.exit, entry: f.entry }];
     stops.forEach((s) => legsDef.push({ dep: legsDef[legsDef.length - 1].arr, arr: s, wps: '', exit: 'auto', entry: 'auto' }));
@@ -968,18 +969,20 @@
     trip.forEach((b) => { b.dayWx = dw; });
     return trip;
   }
+  let runSeq = 0;
   async function run(makePdf) {
-    const prog = $('#pf-prog'), out = $('#pf-out');
+    const prog = $('#pf-prog'), out = $('#pf-out'), my = ++runSeq;
     stopPick();
     try {
       if (makePdf) { prog.textContent = 'Chargement des outils PDF / Excel…'; await needLibs(); }
       const f = readForm();
       lastForm = f;
-      if (f.local && f.dep && A.aptByIcao[f.dep]) { prog.textContent = 'Vol local : météo, espaces et carburant…'; out.innerHTML = await localPrep(f); prog.textContent = ''; return; }
+      if (f.local && f.dep && A.aptByIcao[f.dep]) { prog.textContent = 'Vol local : météo, espaces et carburant…'; const h = await localPrep(f); if (my === runSeq) { out.innerHTML = h; prog.textContent = ''; } return; }
       if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
-      const trip = await buildTrip(f, (t) => { prog.textContent = t; });
-      prog.textContent = 'Créneaux de départ…';
+      const trip = await buildTrip(f, (t) => { if (my === runSeq) prog.textContent = t; });
+      if (my === runSeq) prog.textContent = 'Créneaux de départ…';
       trip[0].slots = await departureSlots(trip).catch((e) => { console.warn('créneaux', e); return null; });
+      if (my !== runSeq) return;   // un calcul plus récent a été lancé entre-temps : on n'affiche pas l'ancien
       // VAC des terrains de la route : mises en cache pour être consultables hors ligne
       if (window.caches) caches.open('aww-offline-vac').then((c) => Promise.all([...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))]
         .map((id) => fetch(`data/vac/${id}.pdf`).then((r) => r.ok && c.put(`data/vac/${id}.pdf`, r)).catch(() => {})))).catch(() => {});

@@ -802,6 +802,14 @@ def parse_openair(txt):
     return keep
 
 
+_OA = ('AC D\nAN TMA PAU 1\nAY TMA\nAL 1500FT AMSL\nAH FL65\nAF 120.000\nAG PAU APPROCHE\nDP 43:20:00 N 000:30:00 W\nDP 43:30:00 N 000:30:00 W\nDP 43:30:00 N 000:20:00 W\n'
+       'AC Q\nAN DANGER X\nDP 43:00:00 N 000:30:00 W\nDP 43:10:00 N 000:30:00 W\nDP 43:10:00 N 000:20:00 W\n'
+       'AC C\nAN CTR TEST\nAL SFC\nAH 2500FT AMSL\nV X=44:00:00 N 001:00:00 W\nDC 5\n')
+_r = parse_openair(_OA)
+assert [(a['kind'], a['cls'], a['lower'], a['upper']) for a in _r] == [('TMA', 'D', '1500FT AMSL', 'FL65'), ('CTR', 'C', 'SFC', '2500FT AMSL')] \
+    and _r[0]['poly'] == [[43.3333, -0.5], [43.5, -0.5], [43.5, -0.3333]] and _r[0]['freq'] == '120.000' and len(_r[1]['poly']) == 24, _r
+
+
 def collect_siv(folder, cycle):
     """SIV (secteurs d'information de vol) de l'ENR 2.2 : géométrie, limites, indicatif, fréquences."""
     page = get(f'{SIA_DVD}/{folder}/FRANCE/AIRAC-{cycle}/html/eAIP/FR-ENR-2.2-fr-FR.html', timeout=180)
@@ -1311,15 +1319,27 @@ def club_issues(label):
     h = {'Accept': 'application/vnd.github+json'}
     if token:
         h['Authorization'] = 'Bearer ' + token
-    issues = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels={label},valide&state=all&per_page=100&sort=created&direction=asc', timeout=30, headers=h))
+    issues, page = [], 1
+    while True:   # 100 issues par page
+        chunk = json.loads(get(f'https://api.github.com/repos/{repo}/issues?labels={label},valide&state=all&per_page=100&page={page}&sort=created&direction=asc', timeout=30, headers=h))
+        issues += chunk
+        if len(chunk) < 100:
+            break
+        page += 1
     # l'auteur peut modifier son texte après la validation : on ne publie que les issues non modifiées depuis la pose de « valide »
     owner, name = repo.split('/')
-    q = ('query($o:String!,$n:String!){repository(owner:$o,name:$n){issues(labels:["valide"],first:100,states:[OPEN,CLOSED]){nodes{'
-         'number lastEditedAt timelineItems(itemTypes:[LABELED_EVENT],last:20){nodes{... on LabeledEvent{createdAt label{name}}}}}}}}')
-    req = urllib.request.Request('https://api.github.com/graphql', data=json.dumps({'query': q, 'variables': {'o': owner, 'n': name}}).encode(),
-                                 headers={**h, 'Content-Type': 'application/json', 'User-Agent': UA})
-    with opener.open(req, timeout=30) as r:
-        nodes = json.load(r)['data']['repository']['issues']['nodes']
+    q = ('query($o:String!,$n:String!,$c:String){repository(owner:$o,name:$n){issues(labels:["valide"],first:100,after:$c,states:[OPEN,CLOSED]){'
+         'pageInfo{hasNextPage endCursor} nodes{number lastEditedAt timelineItems(itemTypes:[LABELED_EVENT],last:20){nodes{... on LabeledEvent{createdAt label{name}}}}}}}}')
+    nodes, cursor = [], None
+    while True:   # 100 issues par page
+        req = urllib.request.Request('https://api.github.com/graphql', data=json.dumps({'query': q, 'variables': {'o': owner, 'n': name, 'c': cursor}}).encode(),
+                                     headers={**h, 'Content-Type': 'application/json', 'User-Agent': UA})
+        with opener.open(req, timeout=30) as r:
+            res = json.load(r)['data']['repository']['issues']
+        nodes += res['nodes']
+        if not res['pageInfo']['hasNextPage']:
+            break
+        cursor = res['pageInfo']['endCursor']
     trusted = set()
     for nd in nodes:
         val = max((e['createdAt'] for e in nd['timelineItems']['nodes'] if e and e['label']['name'] == 'valide'), default=None)

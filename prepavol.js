@@ -335,20 +335,37 @@
     return best ? `${ad.slice(2)}-${best.id}` : null;
   }
   window.AWW_VFR = { loadVfr, vfrOf };
-  // Open-Meteo limite le nombre d'appels par minute : nouvel essai après 6 puis 20 s, cache des réponses identiques
-  const omCache = new Map();
+  // Open-Meteo : chaque point demandé compte comme un appel (limites par connexion : 600 / min, 5 000 / h, 10 000 / jour).
+  // Réponses gardées 30 min sur l'appareil (recalcul, retour, PDF : aucun nouvel appel) ; limite minute : nouvel essai après 6 puis 20 s ;
+  // limite heure / jour : pas d'essai inutile, ancienne copie si elle existe, sinon message clair.
+  const omCache = new Map(), OM_TTL = 30 * 60e3;
+  const omLimit = (reason) => (/daily/i.test(reason || '') ? 'jour' : /hourly/i.test(reason || '') ? 'heure' : /minutely/i.test(reason || '') ? 'minute' : null);
+  console.assert(omLimit('Daily API request limit exceeded. Please try again tomorrow.') === 'jour' && omLimit('Hourly API request limit exceeded') === 'heure' && omLimit('') === null, 'omLimit');
   async function omFetch(url) {
     if (omCache.has(url)) return omCache.get(url);
-    let r;
+    const store = window.caches ? await caches.open('aww-om').catch(() => null) : null;
+    const hit = store ? await store.match(url).catch(() => null) : null;
+    const hitT = hit ? +(hit.headers.get('x-aww-t') || 0) : 0;
+    if (hit && Date.now() - hitT < OM_TTL) { const j = await hit.json(); omCache.set(url, j); return j; }
+    let r, lim = null;
     for (const wait of [0, 6000, 20000]) {
       if (wait) { const p = document.getElementById('pf-prog'); if (p && !/patiente/.test(p.textContent)) p.textContent += ' (serveur météo saturé, patiente…)'; await new Promise((ok) => setTimeout(ok, wait)); }
       r = await fetch(url);
       if (r.status !== 429) break;
+      lim = omLimit((await r.clone().json().catch(() => ({}))).reason);
+      if (lim === 'jour' || lim === 'heure') break;
     }
-    if (!r.ok) throw new Error((r.status === 429 ? 'serveur météo saturé, réessayer dans une minute ' : 'open-meteo ') + r.status);
+    if (!r.ok) {
+      if (hit) { console.warn('Open-Meteo', r.status, ': copie locale du', new Date(hitT).toLocaleTimeString('fr-FR')); const j = await hit.json(); omCache.set(url, j); return j; }
+      throw new Error(lim === 'jour' ? 'limite quotidienne du service météo (Open-Meteo) atteinte pour cette connexion : réessayer demain, ou depuis une autre connexion (4G du téléphone)'
+        : lim === 'heure' ? 'limite horaire du service météo (Open-Meteo) atteinte pour cette connexion : réessayer dans une heure, ou depuis une autre connexion'
+        : r.status === 429 ? 'serveur météo saturé, réessayer dans une minute' : 'open-meteo ' + r.status);
+    }
     const j = await r.json();
     if (omCache.size > 40) omCache.clear();
     omCache.set(url, j);
+    if (store) store.put(url, new Response(JSON.stringify(j), { headers: { 'content-type': 'application/json', 'x-aww-t': String(Date.now()) } }))
+      .then(() => store.keys()).then((k) => k.length > 200 && Promise.all(k.slice(0, k.length - 200).map((x) => store.delete(x)))).catch(() => {});
     return j;
   }
   const WLV = [1000, 975, 950, 925, 900, 850, 800, 700, 600];
@@ -382,15 +399,40 @@
     if (!Array.isArray(d)) d = [d];
     return list.map(([, t], i) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { temp: h.temperature_2m[k], wdir: h.wind_direction_10m[k], wspd: h.wind_speed_10m[k], gust: h.wind_gusts_10m[k] }; });
   }
-  async function elevations(points) { // m, par paquets de 100
-    const out = [];
-    for (let i = 0; i < points.length; i += 100) {
-      const ch = points.slice(i, i + 100);
-      const j = await omFetch(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map((p) => p[0].toFixed(4)).join(',')}&longitude=${ch.map((p) => p[1].toFixed(4)).join(',')}`);
-      out.push(...j.elevation);
-    }
-    return out;
+  // Relief (m) : tuiles d'altitude publiques « Terrarium » (AWS Open Data, sans quota, ~75 m par pixel au zoom 11) ;
+  // Open-Meteo en secours (chaque point y compte comme un appel : 2/3 du quota d'une préparation y passaient)
+  const ELEV_Z = 11, elevTiles = new Map();
+  const terrarium = (r, g, b) => r * 256 + g + b / 256 - 32768;
+  console.assert(terrarium(128, 0, 0) === 0 && Math.round(terrarium(128, 188, 0)) === 188, 'terrarium');
+  function elevTile(x, y) {
+    const k = `${x}/${y}`;
+    if (!elevTiles.has(k)) elevTiles.set(k, fetch(`https://elevation-tiles-prod.s3.amazonaws.com/terrarium/${ELEV_Z}/${x}/${y}.png`).then((r) => { if (!r.ok) throw new Error('tuile ' + r.status); return r.blob(); })
+      .then((b) => createImageBitmap(b)).then((im) => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x2 = c.getContext('2d', { willReadFrequently: true }); x2.drawImage(im, 0, 0); return x2.getImageData(0, 0, im.width, im.height); })
+      .catch((e) => { elevTiles.delete(k); throw e; }));
+    if (elevTiles.size > 300) elevTiles.delete(elevTiles.keys().next().value);
+    return elevTiles.get(k);
   }
+  async function elevations(points) {
+    try {
+      const n = 2 ** ELEV_Z;
+      const px = points.map(([la, lo]) => { const x = (lo + 180) / 360 * n, s2 = Math.log(Math.tan(Math.PI / 4 + rad(la) / 2)), y = (1 - s2 / Math.PI) / 2 * n; return [Math.floor(x), Math.floor(y), Math.min(255, Math.floor((x % 1) * 256)), Math.min(255, Math.floor((y % 1) * 256))]; });
+      const tiles = await Promise.all(px.map(([x, y]) => elevTile(x, y)));
+      // plus haut des 3 × 3 pixels autour du point (~225 m) : les sommets pointus ne sont pas sous-estimés (marge de sécurité)
+      return px.map(([, , i, j], k) => { const { data: d, width: w, height: h } = tiles[k]; let m = -1e9;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const x = Math.min(w - 1, Math.max(0, i + di)), y = Math.min(h - 1, Math.max(0, j + dj)), o = (y * w + x) * 4; m = Math.max(m, terrarium(d[o], d[o + 1], d[o + 2])); }
+        return Math.max(0, m); });
+    } catch (e) {
+      console.warn('tuiles d\'altitude indisponibles, Open-Meteo en secours', e);
+      const out = [];
+      for (let i = 0; i < points.length; i += 100) {
+        const ch = points.slice(i, i + 100);
+        const j = await omFetch(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map((p) => p[0].toFixed(4)).join(',')}&longitude=${ch.map((p) => p[1].toFixed(4)).join(',')}`);
+        out.push(...j.elevation);
+      }
+      return out;
+    }
+  }
+  window.AWW_elevations = elevations;
   const parseAlt = A.altFt;   // -> ft ; ASFC / AGL : valeur brute, le sol est ajouté par l'appelant
   console.assert(parseAlt('3300ft ASFC') === 3300 && parseAlt('( LFRJ ARP ) 500ft ASFC') === 500 && parseAlt('SFC') === 0 && parseAlt('FL 65') === 6500 && parseAlt('UNL') === 99999, 'parseAlt ASFC');
   const isAgl = (s) => /ASFC|AGL|SFC\b(?! *-)/i.test(s || '') && !/^SFC$|^GND$/i.test((s || '').trim());
@@ -1207,7 +1249,7 @@
     const el = document.createElement('div'); el.id = 'tslider'; el.className = 'glass';
     el.innerHTML = `<div class="ts-row"><b>Départ simulé</b><output id="ts-out"></output><button type="button" class="btn" id="ts-use" title="Recalculer la préparation avec cette heure">Utiliser</button><button type="button" class="icon-btn" id="ts-x" title="Fermer" aria-label="Fermer le curseur horaire">✕</button></div>
       <input type="range" id="ts-r" min="${lo}" max="${hi}" step="15" value="${Math.min(hi, Math.max(lo, cur))}" aria-label="Heure de départ simulée">
-      <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p><p class="ts-why" id="ts-grid">Chargement de la pluie et du vent…</p>`;
+      <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p><p class="ts-why" id="ts-grid">Bouge le curseur pour afficher aussi la pluie et le vent sur la carte.</p>`;
     document.body.appendChild(el);
     tsLayer = L.layerGroup().addTo(map);
     const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1227,7 +1269,10 @@
           html: `<svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(${(wd + 180) % 360}deg)"><path d="M15 25V7M10 12l5-5 5 5" fill="none" stroke="#0b2a44" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 25V7M10 12l5-5 5 5" fill="none" stroke="${ws >= 30 ? '#ff9500' : '#fff'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${Math.round(ws)}</b>` }) }).addTo(gLayer); });
       $('#ts-grid').textContent = `Carte : pluie / orages et vent à ~${{ 925: '2 500', 850: '5 000', 700: '10 000' }[G.L0]} ft (${G.L0} hPa) vers ${hm(Math.round((day.getTime() + m * 6e4 + dur / 2 - day) / 6e4))}, milieu du vol.`;
     };
-    gridWx(trip).then((g) => { G = g; drawGrid(+$('#ts-r').value); }).catch((e) => { $('#ts-grid').textContent = 'Pluie et vent sur la carte indisponibles (' + e.message + ').'; });
+    // grille chargée au premier mouvement du curseur seulement (≈ 55 appels Open-Meteo)
+    let gLoad = null;
+    const loadGrid = () => { if (gLoad) return; $('#ts-grid').textContent = 'Chargement de la pluie et du vent…';
+      gLoad = gridWx(trip).then((g) => { G = g; drawGrid(+$('#ts-r').value); }).catch((e) => { $('#ts-grid').textContent = 'Pluie et vent sur la carte indisponibles (' + e.message + ').'; }); };
     const draw = () => {
       const m = +$('#ts-r').value, R = at(m); tsLayer.eachLayer((l) => { if (l !== gLayer) tsLayer.removeLayer(l); }); drawGrid(m);
       for (let i = 1; i < R.length; i++) { const lv = Math.max(R[i - 1].w ? R[i - 1].w.lv : 0, R[i].w ? R[i].w.lv : 0);
@@ -1240,7 +1285,7 @@
       $('#ts-out').innerHTML = `<b style="color:${WXCOL[lv]}">●</b> ${hm(m)} → ${hm(m + Math.round(dur / 6e4))} · ${esc(WXTXT[lv])}`;
       $('#ts-why').textContent = why.slice(0, 4).join(', ') || 'rien de signalé sur la route';
     };
-    $('#ts-r').addEventListener('input', draw); draw();
+    $('#ts-r').addEventListener('input', () => { loadGrid(); draw(); }); draw();
     $('#ts-x').addEventListener('click', () => timeSlider(null));
     $('#ts-use').addEventListener('click', () => { const t = new Date(day.getTime() + +$('#ts-r').value * 6e4), i = $('#pf-time'); if (!i) return; i.value = localInput(t); timeSlider(null); run(false); });
   }

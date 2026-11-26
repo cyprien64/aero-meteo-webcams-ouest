@@ -1323,9 +1323,9 @@
     </div>`;
   }
   async function elevFt(points) {
-    try {
-      const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${points.map((p) => p[0].toFixed(4)).join(',')}&longitude=${points.map((p) => p[1].toFixed(4)).join(',')}`);
-      return (await r.json()).elevation.map((m) => Math.max(0, Math.round(m * 3.281)));
+    try {   // tuiles d'altitude de prepavol.js (sans quota) ; Open-Meteo seulement si elles manquent
+      const m = window.AWW_elevations ? await window.AWW_elevations(points) : (await (await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${points.map((p) => p[0].toFixed(4)).join(',')}&longitude=${points.map((p) => p[1].toFixed(4)).join(',')}`)).json()).elevation;
+      return m.map((x) => Math.max(0, Math.round(x * 3.281)));
     } catch { return points.map(() => 0); }
   }
   // échelle verticale : 0–6 000 ft sur 55 % de la hauteur, puis jusqu'au FL195

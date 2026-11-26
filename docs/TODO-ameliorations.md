@@ -48,9 +48,9 @@ Règles du projet (à respecter) :
 Une fois les points ci-dessus faits : choisir et réaliser d'autres améliorations utiles à la préparation du vol et à la fiabilité du site. Les ajouter ici avant de commencer (une ligne chacune, `- [ ]`), puis les cocher une fois faites.
 Idées de fiabilité à étudier en priorité : test automatique de chargement de `prepavol.js` dans un faux DOM (Node) lancé par le workflow avant publication (bloque si un `console.assert` échoue ou si le module ne se charge pas) ; contrôle des fichiers `data/live/*.json` (taille, champs) avec repli sur la version publiée ; signalement clair dans l'interface quand une source est en échec ou trop ancienne ; nettoyage des caches et du stockage local qui grossissent.
 - [x] A. Test automatique `tests/test_site.js` (faux navigateur Node) lancé par le workflow avant publication : bloque si un script plante ou si un `console.assert` échoue, et vérifie les fichiers de `SHELL` de `sw.js`. Il a trouvé l'assert `tokWords` faux (corrigé).
-- [ ] B. Contrôle des fichiers `data/live` avant publication (presque vide ou illisible -> version publiée gardée). Fait par la session de nuit mais non publié (accès GitHub refusé) : à refaire.
-- [ ] C. Bandeau sur la carte quand une source est en échec ou trop ancienne (`status.json`). Idem : à refaire.
-- [ ] D. Nettoyage du stockage de l'appareil (listes cochées anciennes, rappels orphelins, historique orphelin, cache VAC limité). Idem : à refaire.
+- [x] B. Contrôle des fichiers `data/live` avant publication : fichier presque vide -> version publiée gardée, anomalie notée « suspect » dans `status.json` (`collect.py`, MIN_ITEMS / suspect).
+- [x] C. Bandeau sur la carte quand une source est en échec, suspecte ou trop ancienne, ou si la collecte est arrêtée (`map.js`, staleSources).
+- [x] D. Nettoyage du stockage : listes cochées de plus de 30 jours, rappels orphelins, fichiers d'historique orphelins, VAC hors ligne limitées à 40 (`prepavol.js`, cleanStorage).
 
 ## Préparation, lot du 26/11/2026
 - [x] 39. Verdict global vert / orange / rouge en tête, avec les 3 raisons principales.
@@ -63,3 +63,4 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] 47. Notes personnelles par terrain, rappelées à la préparation.
 - [x] 48. Taxes et infos d'escale partagées entre pilotes du club. — Le circuit existait (proposition par e-mail, issues « taxe » / « pratique » validées, fees_club.json) ; ajout du bouton « Proposer » dans la fiche escale de la préparation.
 - [x] 49. Fiche de genou A5 d'une page.
+- [x] E. Bande de carte du PDF : branches nord-sud en bandes verticales côte à côte, étiquettes à la taille du grand côté de l'image.

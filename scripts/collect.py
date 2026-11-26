@@ -48,7 +48,32 @@ def get(url, data=None, timeout=90, headers=None):
 STATUS = {}   # état de chaque fichier pour la surveillance (status.json)
 
 
+# Contenu minimal attendu (clé, nombre d'éléments) : en dessous, la source a sans doute renvoyé une page vide ou
+# tronquée ; on garde alors la version publiée plutôt que d'écraser de bonnes données par un fichier presque vide.
+MIN_ITEMS = {'metar.json': ('data', 5), 'taf.json': ('data', 3), 'notam.json': ('fir', 10), 'supaip.json': ('data', 10),
+             'vac.json': ('data', 100), 'zones.json': ('data', 100), 'airspaces.json': ('data', 100), 'escale.json': ('data', 100),
+             'special.json': ('act', 20)}
+
+
+def suspect(name, obj):
+    """Raison pour laquelle un fichier semble anormal, ou '' s'il est correct."""
+    if name not in MIN_ITEMS:
+        return ''
+    key, n = MIN_ITEMS[name]
+    got = len(obj.get(key) or []) if isinstance(obj, dict) else 0
+    return f'{got} élément(s) dans {key} (minimum {n})' if got < n else ''
+
+
+assert suspect('metar.json', {'data': [1] * 6}) == '' and suspect('metar.json', {'data': []}).startswith('0 élément') and suspect('autre.json', {}) == ''
+
+
 def save(name, obj, reused=False):
+    why = '' if reused else suspect(name, obj)
+    if why:   # fichier presque vide : la version publiée est conservée (repli), l'anomalie est notée dans status.json
+        print(f'  !! {name} suspect ({why}) : version précédente conservée si possible')
+        kept = fallback(name)
+        STATUS[name] = f"suspect ({why}), {'version précédente conservée' if kept else 'aucune version précédente'}"
+        return
     STATUS[name] = 'repris (inchangé)' if reused else 'ok'
     with open(os.path.join(OUT, name), 'w', encoding='utf-8') as f:
         json.dump(obj, f, ensure_ascii=False, separators=(',', ':'))

@@ -1472,14 +1472,35 @@
   if (window.caches) caches.open('aww-briefings').then((c) => c.keys()).then((k) => { if (k.length) $('#btn-last').hidden = false; }).catch(() => {});
 
   // ---------- Démarrage (chaque chargement est suivi : indicateur en haut de la carte + journal) ----------
+  // ---------- état des sources (data/live/status.json écrit par la collecte) : source en échec, suspecte ou trop ancienne
+  const SRC_LIMITS = { 'metar.json': [3, 'METAR'], 'taf.json': [8, 'TAF'], 'notam.json': [8, 'NOTAM'], 'supaip.json': [48, 'SUP AIP'], 'special.json': [72, 'zones particulières'],
+    'vac.json': [24 * 20, 'VAC'], 'zones.json': [24 * 40, 'zones P / R / D'], 'airspaces.json': [24 * 40, 'espaces aériens'] };
+  const hAgo = (h) => (h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} jours`);
+  function staleSources(st, now = Date.now()) {
+    const out = [], files = (st && st.files) || {};
+    if (st && st.run && (now - Date.parse(st.run)) / 36e5 > 2) out.push(`collecte arrêtée depuis ${hAgo((now - Date.parse(st.run)) / 36e5)}`);
+    for (const [name, [lim, lbl]] of Object.entries(SRC_LIMITS)) {
+      const f = files[name]; if (!f) continue;
+      const age = f.last_ok ? (now - Date.parse(f.last_ok)) / 36e5 : Infinity;
+      if (age > lim) out.push(`${lbl} : ${f.last_ok ? `dernière collecte réussie il y a ${hAgo(age)}` : 'jamais collecté'}${f.state && !/^(ok|repris)/.test(f.state) ? `, dernier essai : ${f.state}` : ''}`);
+      else if (/^suspect/.test(f.state || '')) out.push(`${lbl} : ${f.state}`);
+    }
+    return out;
+  }
+  console.assert((() => { const now = Date.parse('2026-11-26T12:00:00Z'), r = staleSources({ run: '2026-11-26T11:45:00Z', files: { 'metar.json': { state: 'échec', last_ok: '2026-11-26T06:00:00Z' }, 'taf.json': { state: 'ok', last_ok: '2026-11-26T11:45:00Z' } } }, now);
+    return r.length === 1 && /METAR : dernière collecte réussie il y a 6 h, dernier essai : échec/.test(r[0]); })(), 'staleSources');
+  async function loadSourceStatus() {
+    const bad = staleSources(await getLive('status.json'));
+    if (bad.length) throw new Error(`données anciennes, à vérifier sur les sites officiels — ${bad.join(' ; ')}`);
+  }
   const T = window.AWW_LOG.task;
   drawAerodromes();
   T('METAR / TAF', loadMetarTaf);
-  T('NOTAM / SUP AIP', loadNotamSup);
+  T('NOTAM / SUP AIP', loadNotamSup); T('Sources de données', loadSourceStatus);
   T('Balises vent', loadPiouPiou);
   // fichiers lourds (VAC 700 ko) chargés une fois la carte affichée
   const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
-  idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); T('Vigilance', loadVig); });
+  idle(() => { T('Fiches escale (VAC)', loadEscale); loadCamStatus(); T('Vigilance', loadVig); T('Sources de données', loadSourceStatus); });
   setInterval(() => T('METAR / TAF', loadMetarTaf), 5 * 60 * 1000);
   setInterval(() => { T('Balises vent', loadPiouPiou); T('NOTAM / SUP AIP', loadNotamSup); if (radarFrames.length) loadRadar(); }, REFRESH_MS);
   $('#btn-log').addEventListener('click', () => {

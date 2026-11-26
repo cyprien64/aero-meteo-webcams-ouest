@@ -3662,19 +3662,23 @@
         doc.setTextColor(0);
       }
     } catch (e) { console.warn('carte OACI', e); }
-    // bande de carte (strip-map) : une image OACI par branche, deux par page
+    // bande de carte (strip-map) : une image OACI par branche ; branches est-ouest en bandes horizontales (2 l'une sous l'autre),
+    // branches nord-sud en bandes verticales (2 côte à côte) ; une nouvelle page quand l'orientation change
     try {
       const legs = b.legs.filter((lg) => lg.dist >= 6);
+      let page = null, slot = 0;
       for (let i = 0; i < legs.length; i++) {
-        const lg = legs[i], k = b.legs.indexOf(lg);
-        const st = await renderNavMap({ ...b, pts: [lg.a, lg.b], ids: [lg.from, lg.to], legs: [lg], altLeg: null }, (t) => progress && progress(t.replace('carte OACI', `bande de carte ${i + 1}/${legs.length}`)), { ratio: 277 / 82 });
+        const lg = legs[i], k = b.legs.indexOf(lg), vert = Math.abs(Math.sin(rad(lg.tc))) < 0.6;
+        const st = await renderNavMap({ ...b, pts: [lg.a, lg.b], ids: [lg.from, lg.to], legs: [lg], altLeg: null }, (t) => progress && progress(t.replace('carte OACI', `bande de carte ${i + 1}/${legs.length}`)), { ratio: vert ? 132 / 168 : 277 / 82 });
         if (!st) break;
-        if (i % 2 === 0) newPage('landscape', 'BANDE DE CARTE PAR BRANCHE - OACI-VFR 1/500 000');
-        const y0 = i % 2 === 0 ? 19 : 19 + (H - 26) / 2, maxW = W - 2 * M, maxH = (H - 26) / 2 - 8, sc = Math.min(maxW / st.w, maxH / st.h);
-        doc.setFontSize(8.5); doc.setFont('helvetica', 'bold');
-        doc.text(latin(`${k + 1}. ${lg.from} -> ${lg.to} : Rm ${r3(lg.tm)}°, Cm ${r3(lg.hm)}°, ${lg.dist.toFixed(0)} NM, ${lg.min} min, alti sécu ${lg.safe ? lg.safe.alt + ' ft' : '?'}, croisière ${lg.ft || b.f.ft} ft`), M, y0 + 3);
+        if (page !== (vert ? 'v' : 'h') || slot === 2) { newPage('landscape', 'BANDE DE CARTE PAR BRANCHE - OACI-VFR 1/500 000'); page = vert ? 'v' : 'h'; slot = 0; }
+        const bw = vert ? (W - 2 * M - 4) / 2 : W - 2 * M, bh = vert ? H - 32 : (H - 26) / 2 - 8;
+        const x0 = vert ? M + slot * (bw + 4) : M, y0 = vert ? 19 : 19 + slot * (H - 26) / 2, sc = Math.min(bw / st.w, bh / st.h);
+        doc.setFontSize(vert ? 7.5 : 8.5); doc.setFont('helvetica', 'bold');
+        doc.text(doc.splitTextToSize(latin(`${k + 1}. ${lg.from} -> ${lg.to} : Rm ${r3(lg.tm)}°, Cm ${r3(lg.hm)}°, ${lg.dist.toFixed(0)} NM, ${lg.min} min, alti sécu ${lg.safe ? lg.safe.alt + ' ft' : 'à vérifier'}, croisière ${lg.ft || b.f.ft} ft`), bw), x0, y0 + 3);
         doc.setFont('helvetica', 'normal');
-        doc.addImage(st.url, 'JPEG', M + (maxW - st.w * sc) / 2, y0 + 5, st.w * sc, st.h * sc);
+        doc.addImage(st.url, 'JPEG', x0 + (bw - st.w * sc) / 2, y0 + (vert ? 8 : 5), st.w * sc, st.h * sc);
+        slot++;
       }
     } catch (e) { console.warn('bande de carte', e); }
     if (b.gramet && !b.gramet.err) {
@@ -4028,6 +4032,28 @@
       if (e && !e.files.includes(name)) { e.files.push(name); store.set('hist', list); }
     } catch (e) { console.warn('historique', e); }
   }
+  // ---- nettoyage du stockage de l'appareil (localStorage et caches qui grossissent au fil des navs)
+  // listes cochées « check.<immat>.<terrain>.<AAAA-MM-JJ> » de plus de 30 jours -> supprimées
+  const oldChecks = (keys, now = Date.now()) => keys.filter((k) => { const m = /^aww\.prep2\.check\..*\.(\d{4}-\d{2}-\d{2})$/.exec(k); return m && now - Date.parse(m[1]) > 30 * 864e5; });
+  console.assert(JSON.stringify(oldChecks(['aww.prep2.check.F-HAFF.LFBP.2026-09-01', 'aww.prep2.check.F-HAFF.LFBP.2026-11-25', 'aww.prep2.form'], Date.parse('2026-11-26'))) === '["aww.prep2.check.F-HAFF.LFBP.2026-09-01"]', 'oldChecks');
+  async function cleanStorage() {
+    try {
+      const keys = []; for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+      oldChecks(keys).forEach((k) => localStorage.removeItem(k));
+      const snaps = store.get('snaps', {}), seen = store.get('remindSeen', {});   // rappels déjà vus d'une nav qui n'existe plus
+      store.set('remindSeen', Object.fromEntries(Object.entries(seen).filter(([k]) => k in snaps)));
+    } catch (e) { console.warn('nettoyage localStorage', e); }
+    if (!window.caches) return;
+    try {   // fichiers d'historique dont la préparation a été retirée de la liste
+      const ids = new Set(store.get('hist', []).map((e) => String(e.id))), c = await caches.open(HIST_CACHE);
+      for (const r of await c.keys()) { const m = /\/hist\/([^/]+)\//.exec(new URL(r.url).pathname); if (m && !ids.has(m[1])) await c.delete(r); }
+    } catch (e) { console.warn('nettoyage historique', e); }
+    try {   // VAC gardées hors ligne : les 40 dernières suffisent (ordre d'ajout)
+      const c = await caches.open('aww-offline-vac'), k = await c.keys();
+      for (const r of k.slice(0, Math.max(0, k.length - 40))) await c.delete(r);
+    } catch (e) { console.warn('nettoyage VAC', e); }
+  }
+  setTimeout(cleanStorage, 20000);
   async function histFile(id, name) {
     const r = window.caches && await (await caches.open(HIST_CACHE)).match(`hist/${id}/${encodeURIComponent(name)}`);
     if (!r) { alert('Fichier non disponible sur cet appareil.'); return; }
@@ -4134,7 +4160,7 @@
     const ok = (await Promise.all(jobs)).filter(Boolean).length;
     if (!ok) return null;
     const P = (p) => [X(p[1], z) - x0, Y(p[0], z) - y0];
-    const u = W / 1000;   // unité graphique : tailles proportionnelles à l'image (lisibles une fois sur A4)
+    const u = Math.max(W, H) / 1000;   // unité graphique : proportionnelle au grand côté de l'image (lisible sur A4, bandes verticales comprises)
     ctx.lineCap = 'round';
     // route
     ctx.strokeStyle = 'rgba(255,0,180,.9)'; ctx.lineWidth = 5 * u;

@@ -49,10 +49,11 @@ jobs:
             vac-pdf-
 
       - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
+        timeout-minutes: 30   # la collecte tourne toutes les 15 min : au-delà, la publication suivante prend le relais
         env:
           FALLBACK_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/collect.py
+        run: python3 -u scripts/collect.py   # -u : journal au fil de l'eau (durée de chaque partie visible)
 
       - uses: actions/configure-pages@v6
 

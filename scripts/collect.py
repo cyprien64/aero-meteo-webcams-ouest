@@ -200,7 +200,17 @@ def collect_notam():
         print(f'  FIR France : {len(fir_list)} NOTAM sur {horizon} h')
 
         ad = {}
-        icaos = [a[0] for a in aerodromes() if a[0].startswith('LF')]
+        # terrains qui n'ont pas répondu au passage précédent (délai, refus) : sautés 24 h, sinon chaque essai attend 120 s
+        skip = {}
+        if FALLBACK_URL:
+            try:
+                skip = {k: v for k, v in (json.loads(get(f'{FALLBACK_URL}/data/live/notam.json', timeout=30)).get('skip') or {}).items()
+                        if (NOW - datetime.fromisoformat(v)).total_seconds() < 86400}
+            except Exception:  # noqa: BLE001
+                skip = {}
+        icaos = [a[0] for a in aerodromes() if a[0].startswith('LF') and a[0] not in skip]
+        if skip:
+            print(f'  {len(skip)} terrain(s) sauté(s) 24 h (sans réponse au passage précédent)')
 
         def batch(lst):
             try:
@@ -218,6 +228,7 @@ def collect_notam():
                     batch(lst[:h]); batch(lst[h:])
                 else:
                     print('  AD ignoré', lst[0], e)
+                    skip[lst[0]] = NOW.isoformat()
             time.sleep(0.5)
 
         for i in range(0, len(icaos), 20):
@@ -227,7 +238,7 @@ def collect_notam():
         if not fir_list or not ad:   # NOTAM d'aérodromes absents = fermetures de piste invisibles : on garde la version publiée
             raise RuntimeError(f'NOTAM incomplets (FIR : {len(fir_list)}, aérodromes : {len(ad)})')
         save('notam.json', {'generated': NOW.isoformat(), 'horizon': horizon, 'source': 'SOFIA-Briefing (SIA/DGAC)',
-                            'fir': sorted(fir_list.values(), key=lambda x: x['from'] or ''), 'ad': ad})
+                            'fir': sorted(fir_list.values(), key=lambda x: x['from'] or ''), 'ad': ad, 'skip': skip})
     except Exception as e:  # noqa: BLE001
         print('  NOTAM : échec', e)
         fallback('notam.json')

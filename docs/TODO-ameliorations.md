@@ -58,8 +58,8 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] 42. Points de demi-tour météo sur la coupe, avec terrain de repli.
 - [x] 43. Fréquences dans l'ordre du vol avec heure et point de changement.
 - [x] 44. Zones actives à l'heure de passage en surbrillance sur la carte.
-- [ ] 45. Préparation d'un vol local (zone de travail, durée, carburant).
-- [ ] 46. Terrains à éviter pour l'avion (piste courte, herbe détrempée).
-- [ ] 47. Notes personnelles par terrain, rappelées à la préparation.
-- [ ] 48. Taxes et infos d'escale partagées entre pilotes du club.
-- [ ] 49. Fiche de genou A5 d'une page.
+- [x] 45. Préparation d'un vol local (zone de travail, durée, carburant).
+- [x] 46. Terrains à éviter pour l'avion (piste courte, herbe détrempée).
+- [x] 47. Notes personnelles par terrain, rappelées à la préparation.
+- [x] 48. Taxes et infos d'escale partagées entre pilotes du club. — Le circuit existait (proposition par e-mail, issues « taxe » / « pratique » validées, fees_club.json) ; ajout du bouton « Proposer » dans la fiche escale de la préparation.
+- [x] 49. Fiche de genou A5 d'une page.

@@ -576,6 +576,9 @@
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
         <label><input id="pf-rt" type="checkbox" ${f.rt ? 'checked' : ''}> Aller-retour (retour au départ ajouté)</label>
+        <label><input id="pf-local" type="checkbox" ${f.local ? 'checked' : ''}> Vol local (pas d'arrivée ailleurs)</label>
+        <label>Vol local : durée (min) / rayon (NM)<span class="row"><input id="pf-ldur" type="number" min="10" max="300" step="10" value="${esc(f.ldur || 60)}" style="width:70px"><input id="pf-lrad" type="number" min="3" max="40" value="${esc(f.lrad || 15)}" style="width:60px"></span></label>
+        <div class="full" id="pf-adcheck"></div>
         <label>Prix du carburant aux escales (€/L, option)<input id="pf-fuelprice" type="number" min="0" max="10" step="0.01" value="${esc(f.fuelPrice || '')}"></label>
         <label class="full" title="Pour chaque escale : passager avant / passagers arrière / bagages (kg) au départ de cette escale. Ex. « LFCH:0/0/15 » = on dépose le passager à Arcachon">Charges différentes au départ des escales (option)<input id="pf-stload" value="${esc(f.stload || '')}" placeholder="ex. LFCH:0/0/15 LFBP:75/0/10"></label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
@@ -685,6 +688,8 @@
     $('#pf-pdf').addEventListener('click', () => run('pdf'));
     $('#pf-xlsx').addEventListener('click', () => run('xlsx'));
     $('#pf-train').addEventListener('click', trainingStart);
+    ['#pf-dep', '#pf-arr', '#pf-alt', '#pf-stages', '#pf-wps', '#pf-reg'].forEach((x) => $(x) && $(x).addEventListener('change', adCheckHtml));
+    loadAip().then(adCheckHtml).catch(() => {});
     // navs enregistrées (sur cet appareil) : tout le formulaire sauf l'heure
     $('#pf-fav-save').addEventListener('click', () => {
       const f = readForm(), name = prompt('Nom de la nav :', [f.dep, f.arr, ...(f.stages || '').split(/\s+/).filter(Boolean)].join(' → ') + (f.rt ? ' (A/R)' : ''));
@@ -775,7 +780,7 @@
       cor: +v('#pf-cor'), avoid: v('#pf-avoid'), pil: v('#pf-pil'), immat: v('#pf-immat').toUpperCase(), empty: +v('#pf-empty'),
       exit: v('#pf-exit') || 'auto', entry: v('#pf-entry') || 'auto',
       stages: v('#pf-stages').toUpperCase(), turn: +v('#pf-turn') || 0, refuel: v('#pf-refuel') === '1',
-      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), stload: v('#pf-stload').toUpperCase(), fuelPrice: +v('#pf-fuelprice') || 0, rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
+      stalts: v('#pf-stalts').toUpperCase(), legft: v('#pf-legft'), stload: v('#pf-stload').toUpperCase(), fuelPrice: +v('#pf-fuelprice') || 0, local: !!($('#pf-local') && $('#pf-local').checked), ldur: +v('#pf-ldur') || 60, lrad: +v('#pf-lrad') || 15, rt: !!($('#pf-rt') && $('#pf-rt').checked), lic: v('#pf-lic'), med: v('#pf-med'), share: +v('#pf-share') || 1, wxres: +v('#pf-wxres') || 0,
     };
     store.set('form', { ...f, time: undefined, lic: undefined, med: undefined });
     if (f.pil) { const all = store.get('pilots', {}); all[f.pil] = { ...(all[f.pil] || {}), m: f.m1, lic: f.lic, med: f.med, nuit: $('#pf-nuit').checked }; store.set('pilots', all); }
@@ -919,6 +924,7 @@
       if (makePdf) { prog.textContent = 'Chargement des outils PDF / Excel…'; await needLibs(); }
       const f = readForm();
       lastForm = f;
+      if (f.local && f.dep && A.aptByIcao[f.dep]) { prog.textContent = 'Vol local : météo, espaces et carburant…'; out.innerHTML = await localPrep(f); prog.textContent = ''; return; }
       if (!f.dep || !f.arr) throw new Error('Indique un terrain de départ et un terrain d\'arrivée.');
       const trip = await buildTrip(f, (t) => { prog.textContent = t; });
       prog.textContent = 'Créneaux de départ…';
@@ -963,6 +969,11 @@
     on('pf-gpx', () => exportGpx(b));
     on('pf-fpl', () => exportFpl(b));
     on('pf-update', () => run(false));
+    on('pf-knee', () => kneeboard(b).catch((e) => { console.error(e); $('#pf-prog').textContent = 'Fiche de genou : ' + e.message; }));
+    document.querySelectorAll('#pf-out [data-note]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { const id = el.dataset.note, ta = document.getElementById('pf-note-' + id + sfx); const all = store.get('adnotes', {}); if (ta.value.trim()) all[id] = ta.value.trim().slice(0, 600); else delete all[id]; store.set('adnotes', all); el.textContent = 'Enregistré ✔'; }));
+    document.querySelectorAll('#pf-out [data-propose]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { const id = el.dataset.propose, cfg = window.AWW_CONFIG || {}; if (!cfg.contact) return;
+      const tarif = prompt(`Taxe d'atterrissage à ${id} (ex. « 12 € TTC, gratuit FFA ») :`, ''); if (tarif === null) return; const info = prompt('Autre info utile (accueil, carburant, taxi, restaurant…) :', '') || '';
+      location.href = `mailto:${cfg.contact}?subject=${encodeURIComponent(`[Aéro Météo Ouest] Escale ${id}`)}&body=${encodeURIComponent(`Terrain : ${id}\nTaxe : ${tarif}\nInfo : ${info}\nRelevé : ${new Date().toISOString().slice(0, 10)}`)}`; }));
     ['pf-lmk1', 'pf-lmk2'].forEach((id) => on(id, (e) => { $('#pf-wps').value = e.target.dataset.wps; $('#pf-exit').value = 'none'; run(false); }));
     on('pf-routes', compareRoutes);
     document.querySelectorAll('#pf-out [data-setalt]:not([data-b])').forEach((el) => (el.dataset.b = 1) && el.addEventListener('click', () => { if (b.stage && b.stage < b.nStages) { const st = ($('#pf-stalts').value || '').split(/\s+/); st[b.stage - 1] = el.dataset.setalt; $('#pf-stalts').value = st.join(' ').trim(); } else $('#pf-alt').value = el.dataset.setalt; run(false); }));
@@ -2102,7 +2113,7 @@
       <p class="meta">Consignes particulières et circuit exact : <a href="data/vac/${esc(b.f.arr)}.pdf" target="_blank" rel="noopener" style="color:#9cf">VAC ${esc(b.f.arr)}</a>.</p></details>`;
   }
   // ---------- fiche escale (26) : horaires du jour, PPR, carburant, paiement, taxe, contact, vie pratique
-  function escaleCardHtml(b) {
+  function escaleCardHtml(b, sfx = '') {
     const id = b.f.arr, v = b.arrInfo.v || {}, e = (A.escaleOf && A.escaleOf(id)) || {}, fee = A.feeFor ? A.feeFor(id) : null, oh = outsideHours(v, b.eta), h = atsHours(v);
     const pr = e.pratique || {}, c = (e.contacts || []).find((x) => x.m === e.mail_escale) || {};
     const rows = [
@@ -2114,7 +2125,9 @@
       ['Situation', [pr.situation, pr.transport, pr.restaurant, pr.hotel].filter(Boolean).join(' · ')],
     ].filter((r) => r[1]);
     return `<details><summary><b>🏁 Fiche escale ${esc(id)}</b> ${esc((A.aptByIcao[id] || {}).name || '')}</summary><table class="legs">${rows.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left">${esc(r[1])}</td></tr>`).join('')}</table>
-      <p class="meta">Relevé automatique de la VAC et des fiches du site : vérifier sur la VAC et auprès du terrain.</p></details>`;
+      <p class="meta">Relevé automatique de la VAC et des fiches du site : vérifier sur la VAC et auprès du terrain.
+        ${(window.AWW_CONFIG || {}).contact ? `<button class="btn" data-propose="${esc(id)}">📤 Proposer la taxe / une info au club</button> (publiée pour tous les pilotes après vérification)` : ''}</p>
+      <label class="meta">📝 Mes notes sur ${esc(id)} (gardées sur cet appareil, rappelées à chaque préparation)<textarea id="pf-note-${esc(id)}${sfx}" rows="2" style="width:100%">${esc(adNote(id))}</textarea></label><button class="btn" data-note="${esc(id)}">Enregistrer la note</button></details>`;
   }
   // ---------- meilleur dégagement (28) : terrains à moins de 40 NM de l'arrivée, ouverts, sans fermeture NOTAM, TAF correct, piste assez longue, carburant
   function bestAlternates(b) {
@@ -2194,6 +2207,86 @@
     return `<details><summary><b>📻 Fréquences dans l'ordre du vol</b> (${F.length})</summary><table class="legs"><tr><th>Heure</th><th>NM</th><th>Où</th><th>Fréquence</th><th>Quoi</th></tr>
       ${F.map((x) => `<tr><td>${utc(x.at)}</td><td>${x.nm.toFixed(0)}</td><td style="text-align:left">${esc(x.where)}</td><td style="text-align:left">${esc(x.freq)}</td><td style="text-align:left">${esc(x.what)}</td></tr>`).join('')}</table>
       <p class="meta">Ordre calculé sur la route et l'altitude prévues. Fréquences des espaces : données OpenAir FFVP et VAC, à vérifier sur la carte.</p></details>`;
+  }
+  // ---------- terrains à éviter pour l'avion (46) : piste trop courte (distance du manuel à la masse max, ISA + 15 °C, avec marge), dès la saisie
+  function adCheck(id, T) {
+    const v = vacAt(id), a = A.aptByIcao[id]; if (!v || !a) return null;
+    const len = rwyLength(v), grass = isGrass(v), elev = v.alt != null ? +v.alt : +a.elev || 0, pc = { elev, temp: 30, grass, head: 0, mass: T.mtow };
+    const to = T.takeoff && T.takeoff.table ? perfDist(T.takeoff.table, pc) : null, ld = T.landing && T.landing.table ? perfDist(T.landing.table, pc) : null;
+    const need = Math.max(to ? to * 1.33 : 0, ld ? ld * 1.43 : 0), why = [];
+    if (len && need && len < need) why.push(`piste ${len} m${grass ? ' (herbe)' : ''} : il faut ~${Math.round(need / 10) * 10} m à la masse max par 30 °C avec la marge recommandée`);
+    else if (len && need && len < need * 1.15) why.push(`piste ${len} m${grass ? ' en herbe (herbe mouillée : +10 à 15 %)' : ''}, juste à la masse max par forte chaleur`);
+    if (/interdit[^.]{0,60}(?:avions?|ACFT|aéronefs?) (?:non |de plus|>)|réservé aux (?:hélicoptères|ULM|planeurs)/i.test(v.consignes || '')) why.push('restrictions d\'usage dans la VAC (à lire)');
+    if (v.prive || v.restreint) why.push(v.prive ? 'usage privé : autorisation nécessaire' : 'usage restreint : autorisation nécessaire');
+    return why.length ? { id, why } : null;
+  }
+  function adCheckHtml() {
+    const box = $('#pf-adcheck'); if (!box) return;
+    const ac = FLEET.find((x) => x.reg === $('#pf-reg').value) || FLEET[0], T = TYPES[ac.type];
+    const ids = [...new Set([$('#pf-dep').value, $('#pf-arr').value, $('#pf-alt').value, ...$('#pf-stages').value.split(/[\s,;]+/), ...$('#pf-wps').value.split(/[\s,;]+/)].map((x) => (x || '').trim().toUpperCase()).filter((x) => /^LF[A-Z]{2}$/.test(x)))];
+    const bad = ids.map((id) => adCheck(id, T)).filter(Boolean);
+    box.innerHTML = bad.length ? bad.map((x) => `<div class="warn" style="margin:2px 0">⚠️ ${esc(x.id)} pour ${esc(ac.reg)} : ${esc(x.why.join(' ; '))}</div>`).join('') : '';
+  }
+  // ---------- notes personnelles par terrain (47), gardées sur l'appareil
+  const adNote = (id) => (store.get('adnotes', {})[id] || '');
+  function notesHtml(b) {
+    const ids = [...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].filter((id) => adNote(id));
+    return ids.length ? `<div class="okk">📝 <b>Tes notes</b> : ${ids.map((id) => `<b>${esc(id)}</b> ${esc(adNote(id))}`).join(' · ')}</div>` : '';
+  }
+  // ---------- vol local (45) : pas de route, une zone de travail autour du terrain, durée, carburant, espaces, météo
+  async function localPrep(f) {
+    await loadAip();
+    const a = A.aptByIcao[f.dep], c = [+a.la, +a.lo], R = f.lrad || 15, dur = f.ldur || 60, t0 = new Date(f.time), t1 = new Date(t0.getTime() + dur * 6e4);
+    const fuelNeed = Math.round(dur * f.ff / 60) + TAXI_L, res = Math.round(f.res / 60 * f.ff), loaded = f.fuel + f.aux, mb = massBalance(f);
+    const near = (poly) => poly.some((p) => distNm(c, p) <= R) || inPoly(c, poly);
+    const asp = ((ASP && ASP.data) || []).filter((s) => s.kind !== 'SIV' && near(s.poly) && (parseAlt(s.lower) ?? 0) < 6000).sort((x, y) => (parseAlt(x.lower) ?? 0) - (parseAlt(y.lower) ?? 0));
+    const zs = ((ZONES && ZONES.data) || []).filter((z) => near(z.poly) && (parseAlt(z.lower) ?? 0) < 6000).map((z) => ({ z, act: /^[RD]$/.test(z.type) && !z.rtba ? zoneStatus(z, t0.getTime(), t1.getTime(), (A.NOTAM || {}).fir || []) : null }));
+    const para = ((SPECIAL || {}).act || []).filter((x) => distNm(c, [x.la, x.lo]) <= R);
+    let wx = [];
+    try {
+      const d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${c[0].toFixed(3)}&longitude=${c[1].toFixed(3)}&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_180m,wind_direction_180m,cape&wind_speed_unit=kn&timezone=UTC&start_date=${t0.toISOString().slice(0, 10)}&end_date=${t1.toISOString().slice(0, 10)}`);
+      for (let t = t0.getTime(); t <= t1.getTime(); t += 3600e3) { const r = wxAt({ h: d.hourly }, t); if (r) wx.push([t, r]); }
+    } catch (e) { console.warn('météo vol local', e); }
+    const ad = vacAt(f.dep) || {}, notes = adNote(f.dep);
+    const vis = (x) => `${x.lower} – ${x.upper}`;
+    return `<h4>🛩️ Vol local au départ de ${esc(f.dep)} ${esc(a.name)} — ${hhmm(dur)}, zone de ${R} NM</h4>
+      ${notes ? `<div class="okk">📝 ${esc(notes)}</div>` : ''}
+      <p class="meta">⛽ Carburant : vol ${fuelNeed} L (roulage compris) + réserve finale ${res} L = <b>${fuelNeed + res} L</b> ; à bord ${loaded} L, marge <b style="color:${loaded - fuelNeed - res < 0 ? '#ff6b6b' : 'inherit'}">${loaded - fuelNeed - res} L</b>, autonomie ${hhmm(Math.floor((loaded - TAXI_L) / f.ff * 60))}.
+        ⚖️ Masse ${Math.round(mb.mass)} / ${f.T.mtow} kg${mb.cg != null ? `, centrage ${mb.cg.toFixed(3)} m ${mb.inEnv(mb.cg, mb.mass) ? '✅' : '❌ hors limites'}` : ''}.</p>
+      ${wx.length ? `<p class="meta">🌤️ Météo heure par heure : ${wx.map(([t, r]) => `<span style="color:${WXCOL[r.lv]}">●</span> ${hLoc(t)} ${r.why.length ? esc(r.why.join(', ')) : 'VFR favorable'} (vent ${r3(r.wd)}/${Math.round(r.ws)}${r.gust > r.ws + 5 ? 'G' + Math.round(r.gust) : ''})`).join(' · ')}</p>` : ''}
+      <p class="meta">📻 Fréquences du terrain : ${esc((ad.freqs || []).join(' · ') || 'A/A 123.500')} · tour de piste ${esc((ad.tdp || [])[0] || 'voir VAC')}.</p>
+      <table class="legs"><tr><th>Espaces et zones à moins de ${R} NM (sous 6000 ft)</th><th>Limites</th><th>Fréquence / état</th></tr>
+      ${asp.map((s) => `<tr><td style="text-align:left">${esc(s.name)} (${esc(s.cls || s.kind)})</td><td>${esc(vis(s))}</td><td>${esc(s.freq || '')}</td></tr>`).join('')}
+      ${zs.map((x) => `<tr${x.z.type === 'P' || (x.act && x.act.st === 'active') ? ' style="color:#ff6b6b"' : ''}><td style="text-align:left">${esc(x.z.id)} ${esc(x.z.name)}</td><td>${esc(vis(x.z))}</td><td>${x.z.type === 'P' ? 'interdite' : x.act ? esc(x.act.st + ' : ' + x.act.why) : x.z.rtba ? 'AZBA : voir créneaux' : ''}</td></tr>`).join('')}
+      ${para.map((x) => `<tr><td style="text-align:left">${esc(x.kind)} ${esc(x.name)}</td><td>jusqu'à ${esc(x.upper)}</td><td>${esc(x.hours || 'voir NOTAM')}</td></tr>`).join('')}</table>
+      <p class="meta">Zone de travail : choisir un secteur hors espaces contrôlés et zones actives, au-dessus de 1000 ft sol (500 ft en campagne), en gardant le terrain à portée de plané. NOTAM et AZBA du jour : SOFIA.</p>`;
+  }
+  // ---------- fiche de genou A5 (49) : l'essentiel sur une page, avec cases pour les heures réelles
+  async function kneeboard(b) {
+    await needLibs();
+    const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a5', orientation: 'portrait' }), W = 148, M = 6;
+    const ap = arrivalPlan(b), F = freqTimeline(b);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text(latin(`${b.ids[0]} -> ${b.ids[b.ids.length - 1]}  ${b.f.ac.reg}  ${b.depT.toISOString().slice(0, 10)}`), M, 9);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+    doc.text(latin(`Départ ${utc(b.depT)} · arrivée ${utc(b.eta)} · ${b.totDist.toFixed(0)} NM · ${hhmm(b.totMin)} · carburant à bord ${b.loaded} L (requis ${b.reqFuel} L) · réserve ${b.resFuel} L`), M, 13.5);
+    doc.text('QNH : ______   ATIS : ______   Décollage réel : ______   Carbu départ : ______', M, 18);
+    let fuel = b.loaded;
+    const rows = b.legs.map((lg) => { fuel -= lg.fuel; return [`${lg.from} > ${lg.to}`, r3(lg.hm), String(lg.ft || b.f.ft), lg.safe ? String(lg.safe.alt) : '', lg.dist.toFixed(0), `${lg.min}'`, utc(lg.eto).replace('Z', ''), '', `${Math.round(fuel)}`]; });
+    doc.autoTable({ startY: 21, margin: { left: M, right: M }, head: [['Branche', 'Cm', 'Alt', 'Sécu', 'NM', 'Tps', 'HE', 'HR', 'Carbu']], body: rows.map((r) => r.map(latin)),
+      styles: { fontSize: 8, cellPadding: 1.1, lineWidth: .2, lineColor: 120 }, headStyles: { fillColor: [0, 90, 140] }, columnStyles: { 0: { cellWidth: 38 }, 7: { cellWidth: 14 } }, theme: 'grid' });
+    let y = doc.lastAutoTable.finalY + 4;
+    doc.setFont('helvetica', 'bold'); doc.text('Fréquences', M, y); doc.setFont('helvetica', 'normal'); y += 3.5;
+    F.forEach((x) => { const t = doc.splitTextToSize(latin(`${utc(x.at)} ${x.nm.toFixed(0)} NM  ${x.where} : ${x.freq}`), W - 2 * M); doc.text(t, M, y); y += 3.2 * t.length; });
+    y += 2; doc.setFont('helvetica', 'bold'); doc.text(latin(`Arrivée ${b.f.arr}`), M, y); doc.setFont('helvetica', 'normal'); y += 3.5;
+    const arrTxt = doc.splitTextToSize(latin(`Descente vers ${ap.todAlong.toFixed(0)} NM (${utc(ap.tod.at)}) à ${ap.vs} ft/min · ${ap.entry ? 'entrée ' + ap.entry + ' · ' : ''}TDP ${ap.tdpTxt || ap.tdpFt + ' ft'} · ${ap.side} · piste probable ${ap.rw ? ap.rw.best.qfu : '?'} · dégagement ${b.f.alt || '-'}`), W - 2 * M);
+    doc.text(arrTxt, M, y); y += 3.2 * arrTxt.length + 2;
+    const lm = landmarksOf(b).filter((x) => x.list.length);
+    if (lm.length && y < 185) { doc.setFont('helvetica', 'bold'); doc.text('Repères', M, y); doc.setFont('helvetica', 'normal'); y += 3.5;
+      lm.forEach((x) => { const t = doc.splitTextToSize(latin(`${x.lg.from}>${x.lg.to} : ${x.list.slice(0, 5).map((c) => `${c.min}' ${c.n}`).join(', ')}`), W - 2 * M); if (y < 195) { doc.text(t, M, y); y += 3.2 * t.length; } }); }
+    doc.setFontSize(6.5); doc.setTextColor(100); doc.text(latin('Aide à la préparation : vérifier sur la carte, les VAC et SOFIA.'), M, 205); doc.setTextColor(0);
+    const blob = doc.output('blob'), name = `fiche_genou_${b.ids[0]}-${b.ids[b.ids.length - 1]}_${b.depT.toISOString().slice(0, 10)}.pdf`;
+    if (window.AWW_saveBriefing) await window.AWW_saveBriefing(name, blob); else download(blob, name);
   }
   // ---------- verdict global (39) : rouge = au moins une alerte bloquante, orange = points à surveiller, vert sinon
   function verdict(b) {
@@ -3042,7 +3135,8 @@
     const nt = b.night;
     return `
       ${changesHtml(b)}
-      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">🗺️ Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
+      ${notesHtml(b)}
+      <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-knee${sfx}">🗒️ Fiche de genou A5</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">🗺️ Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
       <table class="legs"><tr><th>Branche</th><th>Alt.</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
@@ -3060,7 +3154,7 @@
       ${perfFuelHtml(b)}
       ${altHtml(b, sfx)}
       ${arrivalHtml(b)}
-      ${escaleCardHtml(b)}
+      ${escaleCardHtml(b, sfx)}
       ${fplHtml(b, sfx)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
@@ -3918,7 +4012,7 @@
 
   // ================================================================== historique des préparations (12)
   const HIST_CACHE = 'aww-history';
-  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt', 'stload', 'fuelPrice'];
+  const FORM_KEYS = ['dep', 'arr', 'alt', 'wps', 'time', 'reg', 'regime', 'ft', 'res', 'm1', 'm2', 'm3', 'm4', 'fuel', 'aux', 'cor', 'avoid', 'pil', 'immat', 'empty', 'exit', 'entry', 'stages', 'turn', 'refuel', 'stalts', 'share', 'wxres', 'legft', 'rt', 'stload', 'fuelPrice', 'local', 'ldur', 'lrad'];
   function histStart(id, trip) {
     const b = trip[0], f = lastForm || b.f;
     const list = store.get('hist', []);

@@ -5,7 +5,7 @@ on:
     branches: [main]
   schedule:
     - cron: "4,19,34,49 * * * *"
-    - cron: "7 3 * * *"            # une fois par jour : contrôle keepalive   # toutes les 15 min, hors des minutes 00/30 très chargées chez GitHub (qui peut sauter des créneaux)
+    - cron: "7 3 * * *"            # une fois par jour : collecte complète (VAC, zones, OSM, webcams) et contrôle keepalive
   workflow_dispatch:
 
 permissions:
@@ -39,7 +39,22 @@ jobs:
         id: cyc
         run: echo "c=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import collect; print(collect.current_cycle()[1])' 2>/dev/null || echo inconnu)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v6
+      # collecte rapide (toutes les 15 min) : lit le cache des VAC sans jamais l'enregistrer (un dossier incomplet bloquerait la clé)
+      - name: Type de collecte
+        id: mode
+        run: echo "fast=${{ github.event.schedule == '4,19,34,49 * * * *' }}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.mode.outputs.fast == 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: data/vac
+          key: vac-pdf-${{ steps.cyc.outputs.c }}-${{ hashFiles('data/sources.js') }}
+          restore-keys: |
+            vac-pdf-${{ steps.cyc.outputs.c }}-
+            vac-pdf-
+
+      - if: steps.mode.outputs.fast != 'true'
+        uses: actions/cache@v6
         with:
           path: data/vac
           # la liste des terrains fait partie de la clé : quand elle change, le cache est réenregistré avec les nouvelles VAC
@@ -48,12 +63,12 @@ jobs:
             vac-pdf-${{ steps.cyc.outputs.c }}-
             vac-pdf-
 
-      - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP, zones, VAC (SIA) et contrôle des webcams
+      - name: Collecte METAR/TAF, NOTAM (SOFIA), SUP AIP ; collecte complète la nuit et au push (zones, VAC, OSM, webcams)
         timeout-minutes: 30   # la collecte tourne toutes les 15 min : au-delà, la publication suivante prend le relais
         env:
           FALLBACK_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 -u scripts/collect.py   # -u : journal au fil de l'eau (durée de chaque partie visible)
+        run: python3 -u scripts/collect.py ${{ steps.mode.outputs.fast == 'true' && 'fast' || '' }}   # -u : journal au fil de l'eau
 
       - uses: actions/configure-pages@v6
 

@@ -1178,6 +1178,27 @@
   console.assert((() => { const P = (id) => ({ id, p: [0, 0] }), trip = [{ stage: 1, f: { dep: 'A', arr: 'B' }, depT: new Date(0), eta: new Date(6e5), dayWx: { pts: [P('A'), P('B'), ...[1, 2, 3, 4, 5].map((k) => P(`R1-${k / 6}`))] } }];
     const r = slidePts(trip); return r.length === 7 && r[0].off === 0 && r[6].off === 6e5 && r[3].off === 3e5; })(), 'slidePts');
   let tsLayer = null;
+  // grille autour de la route (≤ 56 points) : pluie, orage, vent au niveau de pression le plus proche de la croisière, heure par heure
+  const gridLevel = (ft) => (ft <= 3500 ? 925 : ft <= 7000 ? 850 : 700);
+  console.assert(gridLevel(2500) === 925 && gridLevel(5500) === 850 && gridLevel(9500) === 700, 'gridLevel');
+  function gridDims(dLa, dLo, max = 56) {   // cellules à peu près carrées (en NM), au plus max points
+    const r = dLo * Math.cos(rad(46)) / Math.max(.01, dLa); let ny = Math.max(2, Math.round(Math.sqrt(max / r))), nx = Math.max(2, Math.floor(max / ny));
+    while (nx * ny > max) nx--; return [nx, ny];
+  }
+  console.assert((() => { const [nx, ny] = gridDims(1, 3); return nx * ny <= 56 && nx > ny; })(), 'gridDims');
+  async function gridWx(trip) {
+    const P = trip.flatMap((b) => b.pts), la = P.map((p) => p[0]), lo = P.map((p) => p[1]);
+    const la0 = Math.min(...la) - .4, la1 = Math.max(...la) + .4, lo0 = Math.min(...lo) - .5, lo1 = Math.max(...lo) + .5, [nx, ny] = gridDims(la1 - la0, lo1 - lo0);
+    const pts = []; for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) pts.push([la0 + (j + .5) * (la1 - la0) / ny, lo0 + (i + .5) * (lo1 - lo0) / nx]);
+    const L0 = gridLevel(trip[0].f.ft), d0 = trip[0].depT.toISOString().slice(0, 10), d1 = trip[trip.length - 1].eta.toISOString().slice(0, 10);
+    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map((p) => p[0].toFixed(2)).join(',')}&longitude=${pts.map((p) => p[1].toFixed(2)).join(',')}`
+      + `&hourly=precipitation,weather_code,cape,wind_speed_${L0}hPa,wind_direction_${L0}hPa&wind_speed_unit=kn&timezone=UTC&start_date=${d0}&end_date=${d1}`);
+    if (!Array.isArray(d)) d = [d];
+    return { pts: pts.map((p, k) => ({ p, h: d[k].hourly })), dLa: (la1 - la0) / ny, dLo: (lo1 - lo0) / nx, L0 };
+  }
+  // couleur de la pluie (mm/h) et des orages, comme un radar
+  const rainCol = (rr, storm) => (storm ? '#ff2d55' : rr >= 4 ? '#7b2ff7' : rr >= 1.5 ? '#2f6bff' : rr >= .4 ? '#3aa0ff' : rr >= .1 ? '#8fd3ff' : null);
+  console.assert(rainCol(0, false) === null && rainCol(.2, false) === '#8fd3ff' && rainCol(5, false) === '#7b2ff7' && rainCol(0, true) === '#ff2d55', 'rainCol');
   function timeSlider(trip) {
     document.getElementById('tslider')?.remove(); if (tsLayer) { map.removeLayer(tsLayer); tsLayer = null; }
     const P = trip ? slidePts(trip) : []; if (P.length < 2) return;
@@ -1186,7 +1207,7 @@
     const el = document.createElement('div'); el.id = 'tslider'; el.className = 'glass';
     el.innerHTML = `<div class="ts-row"><b>Départ simulé</b><output id="ts-out"></output><button type="button" class="btn" id="ts-use" title="Recalculer la préparation avec cette heure">Utiliser</button><button type="button" class="icon-btn" id="ts-x" title="Fermer" aria-label="Fermer le curseur horaire">✕</button></div>
       <input type="range" id="ts-r" min="${lo}" max="${hi}" step="15" value="${Math.min(hi, Math.max(lo, cur))}" aria-label="Heure de départ simulée">
-      <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p>`;
+      <div class="ts-bar" id="ts-bar" aria-hidden="true"></div><p class="ts-why" id="ts-why"></p><p class="ts-why" id="ts-grid">Chargement de la pluie et du vent…</p>`;
     document.body.appendChild(el);
     tsLayer = L.layerGroup().addTo(map);
     const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -1194,8 +1215,21 @@
     // bande du haut : avis le plus défavorable de la route pour chaque départ possible
     $('#ts-bar').innerHTML = Array.from({ length: (hi - lo) / 15 + 1 }, (_, i) => { const r = at(lo + i * 15).map((x) => x.w).filter(Boolean); const lv = r.length ? Math.max(...r.map((w) => w.lv)) : null;
       return `<i style="background:${lv == null ? 'transparent' : WXCOL[lv]}"></i>`; }).join('');
+    let G = null, gLayer = L.layerGroup().addTo(tsLayer);
+    const drawGrid = (m) => {   // pluie et vent à mi-parcours de l'heure choisie
+      gLayer.clearLayers(); if (!G) return;
+      const t = roundHour(new Date(day.getTime() + m * 6e4 + dur / 2));
+      G.pts.forEach((g) => { const k = g.h.time.indexOf(t); if (k < 0) return;
+        const rr = g.h.precipitation[k] || 0, wc = g.h.weather_code[k] || 0, storm = wc >= 95 || ((g.h.cape[k] || 0) >= 800 && rr >= 1), col = rainCol(rr, storm);
+        if (col) L.rectangle([[g.p[0] - G.dLa / 2, g.p[1] - G.dLo / 2], [g.p[0] + G.dLa / 2, g.p[1] + G.dLo / 2]], { stroke: false, fillColor: col, fillOpacity: .32, interactive: false }).addTo(gLayer);
+        const ws = g.h[`wind_speed_${G.L0}hPa`][k], wd = g.h[`wind_direction_${G.L0}hPa`][k]; if (ws == null || wd == null) return;
+        L.marker(g.p, { interactive: false, icon: L.divIcon({ className: 'ts-wind', iconSize: [30, 30], iconAnchor: [15, 15],
+          html: `<svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(${(wd + 180) % 360}deg)"><path d="M15 25V7M10 12l5-5 5 5" fill="none" stroke="#0b2a44" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 25V7M10 12l5-5 5 5" fill="none" stroke="${ws >= 30 ? '#ff9500' : '#fff'}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${Math.round(ws)}</b>` }) }).addTo(gLayer); });
+      $('#ts-grid').textContent = `Carte : pluie / orages et vent à ~${{ 925: '2 500', 850: '5 000', 700: '10 000' }[G.L0]} ft (${G.L0} hPa) vers ${hm(Math.round((day.getTime() + m * 6e4 + dur / 2 - day) / 6e4))}, milieu du vol.`;
+    };
+    gridWx(trip).then((g) => { G = g; drawGrid(+$('#ts-r').value); }).catch((e) => { $('#ts-grid').textContent = 'Pluie et vent sur la carte indisponibles (' + e.message + ').'; });
     const draw = () => {
-      const m = +$('#ts-r').value, R = at(m); tsLayer.clearLayers();
+      const m = +$('#ts-r').value, R = at(m); tsLayer.eachLayer((l) => { if (l !== gLayer) tsLayer.removeLayer(l); }); drawGrid(m);
       for (let i = 1; i < R.length; i++) { const lv = Math.max(R[i - 1].w ? R[i - 1].w.lv : 0, R[i].w ? R[i].w.lv : 0);
         L.polyline([R[i - 1].pt.p, R[i].pt.p], { color: WXCOL[lv], weight: 14, opacity: .45, interactive: false }).addTo(tsLayer); }
       R.forEach((x) => { if (!x.w) return; const w = x.w, d = w.ws >= 3 ? w.wd : null, len = Math.min(12, 4 + w.ws / 2.5);
@@ -1207,8 +1241,6 @@
       $('#ts-why').textContent = why.slice(0, 4).join(', ') || 'rien de signalé sur la route';
     };
     $('#ts-r').addEventListener('input', draw); draw();
-    const phone = innerWidth <= 700;   // route visible entre le panneau, la barre et le curseur
-    map.fitBounds(L.latLngBounds(P.map((x) => x.pt.p)), { paddingTopLeft: phone ? [20, 170] : [370, 90], paddingBottomRight: phone ? [20, 200] : [40, 170], maxZoom: 9 });
     $('#ts-x').addEventListener('click', () => timeSlider(null));
     $('#ts-use').addEventListener('click', () => { const t = new Date(day.getTime() + +$('#ts-r').value * 6e4), i = $('#pf-time'); if (!i) return; i.value = localInput(t); timeSlider(null); run(false); });
   }
@@ -1218,7 +1250,8 @@
     trip.forEach((b) => drawRoute(b, routeLayer, trip.length === 1 || b.stage === 1));
     trip.forEach((b) => activeZones(b).forEach((z) => L.polygon(z.poly, { color: z.col, weight: 2, fillColor: z.col, fillOpacity: .22, dashArray: z.sure ? null : '6 4' })
       .bindTooltip(`${esc(z.name)}<br>${esc(z.lim)}<br>${esc(z.why)}`, { sticky: true }).addTo(routeLayer)));
-    map.fitBounds(L.latLngBounds(trip.flatMap((b) => b.pts)).pad(0.25), { paddingTopLeft: [320, 20], paddingBottomRight: [480, 20] });
+    const phone = innerWidth <= 700;   // route visible entre le panneau (gauche), la fiche (droite), la barre (haut) et le curseur horaire (bas)
+    map.fitBounds(L.latLngBounds(trip.flatMap((b) => b.pts)).pad(0.1), { paddingTopLeft: phone ? [20, 170] : [360, 80], paddingBottomRight: phone ? [20, 220] : [480, 170], maxZoom: 10 });
   }
 
   // ---------------------------------------------------------------- mise à jour J-1 / J : comparaison avec le briefing précédent (3)
@@ -2321,6 +2354,7 @@
       if (t.len && t.tod && t.tod > t.len * 0.85) al.push(`${t.id} : distance de décollage estimée ${t.tod} m pour une piste de ${t.len} m — vérifier les performances.`);
     }
     for (const t of [b.arrInfo, b.altInfo].filter(Boolean)) if (t.len && t.ldg && t.ldg > t.len * 0.85) al.push(`${t.id} : distance d'atterrissage ${t.ldg} m pour une piste de ${t.len} m — vérifier les performances.`);
+    atsAlerts(b).forEach((x) => al.push(x));
     b.rtba.filter((r) => r.conflict && r.below && r.crossed).forEach((r) => al.push(`AZBA : ${r.z.id} ${r.z.name} active pendant le vol (${r.slots.join(', ')} UTC).`));
     if (b.rtba.length && !b.azbaKnown) al.push('Créneaux AZBA non publiés pour cette date : consulter l\'AZBA la veille / le jour même.');
     b.zones.filter((x) => x.crossed && x.below && x.z.type === 'P').forEach((x) => al.push(`Zone interdite encore traversée : ${x.z.id} ${x.z.name} (départ/arrivée à l'intérieur ?).`));
@@ -2477,6 +2511,27 @@
       const r = /^FL/.test(a.upper) ? 2.5 : 1.5, poly = []; for (let k = 0; k < 360; k += 30) poly.push(destPt([a.la, a.lo], k, r));
       out.push({ poly, col: '#8e24aa', name: `${a.kind} ${a.name}`, lim: `jusqu'à ${a.upper}`, why: `${a.hours || 'horaires : voir AIP / NOTAM'} — cercle indicatif autour du site (ENR 5.5)`, sure: false });
     }
+    return out;
+  }
+  // ---------- tours et SIV à l'heure de passage : CTR dont la tour est fermée ; SIV assuré seulement hors des horaires ATS d'un aérodrome (remarque ENR 2.2)
+  const nz = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+  const sivOnlyOutside = (rmk) => { const m = /(?:hors|en dehors des) (?:HOR|horaires) ATS (?:de l'a[ée]rodrome de |d'|de )?([A-ZÀ-Ü][A-ZÀ-Ü' -]{2,30}?)(?=\s*[.(]|\s+(?:Only|Outside)\b|$)/i.exec(rmk || ''); return m ? m[1].trim() : null; };
+  console.assert(sivOnlyOutside('Uniquement Hors HOR ATS LA ROCHELLE. Only outside LA ROCHELLE ATS SKED.') === 'LA ROCHELLE' && sivOnlyOutside("(1) H24 (1) En dehors des horaires ATS de l'aérodrome de BIARRITZ (1) Outside") === 'BIARRITZ' && sivOnlyOutside('H24 Le contact radio n\'est pas garanti') === null, 'sivOnlyOutside');
+  function atsAlerts(b) {
+    const out = [], seen = new Set(), smp = routeSamples(b, 2);
+    b.legs.forEach((lg) => lg.airspaces.forEach((s) => {
+      if (!s.poly || seen.has(s.name) || !/^(CTR|SIV)$/.test(s.kind)) return; seen.add(s.name);
+      const e = smp.find((x) => inPoly(x.p, s.poly)); if (!e) return;
+      const at = routePosAt(b, e.along).at;
+      if (s.kind === 'CTR') {
+        const ap = A.APTS.find((a) => /^LF/.test(a.icao) && vacAt(a.icao) && /TWR/.test((vacAt(a.icao).freqs || []).join(' ')) && inPoly([+a.la, +a.lo], s.poly));
+        const oh = ap && outsideHours(vacAt(ap.icao), at);
+        if (oh) out.push(`${s.name} : tour de ${ap.icao} fermée à l'heure de passage (${utc(at)}, horaires ${oh.win}) — hors horaires la CTR n'est en général plus contrôlée (voir VAC / AIP) : auto-information ou SIV.`);
+      } else {
+        const n = sivOnlyOutside(s.rmk), ap = n && A.APTS.find((a) => /^LF/.test(a.icao) && vacAt(a.icao) && nz(a.name).includes(nz(n)));
+        if (ap && atsHours(vacAt(ap.icao)) && !outsideHours(vacAt(ap.icao), at)) out.push(`${s.name} (${s.freq}) : assuré seulement hors des horaires ATS de ${ap.icao}, ouvert à ${utc(at)} — contacter les services de ${ap.icao} (fréquences sur la VAC) plutôt que le SIV.`);
+      }
+    }));
     return out;
   }
   // ---------- fréquences dans l'ordre du vol (43)

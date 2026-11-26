@@ -839,12 +839,15 @@ def collect_siv(folder, cycle):
         after = tail[dash + lo.end():] if lo else tail
         freqs = re.findall(r'\d{3}\.\d{2,3}', after[:160])
         call = re.search(r'([A-ZÀ-Ü][A-ZÀ-Ü\' -]+ INFO)', after[:120])
+        # remarque de l'AIP (horaires : H24, « en dehors des horaires ATS de l'aérodrome de … », contact radio non garanti…)
+        rmk = re.split(r' SIV [A-Z]', after, maxsplit=1)[0]
+        rmk = re.sub(r'^[^A-Za-zÀ-ü]*(?:[A-ZÀ-Ü\' -]+ INFO[^0-9]*)?(?:\d{3}\.\d{2,3}[ /]*)*', '', rmk)[:300].strip()
         la = sum(p[0] for p in poly) / len(poly)
         lo = sum(p[1] for p in poly) / len(poly)
         if not (41.0 < la < 51.6 and -6.5 < lo < 10.0) or not freqs:
             continue
         out.append({'kind': 'SIV', 'cls': 'G/E', 'name': name, 'upper': upper[:30], 'lower': lower[:30],
-                    'freq': ' / '.join(dict.fromkeys(freqs[:3])), 'call': call.group(1).strip() if call else name.replace('SIV', '').split(' partie')[0].strip() + ' INFO',
+                    'freq': ' / '.join(dict.fromkeys(freqs[:3])), 'call': call.group(1).strip() if call else name.replace('SIV', '').split(' partie')[0].strip() + ' INFO', 'rmk': rmk,
                     'poly': [[round(p[0], 4), round(p[1], 4)] for p in poly]})
     # dédoublonnage par nom
     uniq = {}
@@ -1470,8 +1473,27 @@ def write_status():
     print('État :', {k: v['state'] for k, v in files.items()})
 
 
+# collecte lente (VAC, zones, OSM, webcams) : une fois par nuit et à chaque modification du code ;
+# la collecte rapide (toutes les 15 min) republie ses fichiers tels quels, sans toucher à leur date de dernier succès
+SLOW_FILES = ['vac.json', 'zones.json', 'airspaces.json', 'special.json', 'cams_status.json', 'osm_near.json']
+FAST = ['metar', 'notam', 'supaip', 'fees', 'pratique', 'vigilance', 'fires']
+
+
+def keep(name):
+    ok = fallback(name)
+    STATUS[name] = 'gardé (collecte lente)' if ok else 'échec (fichier de la collecte lente introuvable)'
+
+
+assert set(FAST) < {'metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires'}
+
+
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires']
+    fast = sys.argv[1:] == ['fast']
+    what = FAST if fast else (sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires'])
+    if fast:
+        print('Collecte rapide : fichiers de la collecte lente repris de la version publiée')
+        for f in SLOW_FILES:
+            keep(f)
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:

@@ -561,3 +561,5 @@ body:has(#tslider) #update-bar, body:has(#tslider) #remind-bar { bottom: 150px; 
 :root:not([data-theme="light"]) [style*="color:#d81b60"]:not(svg *) { color: #ff6fa5 !important; }
 :root:not([data-theme="light"]) [style*="color:#8e24aa"]:not(svg *) { color: #d494f2 !important; }
 #detail a:not(.btn), #panel a:not(.btn) { color: var(--link); }
+.ts-wind { pointer-events: none; } .ts-wind svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+.ts-wind b { position: absolute; left: 22px; top: 8px; font: 700 10px -apple-system, system-ui, sans-serif; color: #0b2a44; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }

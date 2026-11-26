@@ -128,3 +128,10 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] AY. Vitesse : mesurée sur le site publié (~1 Mo compressé au démarrage, surtout les NOTAM ; lecture JSON < 20 ms sur ordinateur ; VAC chargées seulement à la préparation) ; rien de bloquant, pas de changement.
 - [x] AZ. Workflow : actions GitHub en versions Node 24 (checkout v7, cache v6, configure-pages v6, upload-pages-artifact v5, deploy-pages v5).
 - [x] BA. Lisibilité : contrastes ≥ 4,5:1 dans les deux thèmes (textes secondaires, couleurs vives du HTML généré), contour de focus au clavier, flèches entre les onglets, poignée du tiroir au clavier.
+
+## Lot du 26/11/2026 (9)
+- [x] BB. Collecte en deux : rapide toutes les 15 min (METAR, TAF, NOTAM, SUP AIP, vigilance, feux, club ; fichiers lents republiés tels quels, état « gardé ») et complète la nuit, au push et à la demande (VAC, zones, OSM, webcams) ; cache des VAC en lecture seule pour la collecte rapide.
+- [x] BC. Collecte : terrains NOTAM sans réponse sautés 24 h, journal au fil de l'eau, durée limitée à 30 min.
+- [x] BD. Alertes : tour d'une CTR traversée fermée à l'heure de passage (horaires VAC) ; SIV assuré seulement hors des horaires ATS d'un aérodrome ouvert (remarque ENR 2.2, champ `rmk`).
+- [x] BE. Curseur horaire : pluie / orages (grille ≤ 56 points) et vent au niveau de pression de la croisière sur la carte (`gridWx`).
+- [x] BF. Service worker : fichiers fixes de data/ en cache d'abord ; données en direct avec délai de 8 s avant la copie locale ; vac.json plus préchargé ; préconnexion Open-Meteo et Géoplateforme.

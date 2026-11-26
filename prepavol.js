@@ -289,13 +289,14 @@
   A.sunTimes = sunTimes;   // utilisé aussi par la carte jour / nuit (extras.js)
 
   // ================================================================== données
-  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null;
+  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null;
   async function loadAip() {
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
     if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
     if (!SPECIAL) SPECIAL = await A.getLive('special.json').catch(() => ({ act: [], zsm: [] }));
     if (!LANDM) LANDM = await A.getJSON('data/landmarks.json', 'default').catch(() => ({ towns: [], mw: {}, rv: {}, lk: [] }));
+    if (!FIRES) FIRES = await A.getLive('fires.json').catch(() => ({ data: [] }));
     await loadVfr();
   }
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
@@ -1022,6 +1023,36 @@
   function bindSummary(b, sfx) {
     const on = (id, fn) => { const el = $('#' + id + sfx); if (el) el.addEventListener('click', fn); };
     on('pf-pax', () => { const w = window.open('', '_blank'); if (!w) { alert('Fenêtre bloquée : autoriser les fenêtres de ce site.'); return; } w.document.write(paxBrief(b)); w.document.close(); w.focus(); setTimeout(() => w.print(), 300); });
+    on('pf-efato', async () => {
+      const st = $('#pf-fields-st' + sfx), out = $('#pf-efato-out' + sfx); st.textContent = 'Recherche des champs dans l\'axe…';
+      try {
+        const x = await efatoPlan(b); st.textContent = '';
+        out.innerHTML = `<p class="meta">🛫 <b>Panne moteur au décollage</b> (piste ${esc(x.rwy || '?')} à ${esc(b.f.dep)}, axe ${Math.round(x.hdg)}° vrai) : ${!x.osm ? 'OpenStreetMap indisponible, champs non listés : repère-les sur la photo' : x.fields.length ? x.fields.map((f, k) => `${k + 1}. à ${f.d.toFixed(1)} NM, ${f.off ? `${Math.abs(f.off)}° ${f.off > 0 ? 'à droite' : 'à gauche'}` : 'dans l\'axe'} (${f.L} × ${f.W} m, ${esc(f.kind || '')})`).join(' · ') : 'aucun champ cartographié sur OpenStreetMap dans l\'axe (les parcelles ne sont pas toutes dessinées) : repère-les sur la photo'}.</p>
+          ${x.img ? `<img src="${x.img}" alt="Axe de décollage" style="width:100%;border-radius:6px">` : ''}
+          <p class="meta">🗣️ Briefing à dire avant l'alignement : « Panne avant la rotation : réduction, freinage. Panne après le décollage en dessous de la hauteur fixée avec mon instructeur : pas de demi-tour, je me pose droit devant, au plus à 30° de part et d'autre${x.fields.length ? `, champ repéré à ${x.fields[0].d.toFixed(1)} NM` : ''}. Au-dessus : selon la hauteur, terrain ou champ choisi. » Champs OSM : nature du sol, clôtures et lignes électriques à vérifier en vol.</p>`;
+        if (routeLayer) { x.fields.forEach((f) => L.circleMarker(f.c, { radius: 6, color: '#fff', weight: 2, fillColor: '#00c853', fillOpacity: .95 }).bindTooltip(`Panne au décollage : champ ${f.L} × ${f.W} m`, { className: 'tip' }).addTo(routeLayer));
+          L.polygon([x.end, destPt(x.end, x.hdg - 30, 2), destPt(x.end, x.hdg, 2.2), destPt(x.end, x.hdg + 30, 2)], { color: '#00c853', weight: 1, fillOpacity: .08, dashArray: '4 4' }).addTo(routeLayer); }
+      } catch (e) { st.textContent = '⚠️ ' + (e.message || e); }
+    });
+    on('pf-obst', async () => {
+      const st = $('#pf-fields-st' + sfx), out = $('#pf-obst-out' + sfx); st.textContent = 'Recherche des éoliennes et lignes HT…';
+      try {
+        const o = await osmObstacles(b); st.textContent = ''; b.osmObst = o;
+        const hi = o.turbines.filter((t) => t.top && t.top > (b.f.ft - 1000)), low = (b.legs[0].ft || b.f.ft);
+        out.innerHTML = `<p class="meta">⚡ <b>Éoliennes</b> à moins de 1,5 NM : ${o.turbines.length ? `${o.turbines.length}${o.turbines.some((t) => t.ft) ? `, jusqu'à ${Math.max(...o.turbines.map((t) => t.ft || 0))} ft de haut` : ''} (${[...new Set(o.turbines.map((t) => Math.round(t.along / 5) * 5))].map((a) => `vers ${a} NM`).join(', ')})` : 'aucune sur OpenStreetMap'}${hi.length ? ` — <b style="color:#ff6b6b">${hi.length} à moins de 1000 ft sous la croisière</b>` : ''} · <b>Lignes haute tension</b> croisées : ${o.lines.length ? o.lines.map((l) => `${l.along.toFixed(0)} NM${l.kv ? ` (${l.kv} kV)` : ''}`).join(', ') : 'aucune'}.</p>
+          <p class="meta">Données OpenStreetMap incomplètes (hauteur des pylônes rarement connue) : compléter avec la carte OACI et les NOTAM d'obstacles. Turbulence de sillage derrière les éoliennes.</p>`;
+        if (routeLayer) { o.turbines.forEach((t) => L.circleMarker(t.p, { radius: 3, color: '#fff', weight: 1, fillColor: '#00e5ff', fillOpacity: 1 }).bindTooltip(`Éolienne${t.ft ? ` ${t.ft} ft` : ''}`, { className: 'tip' }).addTo(routeLayer));
+          o.lines.forEach((l) => L.circleMarker(l.p, { radius: 6, color: '#ffd60a', weight: 3, fillOpacity: 0 }).bindTooltip(`Ligne haute tension${l.kv ? ` ${l.kv} kV` : ''}`, { className: 'tip' }).addTo(routeLayer)); }
+        const sv = $('#pf-vp' + sfx); if (sv && b.vprofile) { sv.outerHTML = cutSvg(b.vprofile, b, { id: 'pf-vp' + sfx }); cursorOn(b, $('#pf-vp' + sfx), $('#pf-vpinfo' + sfx)); }
+      } catch (e) { st.textContent = '⚠️ ' + (e.message || e); }
+    });
+    const pb = $('#pf-photo-box' + sfx);
+    if (pb) pb.addEventListener('toggle', async () => {
+      if (!pb.open || b.arrPhoto) return;
+      const box = $('#pf-photo' + sfx); box.textContent = 'Chargement de la photo et des pistes (OpenStreetMap)…';
+      try { b.arrPhoto = await airfieldPhoto(b); box.innerHTML = `<img src="${b.arrPhoto.url}" alt="Photo du terrain ${esc(b.f.arr)}" style="width:100%;border-radius:6px">${b.arrPhoto.runway ? '' : '<br>Pistes non trouvées sur OpenStreetMap : pas de schéma de circuit.'}<br>Photo © Esri World Imagery · pistes © OpenStreetMap · schéma calculé (côté et altitude d\'après la VAC) : le circuit officiel est sur la VAC. Image reprise dans le PDF.`; }
+      catch (e) { box.textContent = '⚠️ ' + (e.message || e); }
+    });
     on('pf-fields', async () => {
       const st = $('#pf-fields-st' + sfx), out = $('#pf-fields-out' + sfx); st.textContent = 'Recherche OpenStreetMap…';
       try {
@@ -1497,6 +1528,7 @@
     // --- Terrains : briefing départ / arrivée
     // réserve météo : +x % du carburant d'étape si vent de face moyen > 15 kt ou météo en route marginale
     const wxRoute = await routeWeather(pts, legs, depT, f.ft).catch((e) => ({ err: e.message }));
+    const aq = horizon < 4 && wxRoute && wxRoute.pts ? await airQuality(wxRoute.pts).catch((e) => { console.warn('qualité de l\'air', e); return null; }) : null;
     const head = totDist ? legs.reduce((s, lg) => s + (lg.wind ? lg.wind.spd * Math.cos(rad(lg.wind.dir - lg.tc)) : 0) * lg.dist, 0) / totDist : 0;
     const wxWhy = [head > 15 && `vent de face moyen ${Math.round(head)} kt`, wxRoute && wxRoute.worst >= 1 && `météo « ${WXTXT[wxRoute.worst]} »`].filter(Boolean);
     const wxRes = f.wxres > 0 && wxWhy.length ? { L: Math.ceil(totFuel * f.wxres / 100), why: wxWhy, pct: f.wxres } : null;
@@ -1543,7 +1575,7 @@
       f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
       sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
-      profile, mids, depElev: elevOf(f.dep), wxRoute, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
+      profile, mids, depElev: elevOf(f.dep), wxRoute, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
       generated: new Date(), notamGenerated: N.generated, vacCycle: VAC && VAC.cycle, aspSource: ASP && ASP.source,
     };
@@ -1713,7 +1745,7 @@
     const nA = nightAlong(b), night = nA != null ? `<rect x="${X(nA)}" y="${T}" width="${X(v.total) - X(nA)}" height="${H - B - T}" fill="#1a237e" fill-opacity=".35"><title>nuit aéronautique à partir de ${nA.toFixed(0)} NM</title></rect><text x="${X(nA) + 3}" y="${T + 10}" font-size="9" fill="#9fa8da">🌙 nuit aéro</text>` : '';
     const ac = opts.pos ? `<g transform="translate(${X(opts.pos.nm).toFixed(1)},${Y(opts.pos.ft).toFixed(1)})"><circle r="6" fill="#00e5ff" stroke="#000"/><line x1="0" x2="0" y1="6" y2="${(H - B - Y(opts.pos.ft)).toFixed(1)}" stroke="#00e5ff" stroke-dasharray="2 2"/></g>` : '';
     return `<svg ${opts.id ? `id="${opts.id}"` : ''} viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" style="background:${C.bg};border-radius:6px;display:block;touch-action:pan-y" font-family="Helvetica, Arial, sans-serif">
-      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${ppm}${(b.fields || []).map((x) => `<path d="M${X(x.along).toFixed(1)},${H - B - 1} l-5,-9 h10 z" fill="#2ecc40"><title>Champ ${x.L} × ${x.W} m à ${x.along.toFixed(0)} NM</title></path>`).join('')}${mk.join('')}${wx}${ac}
+      <rect width="${W}" height="${H}" fill="${C.bg}"/>${grid.join('')}${night}${clouds}${asp}${iso}<path d="${ter}" fill="#8d6e63"/>${cruise}${best}${calls}${tb}${ppm}${(b.fields || []).map((x) => `<path d="M${X(x.along).toFixed(1)},${H - B - 1} l-5,-9 h10 z" fill="#2ecc40"><title>Champ ${x.L} × ${x.W} m à ${x.along.toFixed(0)} NM</title></path>`).join('')}${glideGaps(b).map((g) => `<rect x="${X(g.from).toFixed(1)}" y="${H - B - 4}" width="${Math.max(2, X(g.to) - X(g.from)).toFixed(1)}" height="4" fill="#ff3b30"><title>Hors de portée de plané d'un terrain de ${g.from.toFixed(0)} à ${g.to.toFixed(0)} NM (il faudrait ${g.need} ft)</title></rect>`).join('')}${b.osmObst ? b.osmObst.turbines.filter((t) => t.top).map((t) => `<line x1="${X(t.along).toFixed(1)}" x2="${X(t.along).toFixed(1)}" y1="${Y(t.top - t.ft).toFixed(1)}" y2="${Y(t.top).toFixed(1)}" stroke="#00e5ff" stroke-width="2"><title>Éolienne ${t.ft} ft (sommet ~${t.top} ft)</title></line>`).join('') + b.osmObst.lines.map((l) => `<text x="${X(l.along).toFixed(1)}" y="${(Y(l.gnd) - 4).toFixed(1)}" font-size="13" text-anchor="middle">⚡<title>Ligne haute tension${l.kv ? ' ' + l.kv + ' kV' : ''} à ${l.along.toFixed(0)} NM</title></text>`).join('') : ''}${mk.join('')}${wx}${ac}
       <line class="vp-cur" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="#ffd60a" stroke-width="1" visibility="hidden"/></svg>`;
   }
   function profileSvg(v, b, sfx = '') {
@@ -2042,6 +2074,9 @@
     if (mo) mo.legs.forEach((m) => { if (!waveRisk(m)) return; const dn = (m.wind.dir + 180) % 360, ax = m.hi.p[0] < 43.4 ? 110 : (m.wind.dir + 90) % 360, e1 = destPt(m.hi.p, ax, 12), e2 = destPt(m.hi.p, ax + 180, 12);
       L.polygon([e1, e2, destPt(e2, dn, 20), destPt(e1, dn, 20)], { color: '#ff9f0a', weight: 1, fillOpacity: .18, dashArray: '3 4' })
         .bindTooltip(`Sous le vent (${r3(m.wind.dir)}°/${Math.round(m.wind.spd)} kt) : descendances et rotors probables — zone approximative à éviter`, { className: 'tip', sticky: true }).addTo(routeLayer); });
+    glideGaps(b).forEach((g) => { const q = []; for (let a = g.from; a <= g.to + 0.01; a += 1) q.push(routePosAt(b, a).p);
+      if (q.length > 1) L.polyline(q, { color: '#ff3b30', weight: 10, opacity: .4 }).bindTooltip(`Hors de portée de plané d'un terrain (${g.from.toFixed(0)}-${g.to.toFixed(0)} NM) : il faudrait ${g.need} ft`, { className: 'tip', sticky: true }).addTo(routeLayer); });
+    firesNear(b).forEach((x) => L.circleMarker(x.p, { radius: 6, color: '#fff', weight: 1, fillColor: '#ff6d00', fillOpacity: .95 }).bindTooltip(`🔥 Feu détecté par satellite (${esc(x.t)} UTC, ${x.frp} MW)`, { className: 'tip' }).addTo(routeLayer));
     L.polyline(b.pts, { color: '#ff2bd6', weight: 4, opacity: .95 }).addTo(routeLayer);
     const mk = routeMarks(b);
     mk.ticks.forEach((t) => {
@@ -2640,8 +2675,184 @@
     const vac = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean).map((id) => { const v = vacAt(id) || {}, t = `${v.consignes || ''} ${v.infos || ''}`.replace(/\s+/g, ' '), m = t.match(/[^.]{0,160}(?:panne (?:de )?radio|radio[- ]?(?:communication )?failure|COM failure)[^.]{0,260}\.?/i); return m ? [id, m[0].trim()] : null; }).filter(Boolean);
     return { ctl, vac };
   }
+  // ---------- poussières / brume sèche : épaisseur optique des aérosols (AOD 550 nm) et poussières au sol, Open-Meteo qualité de l'air (prévision 5 jours)
+  async function airQuality(P) {
+    const days = [...new Set(P.map((x) => x.at.toISOString().slice(0, 10)))].sort();
+    let d = await omFetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${P.map((x) => x.p[0].toFixed(2)).join(',')}&longitude=${P.map((x) => x.p[1].toFixed(2)).join(',')}`
+      + `&hourly=dust,aerosol_optical_depth&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+    if (!Array.isArray(d)) d = [d];
+    const v = P.map((x, i) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(x.at)); return k < 0 ? null : { along: x.along, aod: h.aerosol_optical_depth[k], dust: h.dust[k] }; }).filter((x) => x && x.aod != null);
+    return v.length ? v.reduce((m, x) => (x.aod > m.aod ? x : m)) : null;
+  }
+  const hazeLevel = (q) => (!q ? 0 : q.aod >= 0.5 || q.dust >= 100 ? 2 : q.aod >= 0.3 || q.dust >= 50 ? 1 : 0);
+  console.assert(hazeLevel({ aod: 0.6, dust: 20 }) === 2 && hazeLevel({ aod: 0.35, dust: 10 }) === 1 && hazeLevel({ aod: 0.1, dust: 5 }) === 0, 'hazeLevel');
+
+  // ---------- feux détectés par satellite (24 h) à moins de 5 NM de la route
+  function firesNear(b) {
+    return ((FIRES && FIRES.data) || []).map(([la, lo, frp, t]) => ({ p: [la, lo], frp, t, r: routeDist([la, lo], b.pts) })).filter((x) => x.r.d <= 5 && x.r.along >= -2 && x.r.along <= b.totDist + 2).sort((x, y) => x.r.along - y.r.along);
+  }
+
+  // ---------- tronçons sans terrain à portée de plané : hauteur au-dessus du terrain - 500 ft, finesse de l'avion (relief entre les deux non compté)
+  function glideGaps(b) {
+    const fin = b.f.T.glide || 9, apts = (A.APTS || []).filter((a) => a.la != null), out = [];
+    let cur = null;
+    for (const x of routeSamples(b, 1)) {
+      const ft = x.lg.ft || b.f.ft;
+      let best = null;
+      for (const a of apts) {
+        const d = distNm(x.p, [+a.la, +a.lo]); if (d > 40) continue;
+        const el = +a.elev || 0, ok = d <= Math.max(0, ft - el - 500) * fin / 6076, n = el + 500 + d * 6076 / fin;
+        if (!best || (ok && !best.ok) || (ok === best.ok && n < best.n)) best = { a, d, ok, n };
+      }
+      if (best && best.ok) { cur = null; continue; }
+      const need = best ? best.n : 99999;
+      if (!cur) out.push(cur = { from: x.along, to: x.along, need, near: best && best.a.icao }); else { cur.to = x.along; if (need > cur.need) { cur.need = need; cur.near = best && best.a.icao; } }
+    }
+    return out.map((g) => ({ ...g, need: Math.ceil(g.need / 100) * 100 }));
+  }
+
+  // ---------- NOTAM en français simple : abréviations OACI courantes, puis tri par importance
+  const NOTAM_FR = [['NOT AVBL', 'indisponible'], ['U/S', 'hors service'], ['CLSD', 'fermé'], ['CLOSED', 'fermé'], ['AVBL', 'disponible'], ['ACT', 'active'], ['ACTIVE', 'active'], ['DUE', 'en raison de'],
+    ['WIP', 'travaux en cours'], ['RWY', 'piste'], ['TWY', 'voie de circulation'], ['APN', 'aire de stationnement'], ['AD', 'aérodrome'], ['OBST', 'obstacle'], ['CRANE', 'grue'], ['MAST', 'mât'],
+    ['WIND TURBINES?', 'éolienne(s)'], ['LGTD', 'balisé'], ['LGT', 'balisage'], ['ACFT', 'aéronef'], ['PJE', 'parachutage'], ['UAS', 'drone'], ['UAV', 'drone'], ['AEROBATICS?', 'voltige'],
+    ['GLIDING', 'vol à voile'], ['BALLOONS?', 'ballon(s)'], ['FIREWORKS', 'feux d\'artifice'], ['MIL', 'militaire'], ['EXER', 'exercice'], ['BTN', 'entre'], ['EXC', 'sauf'], ['DLY', 'tous les jours'],
+    ['ABV', 'au-dessus de'], ['BLW', 'au-dessous de'], ['HGT', 'hauteur'], ['ELEV', 'altitude'], ['SFC', 'sol'], ['GND', 'sol'], ['AMSL', 'au-dessus de la mer'], ['AGL', 'au-dessus du sol'],
+    ['ASFC', 'au-dessus du sol'], ['RADIUS', 'rayon'], ['CENTRED ON', 'centré sur'], ['PSN', 'position'], ['FREQ', 'fréquence'], ['SVC', 'service'], ['OPS', 'opérations'], ['OPR', 'en service'],
+    ['TEMPO', 'temporaire'], ['REF', 'voir'], ['TFC', 'trafic'], ['INFO', 'information'], ['AREA', 'zone'], ['FLW', 'suivant'], ['THR', 'seuil'], ['DTHR', 'seuil décalé'], ['RESTRICTED', 'réglementé'],
+    ['PROHIBITED', 'interdit'], ['DANGER', 'dangereux'], ['AIRSPACE', 'espace aérien'], ['MON', 'lun'], ['TUE', 'mar'], ['WED', 'mer'], ['THU', 'jeu'], ['FRI', 'ven'], ['SAT', 'sam'], ['SUN', 'dim'],
+    ['SR', 'lever du soleil'], ['SS', 'coucher du soleil'], ['FUEL', 'carburant'], ['AVGAS', 'AVGAS'], ['PPR', 'autorisation préalable']];
+  const NOTAM_RE = NOTAM_FR.map(([k, v]) => [new RegExp(`(^|[^A-Z/])${k.replace('/', '\\/')}(?![A-Z/])`, 'g'), v]);
+  const notamPlain = (t) => NOTAM_RE.reduce((s, [re, v]) => s.replace(re, `$1${v}`), String(t || '').replace(/\s+/g, ' ').trim());
+  console.assert(notamPlain('RWY 13/31 CLSD DUE WIP') === 'piste 13/31 fermé en raison de travaux en cours' && notamPlain('TWY B LGT U/S') === 'voie de circulation B balisage hors service' && notamPlain('PJE ACT') === 'parachutage active', 'notamPlain');
+  const notamKind = (n) => (isClosure(n) ? 0 : (n.q || '')[0] === 'R' || /\b(ACT|ACTIVE|PJE|AEROBATIC|UAS|UAV|RTBA)\b/.test(n.e || '') ? 1 : (n.q || '')[0] === 'O' || /\b(OBST|CRANE|WIND TURBINE)/.test(n.e || '') ? 2 : 3);
+  const NOTAM_KIND = ['⛔ Fermeture', '🟣 Zone active', '🗼 Obstacle', 'ℹ️ Information'];
+  function notamsHtml(b) {
+    const L0 = [...b.adNotams.flatMap((x) => x.list.map((n) => ({ n, where: x.id }))), ...b.enroute.concat(b.obst).map((x) => ({ n: x.n, where: `en route, ${x.along.toFixed(0)} NM` })), ...b.general.map((n) => ({ n, where: 'FIR' }))]
+      .filter((x) => x.n && x.n.ref).map((x) => ({ ...x, k: notamKind(x.n) })).sort((x, y) => x.k - y.k);
+    if (!L0.length) return '';
+    return `<details><summary><b>📋 NOTAM de la nav en français simple</b> (${L0.length}, triés : fermetures, zones actives, obstacles, informations)</summary>
+      ${L0.map((x) => `<p class="meta" style="margin:3px 0" title="${esc(x.n.e || '')}">${NOTAM_KIND[x.k]} · <b>${esc(x.n.ref)}</b> (${esc(x.where)}, ${fmtNotamT(x.n)}) : ${esc(notamPlain(x.n.efr || x.n.e).slice(0, 300))}</p>`).join('')}
+      <p class="meta">Abréviations traduites automatiquement (texte d'origine au survol) : le NOTAM officiel fait foi (SOFIA).</p></details>`;
+  }
+  const fmtNotamT = (n) => `${n.from ? new Date(n.from).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '?'} → ${n.to && !isNaN(Date.parse(n.to)) ? new Date(n.to).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'PERM / EST'}`;
+
+  // ---------- OpenStreetMap (Overpass) : serveurs publics souvent chargés, on essaie les suivants
+  async function osmQuery(q) {
+    for (const ep of ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
+      try { const r = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: AbortSignal.timeout(20000) }); if (r.ok) return await r.json(); } catch (e) { /* serveur suivant */ }
+    }
+    throw new Error('serveurs OpenStreetMap indisponibles, réessayer plus tard');
+  }
+  const corridorPoly = (b, nm) => { const smp = routeSamples(b, 5), side = (k) => smp.map((x) => destPt(x.p, x.lg.tc + k, nm)); return [...side(-90), ...side(90).reverse()].map((p) => `${p[0].toFixed(4)} ${p[1].toFixed(4)}`).join(' '); };
+  // parcelles (rectangle englobant) : longueur / largeur en m
+  const bbSize = (bb) => { const c = [(bb.minlat + bb.maxlat) / 2, (bb.minlon + bb.maxlon) / 2], h = (bb.maxlat - bb.minlat) * 111e3, w = (bb.maxlon - bb.minlon) * 111e3 * Math.cos(rad(c[0])); return { c, L: Math.max(h, w), W: Math.min(h, w) }; };
+  // pistes OSM autour d'un terrain : [{ ref, a, b }] (extrémités)
+  async function osmRunways(ap) {
+    const j = await osmQuery(`[out:json][timeout:25];way["aeroway"="runway"](around:2500,${(+ap.la).toFixed(5)},${(+ap.lo).toFixed(5)});out geom;`);
+    return (j.elements || []).filter((e) => e.geometry && e.geometry.length > 1).map((e) => ({ ref: (e.tags && e.tags.ref) || '', a: [e.geometry[0].lat, e.geometry[0].lon], b: [e.geometry[e.geometry.length - 1].lat, e.geometry[e.geometry.length - 1].lon] }));
+  }
+  // piste dans le sens hdg (vrai) : seuil t et extrémité e ; sinon la première, dans son sens
+  const runwayDir = (rws, hdg) => { for (const r of rws) for (const [t, e] of [[r.a, r.b], [r.b, r.a]]) if (hdg == null || angDiff(bearing(t, e), hdg) <= 25) return { r, t, e, hdg: bearing(t, e) }; return rws.length ? { r: rws[0], t: rws[0].a, e: rws[0].b, hdg: bearing(rws[0].a, rws[0].b) } : null; };
+  console.assert((() => { const d = runwayDir([{ a: [43, 0], b: [43, 0.02] }], 270); return d && d.t[1] === 0.02 && angDiff(d.hdg, 270) < 1; })(), 'runwayDir');
+
+  // ---------- panne moteur au décollage : champs dans l'axe de la piste de départ (± 30°, jusqu'à 2 NM)
+  async function efatoPlan(b) {
+    const ap = A.aptByIcao[b.f.dep], v = b.depInfo.v || {}, rw = b.depInfo.rw, hdg0 = rw ? (rw.best.qfu + (v.var || 0) + 360) % 360 : null;
+    const rws = await osmRunways(ap).catch(() => []), dir = runwayDir(rws, hdg0);
+    const hdg = dir ? dir.hdg : hdg0; if (hdg == null) throw new Error('piste de départ inconnue');
+    const end = dir ? dir.e : destPt([+ap.la, +ap.lo], hdg, (b.depInfo.len || 800) / 2 / 1852);
+    const poly = [end, destPt(end, hdg - 30, 2), destPt(end, hdg, 2.2), destPt(end, hdg + 30, 2)].map((p) => `${p[0].toFixed(4)} ${p[1].toFixed(4)}`).join(' ');
+    const j = await osmQuery(`[out:json][timeout:25];way["landuse"~"^(meadow|farmland|grass)$"](poly:"${poly}");out bb qt;`).catch(() => null);   // OSM indisponible : la photo suffit
+    const fields = ((j && j.elements) || []).filter((e) => e.bounds).map((e) => ({ ...bbSize(e.bounds), kind: e.tags && e.tags.landuse })).filter((x) => x.L >= 350 && x.W >= 80 && x.L <= 2500)
+      .map((x) => ({ ...x, d: distNm(end, x.c), off: Math.round(((bearing(end, x.c) - hdg + 540) % 360) - 180) })).filter((x) => Math.abs(x.off) <= 35)
+      .sort((x, y) => Math.abs(x.off) - Math.abs(y.off) || x.d - y.d).slice(0, 5);
+    let img = null;
+    try {   // photo de l'axe : cône ± 30° sur 2 NM, piste, champs OSM éventuels
+      const W = 960, H = 640, { cv, ctx, P, txt } = await satImage(destPt(end, hdg, 0.9), 14, W, H);
+      ctx.fillStyle = 'rgba(0,200,83,.16)'; ctx.strokeStyle = '#00e676'; ctx.lineWidth = 2.5; ctx.setLineDash([10, 6]); ctx.beginPath(); ctx.moveTo(...P(end));
+      for (let a = -30; a <= 30; a += 5) ctx.lineTo(...P(destPt(end, hdg + a, 2))); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+      if (dir) { ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(...P(dir.t)); ctx.lineTo(...P(dir.e)); ctx.stroke(); }
+      [0.5, 1, 1.5, 2].forEach((d) => txt(`${d} NM`, P(destPt(end, hdg, d)), '#b9f6ca', 13));
+      fields.forEach((f, k) => { const q = P(f.c); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q[0], q[1], 14, 0, 7); ctx.stroke(); txt(String(k + 1), [q[0] - 4, q[1] + 5], '#00e5ff'); });
+      txt(`${b.f.dep} — décollage piste ${dir && dir.r.ref ? dir.r.ref : ''} : secteur ± 30° sur 2 NM`, [10, 24], '#fff', 16);
+      txt('Repère les champs dégagés dans le secteur vert (photo satellite, date inconnue)', [10, H - 12], '#ffd60a', 13);
+      img = cv.toDataURL('image/jpeg', .85);
+    } catch (e) { console.warn('photo axe', e); }
+    return { hdg, end, fields, img, osm: !!j, rwy: dir ? dir.r.ref : rw ? rwyNum(rw.best.qfu) : '' };
+  }
+
+  // ---------- éoliennes et lignes haute tension (OSM) à moins de 1,5 NM de la route
+  const segX = (p1, p2, q1, q2) => { const d = (p2[1] - p1[1]) * (q2[0] - q1[0]) - (p2[0] - p1[0]) * (q2[1] - q1[1]); if (!d) return null;
+    const t = ((q1[1] - p1[1]) * (q2[0] - q1[0]) - (q1[0] - p1[0]) * (q2[1] - q1[1])) / d, u = ((q1[1] - p1[1]) * (p2[0] - p1[0]) - (q1[0] - p1[0]) * (p2[1] - p1[1])) / d;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? [p1[0] + t * (p2[0] - p1[0]), p1[1] + t * (p2[1] - p1[1])] : null; };
+  console.assert((() => { const x = segX([0, 0], [0, 2], [-1, 1], [1, 1]); return x && x[0] === 0 && x[1] === 1 && !segX([0, 0], [0, 2], [1, 1], [2, 1]); })(), 'segX');
+  async function osmObstacles(b) {
+    const poly = corridorPoly(b, 1.5);
+    const j = await osmQuery(`[out:json][timeout:30];(node["generator:source"="wind"](poly:"${poly}");way["power"="line"](poly:"${poly}"););out geom qt;`);
+    const prof = (b.vprofile && b.vprofile.profile) || [], ground = (al) => (prof.length ? prof.reduce((m, q) => (Math.abs(q.along - al) < Math.abs(m.along - al) ? q : m)).ft : 0);
+    const turbines = [], lines = [];
+    for (const e of j.elements || []) {
+      if (e.type === 'node') {
+        const t = e.tags || {}, hm = parseFloat(t.height) || (parseFloat(t['height:hub']) + parseFloat(t['rotor:diameter']) / 2) || null, r = routeDist([e.lat, e.lon], b.pts);
+        turbines.push({ p: [e.lat, e.lon], ft: hm ? Math.round(hm * 3.281) : null, along: r.along, d: r.d });
+      } else if (e.geometry) {
+        const g = e.geometry.map((x) => [x.lat, x.lon]);
+        b.legs.forEach((lg, i) => { const acc = b.legs.slice(0, i).reduce((s, l) => s + l.dist, 0);
+          for (let k = 0; k < g.length - 1; k++) { const x = segX(lg.a, lg.b, g[k], g[k + 1]); if (x) lines.push({ p: x, along: acc + distNm(lg.a, x), kv: e.tags && e.tags.voltage ? Math.round(+String(e.tags.voltage).split(';')[0] / 1000) : null }); } });
+      }
+    }
+    const tb = turbines.sort((x, y) => x.along - y.along).map((x) => ({ ...x, top: x.ft ? ground(x.along) + x.ft : null }));
+    return { turbines: tb, lines: lines.sort((x, y) => x.along - y.along).map((x) => ({ ...x, gnd: ground(x.along) })) };
+  }
+
+  // ---------- image satellite (Esri World Imagery) centrée sur ctr, zoom z : renvoie { cv, ctx, P } pour dessiner par-dessus
+  async function satImage(ctr, z, W, H) {
+    const X = (lo) => (lo + 180) / 360 * 256 * 2 ** z, Y = (la) => (1 - Math.log(Math.tan(rad(la)) + 1 / Math.cos(rad(la))) / Math.PI) / 2 * 256 * 2 ** z;
+    const x0 = X(ctr[1]) - W / 2, y0 = Y(ctr[0]) - H / 2, P = (p) => [X(p[1]) - x0, Y(p[0]) - y0];
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const ctx = cv.getContext('2d'); ctx.fillStyle = '#334'; ctx.fillRect(0, 0, W, H);
+    const jobs = [];
+    for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + W) / 256); tx++) for (let ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + H) / 256); ty++) jobs.push(new Promise((res) => {
+      const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => { ctx.drawImage(im, tx * 256 - x0, ty * 256 - y0); res(true); }; im.onerror = () => res(false);
+      im.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`; }));
+    if (!(await Promise.all(jobs)).some(Boolean)) throw new Error('photo aérienne indisponible');
+    const txt = (s2, p, col = '#fff', sz = 15) => { ctx.font = `bold ${sz}px Helvetica, Arial, sans-serif`; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText(s2, p[0], p[1]); ctx.fillStyle = col; ctx.fillText(s2, p[0], p[1]); };
+    ctx.lineCap = 'round';
+    return { cv, ctx, P, txt };
+  }
+  // ---------- photo du terrain d'arrivée (Esri World Imagery) + pistes OSM + schéma du tour de piste + point d'entrée
+  async function airfieldPhoto(b) {
+    const ap = A.aptByIcao[b.f.arr], v = b.arrInfo.v || {}, rw = b.arrInfo.rw, x0p = arrivalPlan(b);
+    const rws = await osmRunways(ap).catch(() => []), dir = runwayDir(rws, rw ? (rw.best.qfu + (v.var || 0) + 360) % 360 : null);
+    const right = /droite/.test(x0p.side), sg = right ? 90 : -90, off = 0.7;
+    let circ = null;
+    if (dir) { const h = dir.hdg, c1 = destPt(dir.e, h, 0.5), c4 = destPt(dir.t, h + 180, 0.8); circ = [dir.t, dir.e, c1, destPt(c1, h + sg, off), destPt(c4, h + sg, off), c4, dir.t]; }
+    const ctr = circ ? [circ.reduce((s, p) => s + p[0], 0) / circ.length, circ.reduce((s, p) => s + p[1], 0) / circ.length] : [+ap.la, +ap.lo];
+    const W = 960, H = 680, { cv, ctx, P, txt } = await satImage(ctr, 14, W, H);
+    rws.forEach((r) => { ctx.strokeStyle = r === (dir && dir.r) ? '#ffd60a' : 'rgba(255,255,255,.8)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(...P(r.a)); ctx.lineTo(...P(r.b)); ctx.stroke(); });
+    if (circ) {
+      ctx.strokeStyle = '#ff2bd6'; ctx.lineWidth = 3.5; ctx.setLineDash([14, 8]); ctx.beginPath(); circ.slice(1).forEach((p, i) => (i ? ctx.lineTo(...P(p)) : ctx.moveTo(...P(p)))); ctx.stroke(); ctx.setLineDash([]);
+      for (let i = 1; i < circ.length - 1; i++) {   // flèches de sens au milieu de chaque côté
+        const a = P(circ[i]), c = P(circ[i + 1]), m = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], ang = Math.atan2(c[1] - a[1], c[0] - a[0]);
+        ctx.fillStyle = '#ff2bd6'; ctx.beginPath(); ctx.moveTo(m[0] + 12 * Math.cos(ang), m[1] + 12 * Math.sin(ang)); ctx.lineTo(m[0] + 10 * Math.cos(ang + 2.5), m[1] + 10 * Math.sin(ang + 2.5)); ctx.lineTo(m[0] + 10 * Math.cos(ang - 2.5), m[1] + 10 * Math.sin(ang - 2.5)); ctx.fill();
+      }
+      const mid = (p, q) => [(P(p)[0] + P(q)[0]) / 2, (P(p)[1] + P(q)[1]) / 2];
+      txt('vent arrière', mid(circ[3], circ[4]), '#ffb3f0'); txt('base', mid(circ[4], circ[5]), '#ffb3f0'); txt(`finale ${dir.r.ref ? `(${dir.r.ref})` : ''}`, mid(circ[5], circ[6]), '#ffd60a');
+    }
+    const vp = x0p.entry ? resolvePt(x0p.entry) : null;
+    if (vp) { const q = P([vp.la, vp.lo]), inside = q[0] > 20 && q[0] < W - 20 && q[1] > 20 && q[1] < H - 20;
+      if (inside) { ctx.fillStyle = '#00e5ff'; ctx.beginPath(); ctx.arc(q[0], q[1], 7, 0, 7); ctx.fill(); txt(`entrée ${x0p.entry}`, [q[0] + 10, q[1] - 8], '#00e5ff'); }
+      else { const c = [W / 2, H / 2], ang = Math.atan2(q[1] - c[1], q[0] - c[0]), k = Math.min((W / 2 - 40) / Math.abs(Math.cos(ang) || 1e-9), (H / 2 - 30) / Math.abs(Math.sin(ang) || 1e-9)), e = [c[0] + k * Math.cos(ang), c[1] + k * Math.sin(ang)];
+        txt(`➜ entrée ${x0p.entry} (${distNm(ctr, [vp.la, vp.lo]).toFixed(1)} NM)`, [Math.min(W - 230, Math.max(8, e[0] - 60)), Math.min(H - 10, Math.max(22, e[1]))], '#00e5ff'); } }
+    txt(`${b.f.arr} — tour de piste ${x0p.tdpTxt || x0p.tdpFt + ' ft'} ${right ? 'main droite' : 'main gauche'}${/VAC/.test(x0p.side) ? ' (VAC)' : ' (côté non trouvé dans la VAC : standard à gauche, à vérifier)'}`, [10, 24], '#fff', 16);
+    txt('Schéma indicatif — le circuit exact (points, altitudes, zones à éviter) est sur la VAC', [10, H - 12], '#ffd60a', 13);
+    return { url: cv.toDataURL('image/jpeg', .85), w: W, h: H, runway: !!dir };
+  }
   function safetyAlerts(b) {
-    const al = [], c = carbOf(b), w = waterOf(b), tl = townsLow(b), seen = new Set(), q = qnhList(b), th = thermals(b);
+    const al = [], c = carbOf(b), w = waterOf(b), tl = townsLow(b), seen = new Set(), q = qnhList(b), th = thermals(b), fz = firesNear(b), gg = glideGaps(b);
+    if (hazeLevel(b.aq) >= 2) al.push(`Brume sèche / poussières prévues vers ${b.aq.along.toFixed(0)} NM (épaisseur optique ${b.aq.aod.toFixed(2)}, poussières ${Math.round(b.aq.dust || 0)} µg/m³) : visibilité en vol réduite, horizon flou surtout face au soleil — vérifier les METAR (HZ, DU) et la visibilité en route.`);
+    if (fz.length) al.push(`Feu détecté par satellite dans les dernières 24 h à ${fz[0].r.d.toFixed(1)} NM de la route vers ${fz[0].r.along.toFixed(0)} NM${fz.length > 1 ? ` (${fz.length} détections)` : ''} : fumée, Canadair ou hélicoptères possibles, zone interdite temporaire possible (NOTAM). Peut aussi être un brûlage agricole ou un site industriel.`);
+    if (gg.length) { const pct = Math.round(gg.reduce((t, g) => t + g.to - g.from + 1, 0) / Math.max(1, b.totDist) * 100), mx = Math.max(...gg.map((g) => g.need));
+      al.push(`Hors de portée de plané d'un terrain sur ~${Math.min(100, pct)} % de la route (en rouge sur la coupe et la carte) : en cas de panne moteur, atterrissage en campagne. Pour rester toujours à portée d'un terrain, il faudrait jusqu'à ${mx} ft${mx > 9500 ? ' (irréaliste ici : prévoir les champs)' : ''}. Relief entre la route et le terrain non compté.`); }
     glareOf(b).forEach((g) => al.push(`Soleil bas face à vous en ${g.what} vers ${utc(g.t)} (hauteur ${Math.round(g.sp.el)}°, à ${Math.round(g.off)}° de l'axe) : éblouissement, trafic et relief difficiles à voir — lunettes de soleil, pare-soleil, pare-brise propre, ou changer d'horaire.`));
     if (q.length > 1 && Math.max(...q.map((x) => x.q)) - Math.min(...q.map((x) => x.q)) >= 3) { const lo = q.reduce((m, x) => (x.q < m.q ? x : m)), hi = q.reduce((m, x) => (x.q > m.q ? x : m)); al.push(`QNH de ${hi.q} hPa (${hi.id}) à ${lo.q} hPa (${lo.id}) le long de la route : écart ${hi.q - lo.q} hPa, soit ~${(hi.q - lo.q) * 28} ft d'erreur — recaler l'altimètre en route (QNH du SIV ou du terrain le plus proche).`); }
     if (th) al.push(`Turbulence thermique probable (${th.T} °C, base des cumulus vers ${th.base} ft sol) : ceintures serrées, vitesse réduite en air agité, au-dessus de la base si possible, ou voler le matin.`);
@@ -2665,12 +2876,16 @@
   }
   function moreHtml(b, sfx) {
     const cams = routeCams(b), rf = radioFail(b);
-    return `${cams.length ? `<details><summary><b>📷 Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
+    const aq = b.aq, hz = hazeLevel(aq);
+    return `${hz === 1 ? `<p class="meta">🌫️ Légère brume sèche possible (épaisseur optique ${aq.aod.toFixed(2)}) : visibilité un peu réduite, horizon moins net.</p>` : ''}
+      ${notamsHtml(b)}
+      ${cams.length ? `<details><summary><b>📷 Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
       <details><summary><b>📻 Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
         ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
         ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
-      <p class="meta"><button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <span id="pf-fields-st${sfx}"></span></p>
-      <div id="pf-fields-out${sfx}"></div>`;
+      <p class="meta"><button class="btn" id="pf-pax${sfx}">🧑‍🤝‍🧑 Fiche briefing passagers</button> <button class="btn" id="pf-fields${sfx}">🌾 Chercher les champs de secours</button> <button class="btn" id="pf-efato${sfx}">🛫 Panne au décollage</button> <button class="btn" id="pf-obst${sfx}">⚡ Éoliennes et lignes HT</button> <span id="pf-fields-st${sfx}"></span></p>
+      <div id="pf-fields-out${sfx}"></div><div id="pf-efato-out${sfx}"></div><div id="pf-obst-out${sfx}"></div>
+      <details id="pf-photo-box${sfx}"><summary><b>📸 Photo du terrain d'arrivée et schéma du tour de piste</b></summary><div id="pf-photo${sfx}" class="meta">Ouvrir pour charger la photo…</div></details>`;
   }
   // ---------- fiche briefing passagers (page à imprimer)
   function paxBrief(b) {
@@ -2693,19 +2908,11 @@
   // ---------- champs de secours : prairies / cultures OpenStreetMap à moins de 1,5 NM, le plus grand par tranche de 5 NM (taille d'après la boîte englobante)
   // shortcut: taille = rectangle englobant de la zone OSM (souvent plusieurs parcelles), à remplacer par la géométrie réelle (out geom) si les pilotes s'y fient
   async function rescueFields(b) {
-    const smp = routeSamples(b, 5), side = (k) => smp.map((x) => destPt(x.p, x.lg.tc + k, 1.5));
-    const poly = [...side(-90), ...side(90).reverse()].map((p) => `${p[0].toFixed(4)} ${p[1].toFixed(4)}`).join(' ');
-    const q = `[out:json][timeout:25];way["landuse"~"^(meadow|farmland|grass)$"](poly:"${poly}");out bb qt;`;
-    let j = null;
-    for (const ep of ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {   // serveurs publics souvent chargés
-      try { const r = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: AbortSignal.timeout(35000) }); if (r.ok) { j = await r.json(); break; } } catch (e) { /* serveur suivant */ }
-    }
-    if (!j) throw new Error('serveurs OpenStreetMap indisponibles, réessayer plus tard');
+    const j = await osmQuery(`[out:json][timeout:25];way["landuse"~"^(meadow|farmland|grass)$"](poly:"${corridorPoly(b, 1.5)}");out bb qt;`);
     const bins = new Map();
     for (const e of j.elements || []) {
-      const bb = e.bounds; if (!bb) continue;
-      const c = [(bb.minlat + bb.maxlat) / 2, (bb.minlon + bb.maxlon) / 2], hgt = (bb.maxlat - bb.minlat) * 111e3, wid = (bb.maxlon - bb.minlon) * 111e3 * Math.cos(rad(c[0]));
-      const L1 = Math.max(hgt, wid), W1 = Math.min(hgt, wid); if (L1 < 600 || W1 < 200 || L1 > 2500) continue;   // > 2,5 km : grande zone « cultures » d'OSM (routes, haies, maisons), pas une parcelle
+      if (!e.bounds) continue;
+      const { c, L: L1, W: W1 } = bbSize(e.bounds); if (L1 < 600 || W1 < 200 || L1 > 2500) continue;   // > 2,5 km : grande zone « cultures » d'OSM (routes, haies, maisons), pas une parcelle
       const r = routeDist(c, b.pts), k = Math.floor(r.along / 5), cur = bins.get(k), sc = (x, y) => Math.min(x, 1500) * Math.min(y, 500);
       if (r.d > 1.5) continue;
       if (!cur || sc(L1, W1) > sc(cur.L, cur.W)) bins.set(k, { c, L: Math.round(L1 / 10) * 10, W: Math.round(W1 / 10) * 10, along: r.along, d: r.d, kind: e.tags && e.tags.landuse });
@@ -3248,13 +3455,13 @@
         loc.setHours(h, 0, 0, 0); const t0 = new Date(loc), t1 = new Date(t0.getTime() + dur);
         const p = at(0, t0), q = at(1, t1); if (!p || !q) continue;
         const why = [];
-        for (const [x, id, lbl] of [[p, b0.f.dep, 'départ'], [q, bN.f.arr, 'arrivée']]) {
+        for (const [x, id, lbl] of [[p, b0.f.dep, 'au départ'], [q, bN.f.arr, 'à l\'arrivée']]) {
           const c = cross(x, id), base = Math.round((x.t - x.td) * 400 / 100) * 100;
-          if (c != null && c > vw) why.push(`travers ${c} kt à l'${lbl}`);
-          if (x.g > 25) why.push(`rafales ${Math.round(x.g)} kt à l'${lbl}`);
-          if (x.vis != null && x.vis < 5000) why.push(`visi ${Math.round(x.vis / 100) / 10} km à l'${lbl}`);
-          if (base < 1500) why.push(`base ~${base} ft à l'${lbl}`);
-          if (x.rr >= 1) why.push(`pluie ${x.rr} mm à l'${lbl}`);
+          if (c != null && c > vw) why.push(`travers ${c} kt ${lbl}`);
+          if (x.g > 25) why.push(`rafales ${Math.round(x.g)} kt ${lbl}`);
+          if (x.vis != null && x.vis < 5000) why.push(`visi ${Math.round(x.vis / 100) / 10} km ${lbl}`);
+          if (base < 1500) why.push(`base ~${base} ft ${lbl}`);
+          if (x.rr >= 1) why.push(`pluie ${x.rr} mm ${lbl}`);
         }
         const sd = sunTimes(t0, +dep.la, +dep.lo), sa = sunTimes(t1, +arr.la, +arr.lo);   // nuit aéronautique : coucher + 30 min, lever - 30 min
         if (sd && t0 < sd.rise.getTime() - 18e5) why.push('avant le jour aéronautique');
@@ -3994,6 +4201,15 @@
         doc.setTextColor(0);
       }
     } catch (e) { console.warn('carte OACI', e); }
+    try {   // photo du terrain d'arrivée avec le schéma du tour de piste (déjà chargée dans le résumé, sinon chargée ici)
+      const ph = b.arrPhoto || await airfieldPhoto(b);
+      if (ph) {
+        newPage('landscape', latin(`TERRAIN D'ARRIVEE ${b.f.arr} - PHOTO ET SCHEMA DU TOUR DE PISTE`));
+        const maxW = W - 2 * M, maxH = H - 30, sc = Math.min(maxW / ph.w, maxH / ph.h);
+        doc.addImage(ph.url, 'JPEG', M + (maxW - ph.w * sc) / 2, 18, ph.w * sc, ph.h * sc);
+        doc.setFontSize(6.5); doc.setTextColor(90); doc.text(latin('Photo Esri World Imagery, pistes OpenStreetMap. Schema indicatif (cote et altitude d\'apres la VAC) : le circuit officiel est sur la VAC.'), M, H - 8); doc.setTextColor(0);
+      }
+    } catch (e) { console.warn('photo terrain', e); }
     // bande de carte (strip-map) : une image OACI par branche ; branches est-ouest en bandes horizontales (2 l'une sous l'autre),
     // branches nord-sud en bandes verticales (2 côte à côte) ; une nouvelle page quand l'orientation change
     try {

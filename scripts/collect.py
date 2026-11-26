@@ -1394,6 +1394,53 @@ def collect_pratique():
         fallback('pratique_club.json')
 
 
+# ---------------------------------------------------------------- feux actifs (NASA FIRMS, fichiers publics des dernières 24 h, sans clé)
+FIRMS = 'https://firms.modaps.eosdis.nasa.gov/data/active_fire/'
+FIRMS_FILES = ('noaa-20-viirs-c2/csv/J1_VIIRS_C2_Europe_24h.csv', 'suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Europe_24h.csv', 'modis-c6.1/csv/MODIS_C6_1_Europe_24h.csv')
+
+
+def parse_firms(txt, la0, lo0, la1, lo1):
+    """Lignes CSV FIRMS -> [lat, lon, puissance MW, 'AAAA-MM-JJ HHMM'] dans le cadre, détections de faible confiance exclues."""
+    rows = txt.strip().splitlines()
+    if not rows:
+        return []
+    head = rows[0].split(',')
+    ix = {k: head.index(k) for k in ('latitude', 'longitude', 'frp', 'acq_date', 'acq_time', 'confidence') if k in head}
+    out = []
+    for line in rows[1:]:
+        c = line.split(',')
+        try:
+            la, lo = float(c[ix['latitude']]), float(c[ix['longitude']])
+        except (ValueError, IndexError, KeyError):
+            continue
+        conf = c[ix['confidence']] if 'confidence' in ix else ''
+        if conf in ('l', 'low') or (conf.isdigit() and int(conf) < 30):
+            continue
+        if la0 <= la <= la1 and lo0 <= lo <= lo1:
+            out.append([round(la, 4), round(lo, 4), float(c[ix['frp']] or 0) if 'frp' in ix else 0, f"{c[ix['acq_date']]} {c[ix['acq_time']].zfill(4)}"])
+    return out
+
+
+assert parse_firms('latitude,longitude,frp,acq_date,acq_time,confidence\n43.3,-0.4,12.5,2026-07-01,1342,nominal\n43.3,-0.4,1,2026-07-01,1342,low\n50,10,3,2026-07-01,100,h',
+                   42.0, -5.4, 49.0, 2.6) == [[43.3, -0.4, 12.5, '2026-07-01 1342']]
+
+
+def collect_fires():
+    print('Feux actifs (FIRMS)')
+    la0, lo0, la1, lo1 = map(float, BBOX.split(','))
+    out, ok = [], 0
+    for f in FIRMS_FILES:
+        try:
+            out += parse_firms(get(FIRMS + f, timeout=60), la0, lo0, la1, lo1)
+            ok += 1
+        except Exception as e:  # noqa: BLE001
+            print('  ', f, ':', e)
+    if ok:
+        save('fires.json', {'generated': NOW.isoformat(), 'source': 'NASA FIRMS (VIIRS, MODIS), 24 h', 'data': out})
+    else:
+        fallback('fires.json')
+
+
 def write_status():
     prev, prev_run = {}, None
     if FALLBACK_URL:
@@ -1413,7 +1460,7 @@ def write_status():
 
 
 if __name__ == '__main__':
-    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance']
+    what = sys.argv[1:] or ['metar', 'notam', 'supaip', 'aip', 'special', 'cams', 'fees', 'pratique', 'vigilance', 'fires']
     if 'metar' in what:
         collect_metar_taf()
     if 'notam' in what:
@@ -1432,6 +1479,8 @@ if __name__ == '__main__':
         collect_pratique()
     if 'vigilance' in what:
         collect_vigilance()
+    if 'fires' in what:
+        collect_fires()
     if os.path.exists(os.path.join(OUT, 'vac.json')):   # extrait léger pour la carte (carburant, paiement) : 700 ko -> quelques dizaines
         vac = json.load(open(os.path.join(OUT, 'vac.json'), encoding='utf-8'))
         if 'osm' in what or not sys.argv[1:]:

@@ -91,3 +91,12 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] X. QNH des METAR le long de la route, alerte au-delà de 3 hPa.
 - [x] Y. Thermiques l'été et brise de mer aux terrains côtiers (`thermals`, `seaBreeze`, `seaDir`).
 - [x] Z. Vitesse d'approche corrigée (masse, rafales) : `vappOf`.
+
+## Lot du 26/11/2026 (4)
+- [x] AA. Panne moteur au décollage : photo satellite de l'axe (± 30° sur 2 NM) et champs OSM, briefing à dire (`efatoPlan`).
+- [x] AB. Tronçons hors de portée de plané d'un terrain, en rouge sur la coupe et la carte (`glideGaps`).
+- [x] AC. Brume sèche / poussières (Open-Meteo qualité de l'air, `airQuality`, `hazeLevel`).
+- [x] AD. Feux détectés par satellite (NASA FIRMS, fichiers publics 24 h, `collect_fires`, `firesNear`).
+- [x] AE. NOTAM en français simple, triés par importance (`notamPlain`, `notamKind`).
+- [x] AF. Photo du terrain d'arrivée avec pistes OSM, schéma du tour de piste et point d'entrée, aussi dans le PDF (`airfieldPhoto`).
+- [x] AG. Éoliennes et lignes haute tension (OSM) sur la carte et la coupe (`osmObstacles`).

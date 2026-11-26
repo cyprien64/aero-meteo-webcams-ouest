@@ -23,7 +23,7 @@ const storage = () => { const m = new Map(); return { getItem: (k) => (m.has(k) 
 const el = () => anything();
 const document = {
   getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [], getElementsByTagName: () => [],
-  createElement: () => el(), createElementNS: () => el(), addEventListener() {}, removeEventListener() {},
+  createElement: () => el(), createElementNS: () => el(), addEventListener() {}, removeEventListener() {}, dispatchEvent() {},
   body: el(), head: el(), documentElement: el(), hidden: false, readyState: 'complete', cookie: '',
 };
 const win = {
@@ -32,9 +32,10 @@ const win = {
   history: { replaceState() {}, pushState() {} }, navigator: { userAgent: 'node', onLine: true, language: 'fr-FR', serviceWorker: { controller: null, register: () => new Promise(() => {}), addEventListener() {}, getRegistrations: async () => [] }, geolocation: undefined, clipboard: { writeText: async () => {} } },
   setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, requestIdleCallback: () => 0,
   fetch: () => new Promise(() => {}), addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
-  getComputedStyle: () => ({}), performance, Intl, Date, Math, JSON, Promise, URL, Blob: function () {}, Image: function () { return el(); },
+  getComputedStyle: () => ({}), Event: function () {}, performance, Intl, Date, Math, JSON, Promise, URL, Blob: function () {}, Image: function () { return el(); },
   innerWidth: 1200, innerHeight: 800, devicePixelRatio: 1, caches: undefined, Notification: undefined,
-  L: anything(), atob: (s) => Buffer.from(s, 'base64').toString('binary'), btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
+  // L.geoJSON appelle tout de suite son style (comme Leaflet) : une const utilisée avant sa déclaration fait planter le test
+  L: (() => { const L0 = anything(); return new Proxy(L0, { get: (t, k) => (k === 'geoJSON' ? (d, o) => { if (o && typeof o.style === 'function') o.style({ properties: { k: 'dep' } }); return anything(); } : L0[k]) }); })(), atob: (s) => Buffer.from(s, 'base64').toString('binary'), btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
 };
 win.window = win; win.self = win; win.globalThis = win;
 const ctx = vm.createContext(win);

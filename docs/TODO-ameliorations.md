@@ -111,3 +111,14 @@ Idées de fiabilité à étudier en priorité : test automatique de chargement d
 - [x] AL. Probabilité VFR : ensemble ECMWF (51 scénarios), part des scénarios avec plafond > 1500 ft sol et rafales < 25 kt sur toute la route (`ensStats`, `ensembleProb`).
 - [x] AM. Zone étendue à toute la France métropolitaine : 439 terrains (OurAirports), webcams cam-aero.eu et vision-environnement de toute la France, NOTAM des 5 FIR, bornes de `collect.py` et de la carte, repères visuels OSM.
 - [x] AN. Interface : thème clair façon Apple (automatique selon l'appareil, bouton 🌓), tuiles d'accueil (Préparer, Où voler, Mesurer), boutons bleus, interrupteurs verts ; le thème sombre actuel est gardé.
+
+## Interface, lot du 26/11/2026 (7)
+- [x] AO. Briefing en onglets : Résumé, Météo, Route, Terrains, Radio, Sécurité (`tabsHtml`) ; vol simple : fenêtre météo, créneaux, coût et liste de contrôle rangés dedans.
+- [x] AP. Formulaire de préparation en 3 étapes (Trajet, Avion et chargement, Pilote), options d'escale repliées.
+- [x] AQ. Verdict en grand : anneau (probabilité VFR), 3 raisons, heures clés.
+- [x] AR. Tiroir du panneau sur téléphone (réduit / moitié / plein écran), animations douces (désactivées si « réduire les animations »).
+- [x] AS. Icônes fines à la place des émojis (barre, tuiles, rubriques, onglets).
+- [x] AT. Fond « Schéma » clair en thème clair ; marqueurs METAR (pastille + trait de vent, cercle orange si rafales ≥ 25 kt), webcams et regroupements redessinés.
+- [x] AU. Fiche terrain : bandeau webcam, catégorie de vol en grand, schéma de la piste avec le vent.
+- [x] AV. PDF : page de garde (verdict, probabilité VFR, chiffres clés, croquis de la route).
+- [x] AW. Test de chargement : `L.geoJSON` appelle son style (attrape une const utilisée avant sa déclaration).

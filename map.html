@@ -20,20 +20,21 @@
   <div id="map"></div>
 
   <nav id="topbar" class="glass">
-    <button id="btn-prep" class="tb-main" title="Préparer un vol : briefing PDF et log Excel">✈️ <span>Préparer un vol</span></button>
-    <button id="btn-measure" class="tb" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles">📏<span>Mesurer</span></button>
-    <button id="btn-hist" class="tb" title="Historique des préparations">📚<span>Historique</span></button>
-    <button id="btn-clear" class="tb" title="Effacer la route, les mesures et les coupes tracées sur la carte">🧹<span>Effacer</span></button>
+    <button id="btn-prep" class="tb-main" title="Préparer un vol : briefing PDF et log Excel"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5V18l-2 1.5V21l3.5-1 3.5 1v-1.5L13 18v-5z"/></svg><span>Préparer un vol</span></button>
+    <button id="btn-measure" class="tb" title="Cliquer des points sur la carte : distance, cap et temps de vol selon le vent prévu par plusieurs modèles"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2"/></svg><span>Mesurer</span></button>
+    <button id="btn-hist" class="tb" title="Historique des préparations"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/></svg><span>Historique</span></button>
+    <button id="btn-clear" class="tb" title="Effacer la route, les mesures et les coupes tracées sur la carte"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg><span>Effacer</span></button>
     <div class="presets" id="presets" title="Affichages préréglés">
-      <button data-preset="meteo" title="METAR, webcams, observations, vent, vigilance">🌦️ Météo</button>
-      <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR">🧭 Navigation</button>
-      <button data-preset="all" title="Toutes les couches">🗺️ Tout</button>
+      <button data-preset="meteo" title="METAR, webcams, observations, vent, vigilance"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.8 8.2 4.9 4.9 0 0 1 17 18Z"/></svg>Météo</button>
+      <button data-preset="nav" title="Terrains, NOTAM, SUP AIP, espaces aériens, zones, points VFR"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z"/></svg>Navigation</button>
+      <button data-preset="all" title="Toutes les couches"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5zM2 13l10 5 10-5M2 17.5l10 5 10-5"/></svg>Tout</button>
     </div>
-    <button id="btn-theme" class="tb" title="Thème clair / sombre">🌓<span>Thème</span></button>
+    <button id="btn-theme" class="tb" title="Thème clair / sombre"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18zM12 3a9 9 0 0 0 0 18"/></svg><span>Thème</span></button>
     <div id="clock" title="Heure UTC">--:--:-- UTC</div>
   </nav>
 
   <aside id="panel" class="box glass">
+    <div class="grab" id="panel-grab" title="Glisser pour agrandir ou réduire"></div>
     <header class="brand">
       <div class="logo"><img src="icons/icon48.png" alt="" width="30" height="30"></div>
       <div class="brand-txt">
@@ -47,9 +48,9 @@
     <div id="panel-body">
       <div id="hello" class="hello"></div>
       <div class="quick">
-        <button id="q-prep" class="main" title="Départ, arrivée, avion : route, météo, NOTAM, briefing PDF"><b>✈️</b>Préparer un vol</button>
-        <button id="q-where" title="Terrains atteignables classés selon la météo"><b>🧭</b>Où voler ?</button>
-        <button id="q-measure" title="Distance, cap et temps entre des points de la carte"><b>📏</b>Mesurer</button>
+        <button id="q-prep" class="main" title="Départ, arrivée, avion : route, météo, NOTAM, briefing PDF"><b><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5V18l-2 1.5V21l3.5-1 3.5 1v-1.5L13 18v-5z"/></svg></b>Préparer un vol</button>
+        <button id="q-where" title="Terrains atteignables classés selon la météo"><b><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z"/></svg></b>Où voler ?</button>
+        <button id="q-measure" title="Distance, cap et temps entre des points de la carte"><b><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2"/></svg></b>Mesurer</button>
       </div>
       <button id="btn-last" class="btn ghost wide" hidden>📂 Dernier briefing (hors ligne)</button>
       <div class="favs" id="favs" title="Terrains favoris : ★ dans la fiche d'un terrain pour en ajouter"></div>
@@ -59,7 +60,7 @@
       <ul id="results"></ul>
 
       <details class="sec" open>
-        <summary>🌦️ Météo &amp; webcams</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.8 8.2 4.9 4.9 0 0 1 17 18Z"/></svg>Météo &amp; webcams</summary>
         <label><input type="checkbox" data-layer="metar" checked> <span class="sw sw-metar"></span> METAR / TAF (direct)</label>
         <label><input type="checkbox" data-layer="apt" checked> <span class="sw sw-apt"></span> Aérodromes sans METAR</label>
         <label><input type="checkbox" data-layer="camAero" checked> <span class="sw sw-cam-aero"></span> Webcams aérodromes</label>
@@ -76,7 +77,7 @@
       </details>
 
       <details class="sec" open>
-        <summary>⚠️ NOTAM &amp; SUP AIP</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 2.5 20h19zM12 10v4.5M12 17.5v.01"/></svg>NOTAM &amp; SUP AIP</summary>
         <label><input type="checkbox" data-layer="notam"> <span class="sw sw-notam"></span> NOTAM en route (24 h, ou pendant ton vol)</label>
         <div class="sub-opts">
           <label><input type="checkbox" id="notam-obst"> Afficher les obstacles</label>
@@ -99,7 +100,7 @@
       </details>
 
       <details class="sec">
-        <summary>🛩️ Espaces aériens</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18c2-6 14-6 16 0M7 18c1.5-3.5 8.5-3.5 10 0M12 4v4M9 6l3-2 3 2"/></svg>Espaces aériens</summary>
         <label><input type="checkbox" data-layer="asp"> <span class="sw sw-asp"></span> CTR / TMA / CTA (fréquences)</label>
         <label><input type="checkbox" data-layer="siv"> <span class="sw sw-siv"></span> SIV (fréquences Info)</label>
         <label><input type="checkbox" data-layer="zones"> <span class="sw sw-zones"></span> Zones P / R / D</label>
@@ -118,7 +119,7 @@
       </details>
 
       <details class="sec">
-        <summary>🌙 Jour / nuit aéronautique</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>Jour / nuit aéronautique</summary>
         <label><input type="checkbox" id="night-on"> Afficher la nuit sur la carte</label>
         <div id="night-ctrl" class="sub-opts">
           <label>Jour <input type="date" id="night-date"></label>
@@ -129,7 +130,7 @@
       </details>
 
       <details class="sec" open>
-        <summary>🗺️ Fond de carte</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14"/></svg>Fond de carte</summary>
         <select id="basemap">
           <optgroup label="Cartes aéronautiques / IGN">
             <option value="oaci">Carte OACI-VFR 1/500 000 (IGN-SIA)</option>
@@ -148,7 +149,7 @@
       </details>
 
       <details class="sec">
-        <summary>🧰 Outils météo &amp; trafic</summary>
+        <summary><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5zM6 3l3 3-1.5 1.5-3-3z"/></svg>Outils météo &amp; trafic</summary>
         <div id="tools" class="tools"></div>
       </details>
 

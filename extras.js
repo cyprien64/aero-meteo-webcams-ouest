@@ -257,6 +257,22 @@
   $('#q-where').addEventListener('click', () => { if (!$('#pf-where')) $('#btn-prep').click(); const w = $('#pf-where'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); w.click(); } });
   $('#btn-theme').addEventListener('click', () => window.AWW_theme && window.AWW_theme.toggle());
 
+  // ================================================================ tiroir du panneau sur téléphone : réduit / moitié / plein écran (toucher ou glisser la poignée)
+  (() => {
+    const p = $('#panel'), g = $('#panel-grab'), S = ['sh-min', 'sh-mid', 'sh-full'];
+    let st = 1, y0 = null, h0 = 0;
+    const set = (k) => { st = Math.max(0, Math.min(2, k)); S.forEach((c, i) => p.classList.toggle(c, i === st)); p.style.height = ''; };
+    set(1);
+    g.addEventListener('click', () => set(st === 2 ? 0 : st + 1));
+    g.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; h0 = p.getBoundingClientRect().height; p.style.transition = 'none'; }, { passive: true });
+    g.addEventListener('touchmove', (e) => { if (y0 == null) return; p.style.height = Math.max(90, h0 + y0 - e.touches[0].clientY) + 'px'; }, { passive: true });
+    g.addEventListener('touchend', (e) => {
+      if (y0 == null) return; const dy = y0 - e.changedTouches[0].clientY; y0 = null; p.style.transition = '';
+      if (Math.abs(dy) < 8) return;   // simple toucher : géré par click
+      const r = p.getBoundingClientRect().height / innerHeight; set(r < 0.3 ? 0 : r < 0.68 ? 1 : 2);
+    });
+  })();
+
   // ================================================================ 🧹 Effacer les tracés
   $('#btn-clear').addEventListener('click', () => {
     ms.pts = []; ms.res = null; draw(); if (ms.on) setMeasure(false);

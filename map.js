@@ -54,14 +54,17 @@
   map.createPane('outlinePane').style.zIndex = 395; map.getPane('outlinePane').style.pointerEvents = 'none';
   map.createPane('haloPane').style.zIndex = 590; map.getPane('haloPane').style.pointerEvents = 'none';
 
+  // couleurs du fond « Schéma » : bleu nuit (thème sombre) ou terre claire / mer bleu pâle façon Plans (thème clair)
+  const light = () => document.documentElement.dataset.theme === 'light';
+  function schemaStyle(k) {
+    const L0 = light();
+    if (k === 'nb') return L0 ? { color: '#b8b5ab', weight: 1, opacity: .9, fillColor: '#e4e2da', fillOpacity: 1 } : { color: '#ffffff', weight: 1, opacity: .7, fillColor: '#0a6a9c', fillOpacity: 1 };
+    if (k === 'reg') return L0 ? { color: '#8e8e93', weight: 1.2, opacity: .8, fill: false } : { color: '#ffffff', weight: 1.4, opacity: .9, fill: false };
+    return L0 ? { color: '#a9a69c', weight: .5, opacity: .5, fillColor: '#f5f3ec', fillOpacity: 1 } : { color: '#ffffff', weight: .5, opacity: .25, fillColor: '#0b74aa', fillOpacity: 1 };
+  }
   const schema = L.geoJSON(window.BASEMAP, {
     pane: 'basePane', interactive: false, smoothFactor: 2,
-    style: (f) => {
-      const k = f.properties.k;
-      if (k === 'nb') return { color: '#ffffff', weight: 1, opacity: .7, fillColor: '#0a6a9c', fillOpacity: 1 };
-      if (k === 'reg') return { color: '#ffffff', weight: 1.4, opacity: .9, fill: false };
-      return { color: '#ffffff', weight: .5, opacity: .25, fillColor: '#0b74aa', fillOpacity: 1 };
-    },
+    style: (f) => schemaStyle(f.properties.k),
   });
   const tileOpt = { maxZoom: 15 };
   const geopf = (layer, tms, style, priv) => `https://data.geopf.fr/${priv ? 'private/wmts?apikey=ign_scan_ws&' : 'wmts?'}SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&TILEMATRIXSET=${tms}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg`;
@@ -98,6 +101,9 @@
   const frOutline = L.layerGroup();
   (window.FRANCE || []).forEach((poly) => L.polygon(poly, { pane: 'outlinePane', interactive: false, smoothFactor: 2, color: '#00e5ff', weight: 2.6, opacity: .95, fill: false }).addTo(frOutline));
   (window.BASEMAP && window.BASEMAP.features || []).filter((f) => f.properties.k === 'reg').forEach((f) => L.geoJSON(f, { pane: 'outlinePane', interactive: false, smoothFactor: 2, style: { color: '#ffffff', weight: 1.2, opacity: .55, dashArray: '6 4', fill: false } }).addTo(frOutline));
+  const outlineStyle = () => { const L0 = light(); frOutline.eachLayer((l) => l.setStyle(l instanceof L.GeoJSON ? { color: L0 ? '#8e8e93' : '#ffffff' } : { color: L0 ? '#007aff' : '#00e5ff' })); };
+  outlineStyle();
+  document.addEventListener('aww-theme', () => { schema.setStyle((f) => schemaStyle(f.properties.k)); outlineStyle(); });
   const frMask = L.polygon([[[60, -30], [60, 30], [30, 30], [30, -30]], ...(window.FRANCE || [])], { pane: 'maskPane', interactive: false, stroke: false, fillColor: '#000814', fillOpacity: .38 });
   const syncFr = () => {
     const o = $('#fr-outline').checked, m = $('#fr-mask').checked;
@@ -121,9 +127,15 @@
   document.head.appendChild(zs);
 
   // ---------- Icônes ----------
-  const svgCam = (fill) => `<svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="${fill}" stroke="#003a5c" stroke-width="1.5"/><path d="M6 9.2c0-.7.5-1.2 1.2-1.2h1.6l1-1.5h4.4l1 1.5h1.6c.7 0 1.2.5 1.2 1.2v6.1c0 .7-.5 1.2-1.2 1.2H7.2c-.7 0-1.2-.5-1.2-1.2z" fill="#003a5c"/><circle cx="12" cy="12.2" r="2.6" fill="${fill}"/></svg>`;
+  // webcam : pastille ronde (jaune = aérodrome), pictogramme bleu nuit, ombre douce
+  const svgCam = (fill) => `<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))"><circle cx="12" cy="12" r="10.5" fill="${fill}" stroke="#fff" stroke-width="1.6"/><path d="M6.6 9.4c0-.6.5-1.1 1.1-1.1h1.5l.9-1.4h3.8l.9 1.4h1.5c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H7.7c-.6 0-1.1-.5-1.1-1.1z" fill="#0b2a44"/><circle cx="12" cy="12.1" r="2.2" fill="${fill}"/></svg>`;
   const svgFlag = `<svg width="18" height="22" viewBox="0 0 18 22"><path d="M3 21V2" stroke="#fff" stroke-width="1.6"/><path d="M3.8 2.5h11l-3 3.5 3 3.5h-11z" fill="#ff4b3e" stroke="#7a0f08" stroke-width=".6"/></svg>`;
-  const svgSock = (cat) => `<svg width="30" height="22" viewBox="0 0 30 22"><path d="M2 21V3" stroke="#fff" stroke-width="1.8"/><path d="M3 3l24 3.5v6L3 15z" fill="#fff" style="stroke:var(--${cat})" stroke-width="2"/><path d="M8 3.7v10.6M14 4.6v8.8M20 5.5v7.1" stroke="#ff2a2a" stroke-width="3.2"/></svg>`;
+  // METAR : pastille de la catégorie de vol, trait de vent vers la direction d'où il vient (longueur selon la force)
+  const svgMetar = (cat, m) => {
+    const d = m.wdir != null && m.wdir !== 'VRB' && (m.wspd || 0) >= 3 ? +m.wdir : null, len = Math.min(10, 3 + (m.wspd || 0) / 3), y = (17 - 7 - len).toFixed(1);
+    const g = (m.wgst || 0) >= 25 ? '<circle cx="17" cy="17" r="10.5" fill="none" stroke="#ff9500" stroke-width="1.6" stroke-dasharray="3 2"/>' : '';
+    return `<svg width="34" height="34" viewBox="0 0 34 34" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))">${d != null ? `<g transform="rotate(${d} 17 17)"><path d="M17 10V${y}" stroke="#0b2a44" stroke-width="3.4" stroke-linecap="round"/><path d="M17 10V${y}" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></g>` : ''}${g}<circle cx="17" cy="17" r="7" style="fill:var(--${cat})" stroke="#fff" stroke-width="2.2"/></svg>`;
+  };
   const windColor = (kmh) => kmh == null ? '#9aa' : kmh < 10 ? '#3cdc6c' : kmh < 20 ? '#c7f03c' : kmh < 30 ? '#ffb21e' : kmh < 40 ? '#ff5a1e' : '#d11fd1';
   const svgArrow = (deg, col) => `<svg width="26" height="26" viewBox="0 0 26 26" style="transform:rotate(${deg}deg)"><path d="M13 2l6.5 20L13 18l-6.5 4z" fill="${col}" stroke="#002a40" stroke-width="1.2"/></svg>`;
 
@@ -248,11 +260,8 @@
     const m = metars[a.icao];
     const nN = (NOTAM.ad[a.icao] || []).length, nNew = (NOTAM.ad[a.icao] || []).filter((n) => n.isNew).length;
     const badge = nN ? `<b class="nbadge${nNew ? ' nnew' : ''}" title="${nN} NOTAM${nNew ? ` dont ${nNew} nouveau(x)` : ''}">${nN}</b>` : '';
-    const lbl = `<span class="apt-label" style="position:absolute;left:${m ? 16 : 9}px;top:-7px">${a.icao}${badge}<small>${esc(a.name)}</small></span>`;
-    if (m) {
-      const cat = m.fltCat || 'UNK';
-      return divIcon(`<div style="position:relative">${svgSock(cat)}${lbl}</div>`, [30, 22], [3, 20], 'mk apt-metar');
-    }
+    const lbl = `<span class="apt-label" style="position:absolute;left:${m ? 27 : 9}px;top:${m ? 5 : -7}px">${a.icao}${badge}<small>${esc(a.name)}</small></span>`;
+    if (m) return divIcon(`<div style="position:relative">${svgMetar(m.fltCat || 'UNK', m)}${lbl}</div>`, [34, 34], [17, 17], 'mk apt-metar');
     return divIcon(`<div style="position:relative"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="#073450" stroke="#6fe000" stroke-width="2.6"/></svg>${lbl}</div>`, [14, 14], [7, 7], 'mk apt-plain');
   }
   function aptTip(a) {
@@ -621,6 +630,7 @@
     const cams = near.filter((x) => x.s.t === 'cam').slice(0, 12);
     const others = near.filter((x) => x.s.t !== 'cam').slice(0, 8);
     const lat = fmtCoord(a.la, 'N', 'S'), lon = fmtCoord(a.lo, 'E', 'W');
+    const hero = (cams.find((x) => x.s.img && !x.s.oldPreview && !x.s.dead && !x.s.frozen && x.d <= 10) || {}).s?.img;   // image de webcam proche en bandeau
     // format reconnu par meteoblue : lat N, longitude signée E, altitude en m, fuseau (sinon il renvoie vers Paris)
     const mb = `${a.la.toFixed(3)}N${a.lo.toFixed(3)}E${Math.round((+a.elev || 0) / 3.281)}_Europe%2FParis`;
     const links = [
@@ -634,10 +644,11 @@
     ];
     if (fcstByIcao[icao]) links.unshift(['Prévisions Inter Aéro', fcstByIcao[icao].u, 1174, 984]);
     const html = `
-      <h3><span class="icao">${icao}</span> ${esc(a.name)} <button class="fav-star${favs().includes(icao) ? ' on' : ''}" id="fav-star" title="Ajouter / retirer des favoris">${favs().includes(icao) ? '★' : '☆'}</button></h3>
-      <p class="meta">${lat} ${lon}${a.elev !== '' && a.elev != null ? ` · ${a.elev} ft` : ''}
-        ${m ? ` · <span class="cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span>` : ''}</p>
-      ${m ? `<h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
+      <div class="ad-hero${hero ? '' : ' noimg'}"${hero ? ` style="background-image:url('${esc(hero)}')"` : ''}>
+        <div class="ad-hero-txt"><h3><span class="icao">${icao}</span> ${esc(a.name)} <button class="fav-star${favs().includes(icao) ? ' on' : ''}" id="fav-star" title="Ajouter / retirer des favoris">${favs().includes(icao) ? '★' : '☆'}</button></h3>
+        <p>${lat} ${lon}${a.elev !== '' && a.elev != null ? ` · ${a.elev} ft` : ''}</p></div></div>
+      ${m ? `<div class="ad-now"><span class="ad-cat c-${m.fltCat || 'UNK'}">${m.fltCat || '?'}</span><div>${[m.wdir != null ? `vent ${m.wdir === 'VRB' ? 'variable' : String(m.wdir).padStart(3, '0') + '°'} ${m.wspd} kt${m.wgst ? ` rafales ${m.wgst}` : ''}` : '', m.temp != null ? `${Math.round(m.temp)} °C` : '', m.altim ? `QNH ${Math.round(m.altim)}` : ''].filter(Boolean).map(esc).join(' · ')}<small>METAR ${esc((m.rawOb.match(/\b\d{6}Z\b/) || [''])[0])}</small></div>${rwyDiagram(icao, m)}</div>
+        <h4>METAR</h4><pre>${esc(m.rawOb)}</pre>${decodeMetar(m)}${rwyWindHtml(icao, m)}` : '<p class="meta">Pas de METAR pour cet aérodrome — voir la station la plus proche.</p>'}
       ${t ? `<h4>TAF <span class="seg" id="taf-mode"><button data-m="clair">En clair</button><button data-m="code">Codé</button></span></h4>
         <div class="taf-box" data-m="${store.get('tafMode', 'clair')}">${tafHtml(t.rawTAF)}<pre>${esc(t.rawTAF.replace(/\s(?=(BECMG|TEMPO|PROB\d\d|FM\d{6}))/g, '\n  '))}</pre></div>` : ''}
       ${!m ? nearestMetarHtml(a) : ''}
@@ -673,6 +684,18 @@
     if (fly) map.flyTo([a.la, a.lo], Math.max(map.getZoom(), 9), { duration: .6 });
   }
 
+  // Schéma de la piste la mieux orientée avec la flèche du vent (vue du dessus, nord en haut)
+  function rwyDiagram(icao, m) {
+    const e = escaleOf(icao), q = ((e && e.qfu) || []).map(Number).filter((x) => x > 0);
+    if (!q.length || m.wdir == null || m.wdir === 'VRB' || !m.wspd) return '';
+    const h = q.sort((x, y) => Math.cos((m.wdir - y) * Math.PI / 180) - Math.cos((m.wdir - x) * Math.PI / 180))[0];
+    const r = (m.wdir - h) * Math.PI / 180, hw = Math.round(m.wspd * Math.cos(r)), xw = Math.abs(Math.round(m.wspd * Math.sin(r)));
+    const rn = String(Math.round(h / 10) % 36 || 36).padStart(2, '0');
+    return `<div class="rwy-box"><svg class="rwy-dia" viewBox="0 0 64 64" aria-hidden="true">
+      <g transform="rotate(${h} 32 32)"><rect x="27" y="8" width="10" height="48" rx="2" class="rd-rwy"/><path d="M32 12v40" class="rd-axis"/></g>
+      <g transform="rotate(${m.wdir} 32 32)"><path d="M32 2v14M27.5 11 32 17l4.5-6" class="rd-wind"/></g>
+      </svg><small>Piste ${rn}<br>${hw >= 0 ? 'face' : 'arrière'} ${Math.abs(hw)} kt<br>travers ${xw} kt</small></div>`;
+  }
   // Vent dans l'axe de chaque piste (QFU de la VAC) : face / arrière et travers, rafales comprises
   function rwyWindHtml(icao, m) {
     const e = escaleOf(icao), q = ((e && e.qfu) || []).map(Number).filter((x) => x > 0);

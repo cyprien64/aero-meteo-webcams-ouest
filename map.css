@@ -431,3 +431,92 @@ details.sec { border-radius: 16px; padding: 2px 14px 12px; }
 /* champs isolés des fiches (Où voler, comparer un départ) */
 #detail .row input:not([type=checkbox]):not([type=range]) { margin-left: 4px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0,0,0,.28); color: var(--text); font: inherit; }
 :root[data-theme="light"] #detail .row input:not([type=checkbox]):not([type=range]) { background: var(--field); border-color: transparent; }
+
+/* ================================================================ onglets du briefing, icônes fines */
+.ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; margin-right: 5px; flex: none; }
+.tabwrap { margin-top: 8px; }
+.tabs { position: sticky; top: -18px; z-index: 5; display: flex; gap: 2px; padding: 3px; margin: 0 0 8px; border-radius: 12px; overflow-x: auto; scrollbar-width: none;
+  background: rgba(0,0,0,.35); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--muted); padding: 7px 10px; border-radius: 9px;
+  font: 600 12px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; cursor: pointer; white-space: nowrap; transition: background .2s, color .2s; }
+.tab.on { background: rgba(255,255,255,.16); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.tbadge { font-style: normal; font-size: 10px; min-width: 16px; padding: 0 4px; border-radius: 99px; background: #ff9500; color: #fff; margin-left: 4px; line-height: 16px; }
+.tabp { display: none; } .tabp.on { display: block; animation: fadeUp .22s ease; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+:root[data-theme="light"] .tabs { background: rgba(118,118,128,.14); }
+:root[data-theme="light"] .tab.on { background: #fff; color: #000; box-shadow: 0 3px 8px rgba(0,0,0,.12), 0 0 1px rgba(0,0,0,.2); }
+/* verdict en tête du briefing */
+.verdict { display: flex; gap: 14px; align-items: center; margin: 6px 0; padding: 14px; border-radius: 18px; background: var(--card); border: 1px solid var(--line2); }
+.vring { width: 84px; height: 84px; flex: none; transform: rotate(-90deg); }
+.vring .vr-bg { fill: none; stroke: rgba(128,128,128,.22); stroke-width: 8; }
+.vring .vr-fg { fill: none; stroke-width: 8; stroke-linecap: round; transition: stroke-dasharray .6s ease; }
+.vring text { transform: rotate(90deg); transform-origin: 40px 40px; fill: var(--text); }
+.vring .vr-t { font: 700 17px -apple-system, system-ui, sans-serif; } .vring .vr-s { font: 600 8px system-ui, sans-serif; fill: var(--muted); }
+.vd-txt { min-width: 0; flex: 1; } .vd-txt > b { font-size: 18px; letter-spacing: -.01em; }
+.vd-txt ul { margin: 4px 0 6px; padding-left: 16px; font-size: 12px; } .vd-txt p { margin: 4px 0 6px; font-size: 12px; color: var(--muted); }
+.vd-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vd-facts small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+:root[data-theme="light"] .verdict { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+/* formulaire de préparation en 3 étapes */
+.steps { display: flex; gap: 4px; margin: 8px 0 4px; }
+.step { flex: 1; display: flex; align-items: center; gap: 6px; justify-content: center; padding: 8px 6px; border: 0; border-radius: 12px; background: var(--card); color: var(--muted);
+  font: 600 12px -apple-system, system-ui, sans-serif; cursor: pointer; transition: background .2s, color .2s; }
+.step i { font-style: normal; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(128,128,128,.3); color: #fff; font-size: 11px; }
+.step.on { background: var(--blue); color: #fff; } .step.on i { background: #fff; color: var(--blue); }
+.pf-step { display: none; } .pf-step.on { display: grid; animation: fadeUp .22s ease; }
+.step-nav { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; } .step-nav .btn:last-child { margin-left: auto; }
+details.more { border-radius: 12px; background: var(--card); padding: 2px 10px 8px; } details.more > summary { cursor: pointer; padding: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text); }
+
+/* ================================================================ tiroir sur téléphone, animations */
+.grab { display: none; }
+@media (max-width: 700px) {
+  #panel { top: auto; bottom: 0; left: 0; width: 100%; max-height: none; border-radius: 24px 24px 0 0; transition: height .32s cubic-bezier(.2,.8,.2,1);
+    padding-bottom: env(safe-area-inset-bottom); }
+  #panel.sh-min { height: 150px; } #panel.sh-mid { height: 48%; } #panel.sh-full { height: calc(100% - 72px); }
+  .grab { display: block; position: relative; z-index: 2; height: 22px; margin: 0 0 -10px; cursor: grab; touch-action: none; }
+  .grab::after { content: ''; position: absolute; left: 50%; top: 8px; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: rgba(128,128,128,.55); }
+  #detail { animation: sheetUp .3s cubic-bezier(.2,.8,.2,1); }
+  .quick button { padding: 10px 4px 8px; }
+}
+@keyframes sheetUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slideIn { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (min-width: 701px) { #detail:not([hidden]) { animation: slideIn .28s cubic-bezier(.2,.8,.2,1); } }
+details.sec[open] > :not(summary), details.more[open] > :not(summary) { animation: fadeUp .22s ease; }
+.btn:active, .tools button:active, .presets button:active, #topbar .tb:active, #topbar .tb-main:active, .tab:active, .step:active { transform: scale(.96); }
+.btn, .tools button, .presets button, #topbar .tb, #topbar .tb-main { transition: transform .12s, background .15s, border-color .15s; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+/* icônes de la barre, des tuiles et des rubriques */
+#topbar .tb .ico { width: 21px; height: 21px; margin: 0; }
+#topbar .tb-main .ico { width: 20px; height: 20px; margin: 0; fill: currentColor; stroke: none; }
+.presets button .ico { width: 15px; height: 15px; margin-right: 4px; }
+.quick button b .ico { width: 24px; height: 24px; margin: 0; } .quick button.main b .ico { fill: currentColor; stroke: none; }
+details.sec > summary .ico { width: 18px; height: 18px; margin-right: 8px; color: var(--blue); }
+:root[data-theme="light"] #map, :root[data-theme="light"] .leaflet-container { background: #c9e3f4; }
+:root[data-theme="light"] body { background: #c9e3f4; }
+:root[data-theme="light"] .apt-label small { color: #1d1d1f; } :root[data-theme="light"] .apt-label { text-shadow: 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff; color: #1f7a35; }
+:root[data-theme="light"] .vfr-label { color: #1d1d1f; text-shadow: 0 0 3px #fff, 0 0 2px #fff; }
+/* regroupements plus doux */
+.clu b { background: rgba(16, 38, 61, .78); border: 2px solid rgba(255,255,255,.9); font: 700 12px -apple-system, system-ui, sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+:root[data-theme="light"] .clu b { background: rgba(255,255,255,.95); color: #007aff; border: 0; box-shadow: 0 2px 8px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.05); }
+:root[data-theme="light"] .apt-plain circle { fill: #fff; stroke: #1f7a35; }
+/* fiche terrain : bandeau webcam, situation actuelle, schéma de piste */
+.ad-hero { position: relative; margin: -18px -20px 10px; height: 150px; border-radius: var(--radius) var(--radius) 0 0; background: linear-gradient(135deg, #1b6fb5, #0b3a5e) center / cover no-repeat; display: flex; align-items: flex-end; }
+.ad-hero.noimg { height: auto; min-height: 76px; }
+.ad-hero::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,.65)); }
+.ad-hero-txt { position: relative; z-index: 1; padding: 12px 18px; color: #fff; } .ad-hero-txt p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
+.ad-hero h3 { margin: 0 !important; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.5); } .ad-hero .icao { color: #b8f58a !important; }
+.ad-now { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: var(--card); margin-bottom: 4px; font-size: 13px; font-weight: 600; }
+.ad-now > div { flex: 1; } .ad-now small { display: block; font-weight: 500; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.ad-cat { display: grid; place-items: center; min-width: 54px; height: 54px; border-radius: 16px; font: 800 15px -apple-system, system-ui, sans-serif; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.rwy-dia { width: 64px; height: 64px; flex: none; }
+.rd-rwy { fill: #3a3a3c; stroke: #fff; stroke-width: 1; } .rd-axis { stroke: #fff; stroke-width: 1; stroke-dasharray: 3 3; }
+.rd-wind { fill: none; stroke: #0a84ff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; } .rd-t { fill: var(--text); font: 700 7px system-ui, sans-serif; }
+#detail-close { z-index: 3; background: rgba(0,0,0,.35); color: #fff; border-color: transparent; }
+:root[data-theme="light"] .ad-now { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+.rwy-box { display: flex; align-items: center; gap: 6px; } .rwy-box small { font-size: 10.5px; line-height: 1.3; color: var(--muted); margin: 0; white-space: nowrap; }
+.rwy-dia { width: 54px; height: 54px; }
+/* bouton 📍 posé dans le champ, à droite */
+.prep-form label { position: relative; }
+.prep-form label > .pick-btn { position: absolute; right: 6px; bottom: 6px; z-index: 1; margin: 0; line-height: 22px; }
+.prep-form label:has(> .pick-btn) > input { padding-right: 40px; }

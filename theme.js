@@ -2,8 +2,8 @@
 (function () {
   const root = document.documentElement, mq = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : { matches: true };
   const saved = () => { try { return localStorage.getItem('aww.theme'); } catch (e) { return null; } };
-  const apply = () => { root.dataset.theme = saved() || (mq.matches ? 'dark' : 'light'); };
+  const apply = () => { root.dataset.theme = saved() || (mq.matches ? 'dark' : 'light'); document.dispatchEvent(new Event('aww-theme')); };
   apply();
   if (mq.addEventListener) mq.addEventListener('change', apply);
-  window.AWW_theme = { toggle() { const n = root.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('aww.theme', n); } catch (e) { /* stockage bloqué */ } root.dataset.theme = n; } };
+  window.AWW_theme = { toggle() { const n = root.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('aww.theme', n); } catch (e) { /* stockage bloqué */ } root.dataset.theme = n; document.dispatchEvent(new Event('aww-theme')); } };
 })();

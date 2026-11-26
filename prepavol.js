@@ -622,24 +622,36 @@
       <p class="meta">Route directe entre les terrains (codes OACI), contournement automatique des zones interdites et des RTBA actives.</p>
       <datalist id="apt-list">${aptOptions()}</datalist>
       ${store.get('favs', []).length ? `<div class="row" style="margin:4px 0"><label>⭐ Mes navs <select id="pf-fav"><option value="">— choisir —</option>${store.get('favs', []).map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join('')}</select></label><button type="button" class="btn" id="pf-fav-del">🗑️</button></div>` : ''}
-      <div class="prep-form">
+      <div class="steps" role="tablist"><button type="button" class="step on" data-step="1"><i>1</i>Trajet</button><button type="button" class="step" data-step="2"><i>2</i>Avion et chargement</button><button type="button" class="step" data-step="3"><i>3</i>Pilote</button></div>
+      <div class="prep-form pf-step on" data-stepp="1">
         <label>Départ <button type="button" class="pick-btn" data-pick="pf-dep" title="Choisir sur la carte">📍</button><input id="pf-dep" list="apt-list" value="${esc(f.dep || '')}" placeholder="LFBP" autocomplete="off"></label>
         <label>Arrivée <button type="button" class="pick-btn" data-pick="pf-arr" title="Choisir sur la carte">📍</button><input id="pf-arr" list="apt-list" value="${esc(f.arr || '')}" placeholder="LFRN" autocomplete="off"></label>
         <label class="full">Points tournants (terrains OACI ou points VFR comme BP-N, optionnel) <button type="button" class="pick-btn" data-pick="pf-wps" title="Choisir sur la carte">📍</button> <span class="meta">📍 puis clic sur la carte pour ajouter un point</span><input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX BI-N"></label>
         <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
+        <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
+        <label>Dégagement (destination finale) <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
+        <div class="full" id="pf-adcheck"></div>
+        <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${esc(f.cor || 10)}"></label>
+        <label>Éviter<select id="pf-avoid">
+          <option value="p+rtba" ${!['p', 'none', 'easy'].includes(f.avoid) ? 'selected' : ''}>Zones P + RTBA actives</option>
+          <option value="easy" ${f.avoid === 'easy' ? 'selected' : ''}>Route « VFR facile » : P, RTBA, ZRT, R / D actives et espaces C / D</option>
+          <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
+          <option value="none" ${f.avoid === 'none' ? 'selected' : ''}>Ne rien contourner</option></select></label>
+        <details class="full more"><summary>Escales, aller-retour, vol local</summary><div class="prep-form">
         <label class="full">Escales suivantes (aller-retour, voyage : ex. « LFCH LFBP »)<input id="pf-stages" value="${esc(f.stages || '')}" placeholder="vide = vol simple ; LFBP pour revenir au départ" autocomplete="off"></label>
         <label><input id="pf-rt" type="checkbox" ${f.rt ? 'checked' : ''}> Aller-retour (retour au départ ajouté)</label>
         <label><input id="pf-local" type="checkbox" ${f.local ? 'checked' : ''}> Vol local (pas d'arrivée ailleurs)</label>
         <label>Vol local : durée (min) / rayon (NM)<span class="row"><input id="pf-ldur" type="number" min="10" max="300" step="10" value="${esc(f.ldur || 60)}" style="width:70px"><input id="pf-lrad" type="number" min="3" max="40" value="${esc(f.lrad || 15)}" style="width:60px"></span></label>
-        <div class="full" id="pf-adcheck"></div>
         <label>Prix du carburant aux escales (€/L, option)<input id="pf-fuelprice" type="number" min="0" max="10" step="0.01" value="${esc(f.fuelPrice || '')}"></label>
         <label class="full" title="Pour chaque escale : passager avant / passagers arrière / bagages (kg) au départ de cette escale. Ex. « LFCH:0/0/15 » = on dépose le passager à Arcachon">Charges différentes au départ des escales (option)<input id="pf-stload" value="${esc(f.stload || '')}" placeholder="ex. LFCH:0/0/15 LFBP:75/0/10"></label>
         <label>Temps d'escale (min)<input id="pf-turn" type="number" min="0" max="600" step="5" value="${esc(f.turn ?? 45)}"></label>
         <label>Avitaillement aux escales<select id="pf-refuel"><option value="0" ${f.refuel ? '' : 'selected'}>Non (carburant restant)</option><option value="1" ${f.refuel ? 'selected' : ''}>Oui (plein du réservoir principal)</option></select></label>
-        <label>Dégagement (destination finale) <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
         <label>Dégagements des escales (dans l'ordre, vide = auto)<input id="pf-stalts" value="${esc(f.stalts || '')}" placeholder="auto : terrain à METAR le plus proche" autocomplete="off"></label>
-        <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
+        </div></details>
+        <div class="full step-nav"><button type="button" class="btn" data-goto-step="2">Suivant : avion et chargement ›</button></div>
+      </div>
+      <div class="prep-form pf-step" data-stepp="2">
         <label>Avion<select id="pf-reg">${FLEET.map((a) => `<option value="${a.reg}" ${a.reg === reg ? 'selected' : ''}>${a.reg} — ${esc(TYPES[a.type].label)}</option>`).join('')}</select></label>
         <label>Régime<select id="pf-regime">${regimeOptions(reg, f.regime)}</select></label>
         <label>Immatriculation (si différente)<input id="pf-immat" value="${esc(f.immat || '')}" placeholder="${esc(reg)}"></label>
@@ -647,20 +659,17 @@
         <p class="meta full" id="pf-acnote" style="grid-column:1/-1;margin:0"></p>
         <label>Altitude croisière (ft)<input id="pf-ft" type="number" min="500" max="12000" step="500" value="${esc(f.ft || 2500)}"></label>
         <label title="Une altitude par branche de la 1re étape (ex. 3000 5500 2000) ; vide = altitude de croisière partout">Altitudes par branche (ft, option)<input id="pf-legft" placeholder="ex. 3000 5500 2000" value="${esc(f.legft || '')}"></label>
-        <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${esc(f.res ?? 30)}"></label>
-        <label>Réserve météo (% si vent de face > 15 kt ou météo marginale)<input id="pf-wxres" type="number" min="0" max="50" step="5" value="${esc(f.wxres ?? 10)}"></label>
         <label>Pilote (kg)<input id="pf-m1" type="number" min="0" max="150" value="${esc(f.m1 ?? 80)}"></label>
         <label>Copilote / passager avant (kg)<input id="pf-m2" type="number" min="0" max="150" value="${esc(f.m2 ?? 0)}"></label>
         <label>Passagers arrière (kg)<input id="pf-m3" type="number" min="0" max="250" value="${esc(f.m3 ?? 0)}"></label>
         <label>Bagages (kg)<input id="pf-m4" type="number" min="0" max="60" value="${esc(f.m4 ?? 10)}"></label>
         <label>Carburant au départ (L)<input id="pf-fuel" type="number" min="0" max="200" value="${esc(f.fuel ?? 100)}"></label>
         <label id="pf-aux-l">Réservoir supp. (L)<input id="pf-aux" type="number" min="0" max="50" value="${esc(f.aux ?? 0)}"></label>
-        <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${esc(f.cor || 10)}"></label>
-        <label>Éviter<select id="pf-avoid">
-          <option value="p+rtba" ${!['p', 'none', 'easy'].includes(f.avoid) ? 'selected' : ''}>Zones P + RTBA actives</option>
-          <option value="easy" ${f.avoid === 'easy' ? 'selected' : ''}>Route « VFR facile » : P, RTBA, ZRT, R / D actives et espaces C / D</option>
-          <option value="p" ${f.avoid === 'p' ? 'selected' : ''}>Zones P seulement</option>
-          <option value="none" ${f.avoid === 'none' ? 'selected' : ''}>Ne rien contourner</option></select></label>
+        <label>Réserve finale (min)<input id="pf-res" type="number" min="0" max="120" value="${esc(f.res ?? 30)}"></label>
+        <label>Réserve météo (% si vent de face > 15 kt ou météo marginale)<input id="pf-wxres" type="number" min="0" max="50" step="5" value="${esc(f.wxres ?? 10)}"></label>
+        <div class="full step-nav"><button type="button" class="btn" data-goto-step="1">‹ Trajet</button><button type="button" class="btn" data-goto-step="3">Suivant : pilote ›</button></div>
+      </div>
+      <div class="prep-form pf-step" data-stepp="3">
         <datalist id="pil-list">${Object.keys(store.get('pilots', {})).map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
         <label>Partage du coût entre (personnes)<input id="pf-share" type="number" min="1" max="4" value="${esc(f.share || 1)}"></label>
         <label>Pilote (nom, profil mémorisé sur cet appareil)<input id="pf-pil" list="pil-list" value="${esc(f.pil || '')}" autocomplete="off"></label>
@@ -676,6 +685,7 @@
           <p class="meta">Valeurs en mètres depuis la référence du manuel de vol. Vide = valeur par défaut (indiquée en grisé). Mémorisé pour chaque avion sur cet appareil.</p>
           <div class="prep-form" id="pf-arms"></div>
         </details>
+        <div class="full step-nav"><button type="button" class="btn" data-goto-step="2">‹ Avion et chargement</button></div>
       </div>
       <div class="prep-actions">
         <button class="btn primary" id="pf-calc">Calculer la route</button>
@@ -1004,9 +1014,11 @@
         A.setNotamWindow(new Date(trip[0].depT.getTime() - 30 * 6e4), new Date(trip[trip.length - 1].eta.getTime() + 30 * 6e4));
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
-      out.innerHTML = verdictHtml(trip) + wxStripHtml(trip) + slotsHtml(trip) + climHtml(trip) + (trip.length > 1 ? tripHtml(trip) + refuelHtml(trip) : '') + costHtml(trip) + checkHtml(trip[0], '') + trip.map((b, i) => trip.length > 1
-        ? `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`
-        : summaryHtml(b, '-' + i)).join('');
+      // vol simple : météo du jour, créneaux, coût et liste de contrôle rangés dans les onglets ; voyage : au-dessus des étapes
+      const top = { wx: wxStripHtml(trip) + slotsHtml(trip) + climHtml(trip), res: costHtml(trip) + checkHtml(trip[0], '') };
+      out.innerHTML = verdictHtml(trip) + (trip.length > 1
+        ? top.wx + tripHtml(trip) + refuelHtml(trip) + top.res + trip.map((b, i) => `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`).join('')
+        : summaryHtml(trip[0], '-0', top));
       trip.forEach((b, i) => bindSummary(b, '-' + i));
       const csv = $('#pf-cost-csv'); if (csv) csv.addEventListener('click', () => download(new Blob(['\ufeff' + costCsv(trip)], { type: 'text/csv;charset=utf-8' }), `cout_${trip[0].f.dep}-${trip[trip.length - 1].f.arr}_${trip[0].depT.toISOString().slice(0, 10)}.csv`));
       const ck = $('#pf-check'); if (ck) ck.addEventListener('change', (e) => { const st = store.get(checkKey(trip[0]), []); st[+e.target.dataset.i] = e.target.checked; store.set(checkKey(trip[0]), st); });
@@ -2536,9 +2548,17 @@
   console.assert((() => { const pick = (st, wh, wa, n) => (st || wh ? 2 : wa || n > 12 ? 1 : 0); return pick(1, 0, 0, 1) === 2 && pick(0, 0, 1, 1) === 1 && pick(0, 0, 0, 3) === 0; })(), 'verdict niveaux');
   function verdictHtml(trip) {
     const V = trip.map(verdict), lv = Math.max(...V.map((v) => v.lv)), r = V.flatMap((v, i) => v.reasons.map((x) => (trip.length > 1 ? `étape ${i + 1} : ` : '') + x)).slice(0, 3);
-    const lbl = ['✅ On peut partir', '⚠️ À surveiller', '⛔ Ne pas partir en l\'état'][lv];
-    return `<div style="border-radius:10px;padding:10px 12px;margin:6px 0;background:${WXCOL[lv]};color:#000"><b style="font-size:1.15em">${lbl}</b>${r.length ? `<br>${r.map((x) => '• ' + esc(x)).join('<br>')}` : '<br>Aucune alerte importante.'}</div>
-      <p class="meta">Synthèse automatique des alertes ci-dessous : la décision reste celle du pilote (TEMSI, TAF, NOTAM du jour).</p>`;
+    const lbl = ['On peut partir', 'À surveiller', 'Ne pas partir en l\'état'][lv], col = ['#34c759', '#ff9500', '#ff3b30'][lv];
+    const b0 = trip[0], bN = trip[trip.length - 1], e = b0.ens && !b0.ens.err ? b0.ens.both : null;
+    const C = 2 * Math.PI * 34, pc = e != null ? e : [100, 66, 33][lv];
+    const ring = `<svg class="vring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="34" class="vr-bg"/><circle cx="40" cy="40" r="34" stroke="${col}" class="vr-fg" stroke-dasharray="${(C * pc / 100).toFixed(1)} ${C.toFixed(1)}"/>
+      <text x="40" y="${e != null ? 44 : 49}" text-anchor="middle" class="vr-t">${e != null ? e + '%' : ['✓', '!', '✕'][lv]}</text>${e != null ? '<text x="40" y="57" text-anchor="middle" class="vr-s">VFR</text>' : ''}</svg>`;
+    const dist = trip.reduce((x, b) => x + b.totDist, 0), nt = bN.night;
+    const facts = [['Départ', utc(b0.depT)], ['Arrivée', utc(bN.eta)], ['Trajet', `${dist.toFixed(0)} NM · ${hhmm(Math.round((bN.eta - b0.depT) / 6e4))}`], ...(nt ? [['Nuit aéro', utc(nt.night)]] : [])];
+    return `<div class="verdict v${lv}">${ring}<div class="vd-txt"><b style="color:${col}">${lbl}</b>
+        ${r.length ? `<ul>${r.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>Aucune alerte importante.</p>'}
+        <div class="vd-facts">${facts.map(([k, v]) => `<span><small>${k}</small>${esc(v)}</span>`).join('')}</div></div></div>
+      <p class="meta">Synthèse automatique des alertes${e != null ? ` · anneau : probabilité VFR (${b0.ens.n} scénarios ECMWF)` : ''} : la décision reste celle du pilote (TEMSI, TAF, NOTAM du jour).</p>`;
   }
   // ---------- scénario « et si » (41) : départ décalé, passager en plus, vent plus fort ; recalcul local sans réseau
   function whatIf(b, { delay = 0, kg = 0, wind = 0 }) {
@@ -3799,10 +3819,38 @@
       return e.mail_escale ? `<a href="#" data-esc-mail="${esc(id)}" style="color:var(--link)">${esc(id)} : ${esc(e.mail_escale)}</a> <small>(${esc(c.r || 'VAC')})</small>` : `${esc(id)} : pas d'e-mail publié${(e.tel_ad || []).length ? `, 📞 ${esc(e.tel_ad[0])}` : ''}`; }).join(' · ')}</p>`;
   }
   const vacLinks = (b) => escaleMailHtml(b) + `<p class="meta">📄 VAC (copie du cycle en cours, consultable hors ligne après le calcul) : ${[...new Set([b.f.dep, b.f.arr, b.f.alt].filter(Boolean))].map((id) => `<a href="data/vac/${id}.pdf" target="_blank" rel="noopener">${id}</a>`).join(' · ')}</p>`;
-  function summaryHtml(b, sfx = '') {
+  // ---------- briefing en onglets (un panneau visible à la fois ; tout reste dans la page pour l'impression et les boutons)
+  // icônes fines (traits, couleur du texte) à la place des émojis
+  const ico = (d) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+  const ICONS = {
+    list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01', cloud: 'M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.8 8.2 4.9 4.9 0 0 1 17 18Z',
+    route: 'M5 19a2 2 0 1 0 0-.01M19 5a2 2 0 1 0 0-.01M6.5 17.5 11 13M13 11l4.5-4.5M11 13c1-1 1-1 2-2', runway: 'M10 3 7 21M14 3l3 18M12 5v2M12 10v2M12 15v2M12 20v1',
+    radio: 'M12 13v8M9 21h6M8.5 9.5a5 5 0 0 1 7 0M5.6 6.6a9 9 0 0 1 12.8 0M12 13a1.5 1.5 0 1 0 0-.01', shield: 'M12 3 19 6v6c0 4.4-2.9 7.6-7 9-4.1-1.4-7-4.6-7-9V6Z M9 12l2 2 4-4',
+  };
+  const TAB_ICON = { res: ico(ICONS.list), wx: ico(ICONS.cloud), route: ico(ICONS.route), ad: ico(ICONS.runway), radio: ico(ICONS.radio), sec: ico(ICONS.shield) };
+  const TABS = [['res', 'Résumé'], ['wx', 'Météo'], ['route', 'Route'], ['ad', 'Terrains'], ['radio', 'Radio'], ['sec', 'Sécurité']];
+  function tabsHtml(parts, badge = {}) {
+    const ks = TABS.filter(([k]) => (parts[k] || '').trim());
+    return `<div class="tabwrap"><div class="tabs" role="tablist">${ks.map(([k, l], i) => `<button type="button" role="tab" class="tab${i ? '' : ' on'}" data-tab="${k}">${TAB_ICON[k] || ''}${l}${badge[k] ? ` <i class="tbadge">${badge[k]}</i>` : ''}</button>`).join('')}</div>
+      ${ks.map(([k], i) => `<div class="tabp${i ? '' : ' on'}" data-tabp="${k}" role="tabpanel">${parts[k]}</div>`).join('')}</div>`;
+  }
+  document.addEventListener('click', (e) => {   // étapes du formulaire
+    const t = e.target.closest('[data-step], [data-goto-step]'); if (!t) return;
+    const n = t.dataset.step || t.dataset.gotoStep;
+    document.querySelectorAll('.steps .step').forEach((x) => x.classList.toggle('on', x.dataset.step === n));
+    document.querySelectorAll('.pf-step').forEach((x) => x.classList.toggle('on', x.dataset.stepp === n));
+  });
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('.tabs .tab'); if (!t) return;
+    const w = t.closest('.tabwrap');
+    w.querySelectorAll(':scope > .tabs .tab').forEach((x) => x.classList.toggle('on', x === t));
+    w.querySelectorAll(':scope > .tabp').forEach((x) => x.classList.toggle('on', x.dataset.tabp === t.dataset.tab));
+  });
+  function summaryHtml(b, sfx = '', top = {}) {
     const al = alertsOf(b);
     const nt = b.night;
-    return `
+    return tabsHtml({
+      res: `
       ${changesHtml(b)}
       ${notesHtml(b)}
       <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">🔄 Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">📅 Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">📍 Mode en vol (GPS)</button><button class="btn" id="pf-knee${sfx}">🗒️ Fiche de genou A5</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">🗺️ Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">🔗 Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">📓 Vol effectué : ajouter au carnet</button>` : ''}</div>
@@ -3817,50 +3865,56 @@
       ${b.f.avoid === 'easy' ? `<p class="meta">🧭 Route « VFR facile » : ${b.totDist.toFixed(0)} NM, soit ${b.totDist - b.directNm >= 0.5 ? `+${(b.totDist - b.directNm).toFixed(0)} NM (≈ +${Math.round((b.totDist - b.directNm) / b.f.tas * 60)} min) par rapport à la route directe` : 'pas de détour nécessaire'}${b.avoided.length ? ` — évite ${esc(b.avoided.slice(0, 6).join(', '))}${b.avoided.length > 6 ? '…' : ''}` : ''}${b.crossedOk && b.crossedOk.length ? ` · traversés plutôt qu'un grand détour (clairance) : ${esc(b.crossedOk.join(', '))}` : ''}. Les TMA à plancher se passent dessous : voir l'altitude optimale.${b.detours.length || b.valley ? ' Sur la carte : route facile en magenta, route directe en bleu pointillé.' : ''}</p>
       ${clearHtml(b) ? `<p class="meta">📻 Clairances à demander : ${clearHtml(b)}</p>` : ''}
       ${b.valley ? `<p class="meta">⛰️ Plafond bas (base ~${b.valley.base} ft) sur le relief : route par les vallées, point le plus haut sous la route ${b.valley.to} ft au lieu de ${b.valley.from} ft (${b.totDist.toFixed(0)} NM au lieu de ${b.valley.nm.toFixed(0)}). Rester sous la base, garder un demi-tour possible (vallée qui se ferme), vérifier sur la carte OACI.</p>` : ''}` : ''}
-      ${crossHtml(b)}
-      ${tafHtml(b)}
-      ${perfLine(b, sfx)}
-      ${whatIfHtml(b, sfx)}
-      ${turnBackHtml(b)}
       ${perfFuelHtml(b)}
-      ${altHtml(b, sfx)}
-      ${arrivalHtml(b)}
-      ${escaleCardHtml(b, sfx)}
-      ${fplHtml(b, sfx)}
+      ${loadHtml(b)}
+      ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}` + (top.res || ''),
+      wx: (top.wx || '') + `
+      ${tafHtml(b)}
+      <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
+      ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
+        <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
+      ${ensHtml(b)}
+      ${confHtml(b)}
+      <h4>GRAMET — coupe météo de la route</h4>
+      ${b.gramet && !b.gramet.err ? `<canvas id="pf-gramet${sfx}" class="gramet-cv" width="1000" height="470"></canvas>` : ''}
+      <p class="meta">${grametSummary(b.gramet, b)} Modèle Open-Meteo à l'heure de passage.</p>
+      <div class="row">${b.gramet && !b.gramet.err ? `<button class="btn" id="pf-gramet-big${sfx}">🔍 Agrandir</button>` : ''}<a class="btn" href="${esc(ogimetUrl(b))}" target="_blank" rel="noopener">GRAMET Ogimet (GFS)</a><a class="btn" href="https://aviation.meteo.fr" target="_blank" rel="noopener">TEMSI / WINTEM (aviation.meteo.fr)</a></div>
+      ${mountainHtml(b)}`,
+      route: `
+      <h4>✈️ Coupe verticale de la route</h4>
+      ${profileSvg(b.vprofile, b, sfx)}
+      ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
+      ${crossHtml(b)}
+      ${turnBackHtml(b)}
       ${pnrHtml(b)}
       ${optAltHtml(b, sfx)}
       ${landmarksHtml(b)}
       ${drHtml(b)}
       ${landmarkHtml(b, sfx)}
       ${altCmpHtml(b)}
-      ${loadHtml(b)}
-      ${nt ? `<p class="meta">☀️ Coucher du soleil à ${esc(b.f.arr)} ${utc(nt.set)} · nuit aéronautique ${utc(nt.night)} · <b>dernier décollage possible ${utc(nt.latestDep)}</b> pour arriver de jour.</p>` : ''}
+      ${azbaHtml(b)}
+      <h4>Exporter la route</h4>
+      <div class="row"><button class="btn" id="pf-gpx${sfx}">GPX (SkyDemon, Garmin, etc.)</button><button class="btn" id="pf-fpl${sfx}">Garmin .fpl (ForeFlight, Garmin Pilot)</button></div>`,
+      ad: `
+      ${perfLine(b, sfx)}
+      ${altHtml(b, sfx)}
+      ${arrivalHtml(b)}
+      ${escaleCardHtml(b, sfx)}
+      ${diversionsHtml(b)}
+      ${vacLinks(b)}`,
+      radio: `
+      ${freqHtml(b)}
+      ${radioHtml(b)}
+      <h4>Fréquences en route</h4>
+      ${b.legs.map((l) => `<p class="meta" style="margin:2px 0"><b>${l.from}→${l.to}</b> : ${l.airspaces.map((s) => `${esc(s.name)} ${esc(s.freq)}`).join(' · ') || 'classe G (A/A 123.500 / SIV)'}</p>`).join('')}
+      ${fplHtml(b, sfx)}`,
+      sec: `
       ${nt && nt.firstDark ? `<div class="warn">🌙 Il fera nuit aéronautique à partir de <b>${esc(nt.firstDark.id)}</b> (passage ${utc(nt.firstDark.eta)}, nuit aéro sur place ${utc(nt.firstDark.night)}) : ${nt.pts.filter((x) => x.dark).map((x) => esc(x.id)).join(', ')} de nuit. VFR de nuit = qualification requise.</div>` : ''}
       ${al.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('') || '<div class="okk">Aucune alerte majeure détectée automatiquement.</div>'}
       ${safetyHtml(b)}
       ${moreHtml(b, sfx)}
-      ${azbaHtml(b)}
-      ${mountainHtml(b)}
-      ${diversionsHtml(b)}
-      ${freqHtml(b)}
-      ${radioHtml(b)}
-      ${vacLinks(b)}
-      <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
-      ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
-        <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
-      ${ensHtml(b)}
-      ${confHtml(b)}
-      <h4>✈️ Coupe verticale de la route</h4>
-      ${profileSvg(b.vprofile, b, sfx)}
-      ${b.vprofile && b.vprofile.conflicts.length ? `<div class="warn">À ${b.f.ft} ft, la route entre dans : ${esc(b.vprofile.conflicts.map((c) => c.name).join(', '))}.</div>` : ''}
-      <h4>GRAMET — coupe météo de la route</h4>
-      ${b.gramet && !b.gramet.err ? `<canvas id="pf-gramet${sfx}" class="gramet-cv" width="1000" height="470"></canvas>` : ''}
-      <p class="meta">${grametSummary(b.gramet, b)} Modèle Open-Meteo à l'heure de passage.</p>
-      <div class="row">${b.gramet && !b.gramet.err ? `<button class="btn" id="pf-gramet-big${sfx}">🔍 Agrandir</button>` : ''}<a class="btn" href="${esc(ogimetUrl(b))}" target="_blank" rel="noopener">GRAMET Ogimet (GFS)</a><a class="btn" href="https://aviation.meteo.fr" target="_blank" rel="noopener">TEMSI / WINTEM (aviation.meteo.fr)</a></div>
-      <h4>Exporter la route</h4>
-      <div class="row"><button class="btn" id="pf-gpx${sfx}">GPX (SkyDemon, Garmin, etc.)</button><button class="btn" id="pf-fpl${sfx}">Garmin .fpl (ForeFlight, Garmin Pilot)</button></div>
-      <h4>Fréquences en route</h4>
-      ${b.legs.map((l) => `<p class="meta" style="margin:2px 0"><b>${l.from}→${l.to}</b> : ${l.airspaces.map((s) => `${esc(s.name)} ${esc(s.freq)}`).join(' · ') || 'classe G (A/A 123.500 / SIV)'}</p>`).join('')}`;
+      ${whatIfHtml(b, sfx)}`,
+    }, { sec: al.length });
   }
 
   // ================================================================== LOG EXCEL (modèle ACB rempli tel quel)
@@ -4136,6 +4190,40 @@
       if (!o.keepY) y = doc.lastAutoTable.finalY + 3.5;
       return doc.lastAutoTable.finalY;
     };
+
+    // ---------------------------------------------------------------- 0. PAGE DE GARDE : verdict, chiffres clés, croquis de la route
+    progress('PDF : page de garde…');
+    {
+      const V = verdict(b), col = [[52, 199, 89], [255, 149, 0], [255, 59, 48]][V.lv], e = b.ens && !b.ens.err ? b.ens.both : null;
+      doc.setFillColor(0, 102, 153); doc.rect(0, 0, W, 44, 'F'); doc.setTextColor(255);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.text(latin(`${b.f.dep}  ->  ${b.f.arr}`), M + 4, 20);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+      doc.text(latin(`${b.depT.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })} · départ ${utc(b.depT)} · ${b.f.ac.reg} ${b.f.T.label}${b.f.pil ? ' · ' + b.f.pil : ''}`), M + 4, 30);
+      doc.setFontSize(8.5); doc.text(latin(`Briefing de préparation · généré le ${b.generated.toISOString().slice(0, 16).replace('T', ' ')}Z`), M + 4, 38);
+      // verdict
+      doc.setFillColor(...col); doc.roundedRect(M, 52, 128, 58, 4, 4, 'F'); doc.setTextColor(255);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.text(latin(['On peut partir', 'À surveiller', 'Ne pas partir en l\'état'][V.lv]), M + 6, 64);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      let yy = 72; (V.reasons.length ? V.reasons : ['Aucune alerte importante détectée.']).forEach((r) => { doc.splitTextToSize(latin('• ' + r), 116).slice(0, 2).forEach((l) => { doc.text(l, M + 6, yy); yy += 4.4; }); });
+      if (e != null) { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(latin(`Probabilité VFR : ${e} % (${b.ens.n} scénarios ECMWF)`), M + 6, 105); }
+      // chiffres clés
+      const F = fuelLines(b), tiles = [['Distance', `${b.totDist.toFixed(0)} NM`], ['Temps de vol', hhmm(b.totMin)], ['Arrivée', utc(b.eta)], ['Carburant requis', `${b.reqFuel} L`],
+        ['Embarqué', `${b.f.fuel + (b.f.aux || 0)} L (marge ${F.margin} L)`], ['Masse décollage', `${Math.round(b.mb.mass)} / ${b.f.T.mtow} kg`], ['Altitude', `${b.f.ft} ft`], ['Nuit aéro', b.night ? utc(b.night.night) : '-']];
+      tiles.forEach(([k, v], i) => { const x = M + (i % 4) * 32, yt = 118 + Math.floor(i / 4) * 24;
+        doc.setFillColor(238, 244, 249); doc.roundedRect(x, yt, 30, 21, 3, 3, 'F'); doc.setTextColor(100); doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.text(latin(k.toUpperCase()), x + 2.5, yt + 6);
+        doc.setTextColor(0); doc.setFont('helvetica', 'bold'); doc.setFontSize(v.length > 12 ? 8 : 11); doc.text(doc.splitTextToSize(latin(v), 26).slice(0, 2), x + 2.5, yt + 13); });
+      // croquis de la route (projection simple, nord en haut)
+      const bx = 148, by = 52, bw = W - bx - M, bh = H - by - 16, pts = b.pts, las = pts.map((p) => p[0]), los = pts.map((p) => p[1]), k = Math.cos(rad((Math.min(...las) + Math.max(...las)) / 2));
+      const sx = Math.max(.01, (Math.max(...los) - Math.min(...los)) * k), sy = Math.max(.01, Math.max(...las) - Math.min(...las)), sc = Math.min((bw - 24) / sx, (bh - 24) / sy);
+      const X = (p) => bx + bw / 2 + ((p[1] - (Math.min(...los) + Math.max(...los)) / 2) * k) * sc, Y = (p) => by + bh / 2 - (p[0] - (Math.min(...las) + Math.max(...las)) / 2) * sc;
+      doc.setFillColor(246, 248, 250); doc.roundedRect(bx, by, bw, bh, 4, 4, 'F');
+      doc.setDrawColor(255, 43, 214); doc.setLineWidth(1.2); for (let i = 1; i < pts.length; i++) doc.line(X(pts[i - 1]), Y(pts[i - 1]), X(pts[i]), Y(pts[i]));
+      doc.setFontSize(8); b.ids.forEach((id, i) => { const p = pts[i]; if (!p) return; doc.setFillColor(i === 0 || i === pts.length - 1 ? 0 : 255, 102, 153); doc.circle(X(p), Y(p), i === 0 || i === pts.length - 1 ? 1.8 : 1.1, 'F');
+        doc.setTextColor(30); doc.setFont('helvetica', i === 0 || i === pts.length - 1 ? 'bold' : 'normal'); doc.text(latin(id), X(p) + 2.5, Y(p) - 1.5); });
+      doc.setTextColor(120); doc.setFontSize(7); doc.text(latin('Croquis de la route (nord en haut) - carte OACI pages suivantes'), bx + 4, by + bh - 4);
+      doc.setTextColor(0);
+      doc.addPage('a4', 'landscape');
+    }
 
     // ---------------------------------------------------------------- 1. LOG DE NAVIGATION (paysage, inspiré du log ACB)
     progress('PDF : log de navigation…');

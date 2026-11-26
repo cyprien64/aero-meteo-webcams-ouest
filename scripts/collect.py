@@ -876,7 +876,9 @@ def collect_aip():
             prev = json.loads(get(f'{FALLBACK_URL}/data/live/vac.json', timeout=30))
             prevz = json.loads(get(f'{FALLBACK_URL}/data/live/zones.json', timeout=30))
             preva = json.loads(get(f'{FALLBACK_URL}/data/live/airspaces.json', timeout=30))
-            if prev.get('cycle') == cycle and prev.get('v') == VAC_PARSER and prevz.get('cycle') == cycle and preva.get('cycle') == cycle:
+            wanted = {a[0] for a in aerodromes() if a[0].startswith('LF')}
+            seen = set(prev.get('ids') or (prev.get('data') or {}).keys())   # terrains déjà essayés (avec ou sans VAC)
+            if prev.get('cycle') == cycle and prev.get('v') == VAC_PARSER and prevz.get('cycle') == cycle and preva.get('cycle') == cycle and wanted <= seen:
                 save('vac.json', prev, True); save('zones.json', prevz, True); save('airspaces.json', preva, True)
                 print('  inchangé (même cycle)')
                 ensure_vac_pdfs(folder, cycle, list((prev.get('data') or {}).keys()))
@@ -914,7 +916,8 @@ def collect_aip():
         time.sleep(0.2)
     print(f'  {len(vac)} cartes VAC analysées')
     if vac:
-        save('vac.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'v': VAC_PARSER, 'source': 'SIA eAIP — Atlas VAC', 'data': vac})
+        save('vac.json', {'generated': NOW.isoformat(), 'cycle': cycle, 'v': VAC_PARSER, 'source': 'SIA eAIP — Atlas VAC', 'data': vac,
+                          'ids': sorted(a[0] for a in aerodromes() if a[0].startswith('LF'))})
     else:
         fallback('vac.json')
 

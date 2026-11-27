@@ -30,7 +30,7 @@
   // prepavol.js (500 ko) n'est plus lu à l'ouverture : le premier clic le charge, puis le clic est rejoué
   let prepP = null;
   const addScript = (src) => new Promise((ok, ko) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => ko(new Error(`${src} introuvable`)); document.head.appendChild(el); });
-  const loadPrep = window.AWW_loadPrep = () => window.AWW_PREP ? Promise.resolve() : swNew ? Promise.reject(new Error('nouvelle version : recharger la page')) : prepP || (prepP = window.AWW_LOG.task('Préparation de vol', () => addScript('data/aircraft.js').then(() => addScript('prepavol.js')))
+  const loadPrep = window.AWW_loadPrep = () => window.AWW_PREP ? Promise.resolve() : swNew ? Promise.reject(new Error('nouvelle version : recharger la page')) : prepP || (prepP = window.AWW_LOG.task('Préparation de vol', () => addScript('data/aircraft.js').then(() => addScript('prepavol.js')).then(() => addScript('prep-docs.js')))
     .then(() => { if (window.AWW_PREP) return; prepP = null; alert('La préparation de vol n\'a pas pu se charger (réseau ?). Réessaie dans un instant.'); throw new Error('prepavol.js non chargé'); }));   // LOG.task ne rejette jamais : on regarde le drapeau
   // nouvelle version installée pendant que la page était ouverte : la carte en mémoire est l'ancienne, la préparation serait la nouvelle ;
   // on recharge la page (puis on rouvre ce que le pilote demandait) plutôt que de mélanger deux versions

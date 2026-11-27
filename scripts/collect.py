@@ -1442,17 +1442,29 @@ assert parse_firms('latitude,longitude,frp,acq_date,acq_time,confidence\n43.3,-0
 # ---------------------------------------------------------------- prévision des terrains (Open-Meteo), une fois pour tous les visiteurs
 ADWX_VARS = ['temperature_2m', 'dew_point_2m', 'cloud_cover_low', 'visibility', 'precipitation', 'weather_code',
              'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'wind_speed_180m', 'wind_direction_180m', 'cape']
+# fichier allégé (~20 % une fois compressé) : visibilité en hectomètres (nom « visibility_hm », remis en m par la page), direction du vent à 10° près comme un METAR
+ADWX_OUT = ['visibility_hm' if v == 'visibility' else v for v in ADWX_VARS]
 ADWX_EVERY_H = 3   # ~530 appels par mise à jour (439 terrains, 12 variables) : 8 par jour restent sous la limite quotidienne
 
 
 def adwx_pack(blocks):
     """Réponses Open-Meteo (une par terrain) -> début commun et séries arrondies, dans l'ordre de ADWX_VARS."""
     start = blocks[0][1]['time'][0]
-    rnd = lambda v, x: None if x is None else (round(x, 1) if v in ('temperature_2m', 'dew_point_2m', 'precipitation') else int(round(x)))  # noqa: E731
+    def rnd(v, x):
+        if x is None:
+            return None
+        if v in ('temperature_2m', 'dew_point_2m', 'precipitation'):
+            return round(x, 1)
+        if v == 'visibility':
+            return int(round(x / 100))
+        if v.startswith('wind_direction'):
+            return int(round(x / 10)) * 10 % 360 or 360
+        return int(round(x))
     return start, {icao: [[rnd(v, x) for x in h[v]] for v in ADWX_VARS] for icao, h in blocks if h['time'][0] == start}
 
 
-assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [1.26] for v in ADWX_VARS}})]) == ('2026-11-26T00:00', {'LFBP': [[1.3], [1.3], [1], [1], [1.3], [1], [1], [1], [1], [1], [1], [1]]})
+assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [1.26] for v in ADWX_VARS}})]) == ('2026-11-26T00:00', {'LFBP': [[1.3], [1.3], [1], [0], [1.3], [1], [1], [360], [1], [1], [360], [1]]})
+assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [9540 if v == 'visibility' else 264 if 'direction' in v else 2.0] for v in ADWX_VARS}})])[1]['LFBP'][3:8] == [[95], [2.0], [2], [2], [260]]
 
 
 def collect_adwx():
@@ -1478,7 +1490,7 @@ def collect_adwx():
             blocks += [(a[0], x['hourly']) for a, x in zip(ch, d)]
             time.sleep(15)   # limite par minute d'Open-Meteo
         start, data = adwx_pack(blocks)
-        save('adwx.json', {'generated': NOW.isoformat(), 'source': 'Open-Meteo (modèles « best match »)', 'start': start, 'vars': ADWX_VARS, 'data': data})
+        save('adwx.json', {'generated': NOW.isoformat(), 'source': 'Open-Meteo (modèles « best match »)', 'start': start, 'vars': ADWX_OUT, 'data': data})
     except Exception as e:  # noqa: BLE001
         print('  échec', e)
         fallback('adwx.json')

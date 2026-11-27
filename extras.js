@@ -30,23 +30,38 @@
   // prepavol.js (500 ko) n'est plus lu à l'ouverture : le premier clic le charge, puis le clic est rejoué
   let prepP = null;
   const addScript = (src) => new Promise((ok, ko) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => ko(new Error(`${src} introuvable`)); document.head.appendChild(el); });
-  const loadPrep = window.AWW_loadPrep = () => window.AWW_PREP ? Promise.resolve() : prepP || (prepP = window.AWW_LOG.task('Préparation de vol', () => addScript('data/aircraft.js').then(() => addScript('prepavol.js')))
+  const loadPrep = window.AWW_loadPrep = () => window.AWW_PREP ? Promise.resolve() : swNew ? Promise.reject(new Error('nouvelle version : recharger la page')) : prepP || (prepP = window.AWW_LOG.task('Préparation de vol', () => addScript('data/aircraft.js').then(() => addScript('prepavol.js')))
     .then(() => { if (window.AWW_PREP) return; prepP = null; alert('La préparation de vol n\'a pas pu se charger (réseau ?). Réessaie dans un instant.'); throw new Error('prepavol.js non chargé'); }));   // LOG.task ne rejette jamais : on regarde le drapeau
+  // nouvelle version installée pendant que la page était ouverte : la carte en mémoire est l'ancienne, la préparation serait la nouvelle ;
+  // on recharge la page (puis on rouvre ce que le pilote demandait) plutôt que de mélanger deux versions
+  const SW = navigator.serviceWorker, hadCtrl = !!(SW && SW.controller);
+  let swNew = false;
+  if (SW) SW.addEventListener('controllerchange', () => { swNew = hadCtrl; });
+  const reloadFirst = (sel) => { try { sessionStorage.setItem('aww.reopen', sel); } catch { /* ignore */ } location.reload(); };
   ['#btn-prep', '#btn-hist'].forEach((s) => $(s) && $(s).addEventListener('click', (e) => {
     if (window.AWW_PREP) return;
-    e.stopImmediatePropagation(); loadPrep().then(() => $(s).click(), () => {});
+    e.stopImmediatePropagation();
+    if (swNew) { reloadFirst(s); return; }
+    loadPrep().then(() => $(s).click(), () => {});
   }, true));
-  if (location.hash.startsWith('#vol=')) loadPrep().catch(() => {});   // lien de vol partagé
+  let reopen = null; try { reopen = sessionStorage.getItem('aww.reopen'); sessionStorage.removeItem('aww.reopen'); } catch { /* ignore */ }
+  if (reopen === '#btn-prep' || reopen === '#btn-hist') loadPrep().then(() => $(reopen).click(), () => {});
+  else if (location.hash.startsWith('#vol=')) loadPrep().catch(() => {});   // lien de vol partagé
 
   // ================================================================ 📏 Mesure d'un trajet
-  const nmBetween = (a, b) => {
-    const p1 = rad(a[0]), p2 = rad(b[0]), dl = rad(b[1] - a[1]);
-    return deg(Math.acos(Math.min(1, Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl)))) * 60;
-  };
-  const course = (a, b) => {
-    const p1 = rad(a[0]), p2 = rad(b[0]), dl = rad(b[1] - a[1]);
-    return (deg(Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl))) + 360) % 360;
-  };
+  // distance (NM, formule de haversine) et route vraie entre deux points [lat, lon] ; partagées avec la préparation de vol
+  function distNm(a, b) {
+    const dLa = rad(b[0] - a[0]), dLo = rad(b[1] - a[1]);
+    const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLo / 2) ** 2;
+    return 2 * 3440.065 * Math.asin(Math.sqrt(h));
+  }
+  function bearing(a, b) {
+    const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
+    const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
+    return (deg(Math.atan2(y, x)) + 360) % 360;
+  }
+  A.distNm = distNm; A.bearing = bearing;
+  console.assert(Math.abs(distNm([43.38, -0.42], [43.47, -1.52]) - 48.2) < 0.5 && Math.round(bearing([0, 0], [0, 1])) === 90, 'distNm / bearing');
   const MODELS = [
     ['meteofrance_seamless', 'Météo-France (AROME / ARPEGE)'],
     ['ecmwf_ifs025', 'ECMWF (européen)'],
@@ -90,8 +105,8 @@
     if (ms.pts.length > 1) L.polyline(ms.pts.map((p) => p.ll), { color: '#00e5ff', weight: 4, opacity: .95, dashArray: '10 6', interactive: false }).addTo(ms.layer);
     ms.pts.forEach((p, i) => {
       if (i) {
-        const a = ms.pts[i - 1].ll, b = p.ll, nm = nmBetween(a, b);
-        L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { interactive: false, icon: L.divIcon({ className: 'ms-lbl', html: `${nm.toFixed(1)} NM · ${(nm * 1.852).toFixed(0)} km · ${pad(Math.round(course(a, b)) % 360).padStart(3, '0')}°`, iconSize: null }) }).addTo(ms.layer);
+        const a = ms.pts[i - 1].ll, b = p.ll, nm = distNm(a, b);
+        L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { interactive: false, icon: L.divIcon({ className: 'ms-lbl', html: `${nm.toFixed(1)} NM · ${(nm * 1.852).toFixed(0)} km · ${pad(Math.round(bearing(a, b)) % 360).padStart(3, '0')}°`, iconSize: null }) }).addTo(ms.layer);
       }
       L.marker(p.ll, { draggable: true, icon: L.divIcon({ className: 'ms-pt', iconSize: [16, 16], iconAnchor: [8, 8] }) })
         .bindTooltip(esc(p.id), { permanent: true, direction: 'right', className: 'tip' })
@@ -102,7 +117,7 @@
   }
   const st = A.store.get('measure', { tas: 105, ft: 2500 });
   function panel() {
-    const tot = ms.pts.reduce((s, p, i) => s + (i ? nmBetween(ms.pts[i - 1].ll, p.ll) : 0), 0);
+    const tot = ms.pts.reduce((s, p, i) => s + (i ? distNm(ms.pts[i - 1].ll, p.ll) : 0), 0);
     const next = new Date(Date.now() + 3600e3); next.setMinutes(0, 0, 0);
     A.showPanel('📏 Mesure d\'un trajet', `
       <p class="meta">${ms.on ? 'Clique sur la carte pour ajouter des points (accroche aux aérodromes) · glisse un point pour le déplacer · clic droit sur un point pour le supprimer.' : 'Mode mesure arrêté. Re-clique sur « Mesurer un trajet » pour continuer.'}</p>
@@ -135,7 +150,7 @@
     const tas = +$('#ms-tas').value || 100, ft = +$('#ms-ft').value || 2500, t0 = new Date($('#ms-t').value || Date.now());
     st.tas = tas; st.ft = ft; st.t = $('#ms-t').value; A.store.set('measure', st);
     const out = $('#ms-out'); out.innerHTML = '<p class="meta">Interrogation des 4 modèles…</p>';
-    const legs = ms.pts.slice(1).map((p, i) => { const a = ms.pts[i].ll, b = p.ll; return { from: ms.pts[i].id, to: p.id, a, b, nm: nmBetween(a, b), tc: course(a, b), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; });
+    const legs = ms.pts.slice(1).map((p, i) => { const a = ms.pts[i].ll, b = p.ll; return { from: ms.pts[i].id, to: p.id, a, b, nm: distNm(a, b), tc: bearing(a, b), mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; });
     let t = t0.getTime();
     legs.forEach((lg) => { lg.tmid = new Date(t + lg.nm / tas * 1800e3); t += lg.nm / tas * 3600e3; });
     const lv = levelFor(ft);
@@ -283,7 +298,7 @@
   // tuiles d'accueil et thème
   $('#q-prep').addEventListener('click', () => $('#btn-prep').click());
   $('#q-measure').addEventListener('click', () => $('#btn-measure').click());
-  $('#q-where').addEventListener('click', () => loadPrep().then(() => { if (!$('#pf-where')) $('#btn-prep').click(); const w = $('#pf-where'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); w.click(); } }, () => {}));
+  $('#q-where').addEventListener('click', () => (swNew && !window.AWW_PREP ? reloadFirst('#btn-prep') : loadPrep().then(() => { if (!$('#pf-where')) $('#btn-prep').click(); const w = $('#pf-where'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); w.click(); } }, () => {})));
   $('#btn-theme').addEventListener('click', () => window.AWW_theme && window.AWW_theme.toggle());
 
   // ================================================================ tiroir du panneau sur téléphone : réduit / moitié / plein écran (toucher ou glisser la poignée)

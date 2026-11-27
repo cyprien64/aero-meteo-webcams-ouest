@@ -1,5 +1,5 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v57';
+const VERSION = 'aww-v58';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'theme.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
@@ -31,7 +31,8 @@ self.addEventListener('fetch', (e) => {
   if (/\/data\/(live|vac)\//.test(url.pathname)) {
     const key = url.pathname.replace(/^.*?\/data\//, 'data/'), cached = () => caches.match(key, { ignoreSearch: true });
     const net = fetch(e.request).then((r) => {
-      if (r.ok && !url.pathname.includes('/data/vac/')) { const cp = r.clone(); caches.open(VERSION).then((c) => c.put(key, cp)); }   // VAC : déjà gardées par la page (aww-offline-vac)
+      if (!r.ok) return cached().then((h) => h || r);   // erreur passagère du serveur (503 pendant une publication) : copie locale si on en a une
+      if (!url.pathname.includes('/data/vac/')) { const cp = r.clone(); caches.open(VERSION).then((c) => c.put(key, cp)); }   // VAC : déjà gardées par la page (aww-offline-vac)
       return r;
     });
     const slow = new Promise((ok) => setTimeout(ok, 8000)).then(() => cached()).then((h) => h || net);

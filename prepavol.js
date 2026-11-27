@@ -25,16 +25,7 @@
   const r3 = (x) => String(Math.round(x) % 360 || 360).padStart(3, '0');
 
   // ================================================================== géométrie
-  function distNm(a, b) {
-    const dLa = rad(b[0] - a[0]), dLo = rad(b[1] - a[1]);
-    const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLo / 2) ** 2;
-    return 2 * 3440.065 * Math.asin(Math.sqrt(h));
-  }
-  function bearing(a, b) {
-    const y = Math.sin(rad(b[1] - a[1])) * Math.cos(rad(b[0]));
-    const x = Math.cos(rad(a[0])) * Math.sin(rad(b[0])) - Math.sin(rad(a[0])) * Math.cos(rad(b[0])) * Math.cos(rad(b[1] - a[1]));
-    return (deg(Math.atan2(y, x)) + 360) % 360;
-  }
+  const { distNm, bearing } = A;   // définis dans extras.js (aussi utilisés par l'outil « Mesurer »)
   function destPt(p, brg, nm) {
     const d = nm / 3440.065, la1 = rad(p[0]), lo1 = rad(p[1]), b = rad(brg);
     const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(b));

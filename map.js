@@ -630,11 +630,12 @@
   // Fréquences du terrain (VAC) en tête de fiche
   const freqList = (lines) => {
     const out = new Map();
-    for (const l of lines || []) for (const m of l.matchAll(/\b(ATIS|APP|TWR|GND|SOL|AFIS|A\/A|DEL)\b[^0-9|]*?(1[1-3]\d\.\d{2,3})/g)) out.set(`${m[1]} ${m[2]}`, [m[1] === 'SOL' ? 'GND' : m[1], m[2]]);
+    for (const l of lines || []) for (const m of l.matchAll(/(?:^|\s-\s)\s*(ATIS|APP|TWR|GND|SOL|AFIS|A\/A|DEL)\b[^0-9|]*?(1[1-3]\d\.\d{2,3})/g)) out.set(`${m[1]} ${m[2]}`, [m[1] === 'SOL' ? 'GND' : m[1], m[2]]);
     return [...out.values()];
   };
   console.assert(freqList(['APP : PYRENEES Approche / Approach 128.805 - 135.880 (s)', 'TWR : 124.155 - GND (SOL) : 121.755']).map((x) => x.join(' ')).join('|') === 'APP 128.805|TWR 124.155|GND 121.755'
-    && freqList(['AFIS : 119.080. Absence ATS : A/A (119.080) FR seulement /only.']).length === 2, 'freqList');
+    && freqList(['AFIS : 119.080. Absence ATS : A/A (119.080) FR seulement /only.']).length === 1
+    && freqList(['TWR : 118.105 AFIS (St Martin Info) 121.830 (HOR voir/see AD 2.18)']).map((x) => x.join(' ')).join('|') === 'TWR 118.105', 'freqList');
   function freqHtml(icao) {
     const f = freqList((escaleOf(icao) || {}).freqs);
     return f.length ? `<div class="ad-freqs">${f.slice(0, 6).map(([k, v]) => `<span><small>${esc(k)}</small>${esc(v)}</span>`).join('')}</div>` : '';

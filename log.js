@@ -89,7 +89,9 @@
     if (lb) { lb.dataset.issues = nq || ''; lb.title = nq ? `${nq} chargement(s) secondaire(s) en échec : voir le journal` : 'Quelque chose ne marche pas ? Journal des erreurs et contact'; }
     const run = list.filter((t) => t.state === 'en cours' && !quiet(t) && now - t.start > 2500);   // pas de clignotement pour un chargement rapide
     const bad = list.filter((t) => !t.seen && !quiet(t) && (t.state === 'erreur' || (t.state === 'en cours' && now - t.start > SLOW)));
-    if (!run.length && !bad.length) { bar.hidden = true; clearInterval(timer); timer = null; return; }
+    if (!run.length && !bad.length) {   // le minuteur continue tant qu'un chargement est en cours (sinon un chargement lent ne serait jamais signalé)
+      bar.hidden = true; if (!list.some((t) => t.state === 'en cours')) { clearInterval(timer); timer = null; } return;
+    }
     bar.hidden = false;
     const runTxt = run.length ? `<span class="spin"></span> Chargement : ${run.map((t) => `${t.name} <i>${Math.round((now - t.start) / 1000)} s</i>`).join(' · ')}` : '';
     const badTxt = bad.map((t) => `<div class="lb-bad">⚠️ ${t.state === 'erreur' ? `${t.name} : échec (${t.err || 'erreur'})` : `${t.name} ne répond pas depuis ${Math.round((now - t.start) / 1000)} s`}

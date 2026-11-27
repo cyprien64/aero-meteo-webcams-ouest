@@ -39,9 +39,15 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(Promise.race([net, slow]).catch(() => cached()));
     return;
   }
-  // fichiers fixes de data/ (sources, fond de carte, repères…) et application : cache d'abord, mise à jour en arrière-plan
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then((hit) => {
-    const net = fetch(e.request, { cache: 'no-cache' }).then((r) => { if (r.ok) { const cp = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, cp)); } return r; }).catch(() => hit);
-    return hit || net;
-  }));
+  // application et fichiers fixes de data/ : réseau d'abord, pour toujours avoir la dernière version publiée
+  // (le cache d'abord laissait Safari sur une copie périmée ou mélangée après une mise en ligne) ;
+  // sans réseau, ou s'il ne répond pas en 4 s, la copie gardée ; la réponse du réseau met la copie à jour
+  const cached = () => caches.match(e.request, { ignoreSearch: true });
+  const net = fetch(e.request, { cache: 'no-cache' }).then((r) => {
+    if (!r.ok) return cached().then((h) => h || r);
+    const cp = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, cp));
+    return r;
+  });
+  const slow = new Promise((ok) => setTimeout(ok, 4000)).then(() => cached()).then((h) => h || net);
+  e.respondWith(Promise.race([net, slow]).catch(() => cached().then((h) => h || Response.error())));
 });

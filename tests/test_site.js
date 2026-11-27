@@ -21,8 +21,13 @@ const anything = () => {
 };
 const storage = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), key: (i) => [...m.keys()][i] ?? null, get length() { return m.size; }, clear: () => m.clear() }; };
 const el = () => anything();
+let cbs = null;
+const LAYER_CBS = () => cbs || (cbs = [...fs.readFileSync(path.join(ROOT, 'map.html'), 'utf8').matchAll(/data-layer="([^"]+)"/g)]
+  .map((m) => ({ ...anything(), dataset: { layer: m[1] }, checked: true, addEventListener() {}, dispatchEvent() {}, closest: () => anything() })));
 const document = {
-  getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [], getElementsByTagName: () => [],
+  getElementById: () => el(), querySelector: () => el(), getElementsByTagName: () => [],
+  // cases des couches toutes cochées (réglage enregistré d'un utilisateur) : une variable lue avant sa déclaration au démarrage fait planter le test
+  querySelectorAll: (sel) => (sel === 'input[data-layer]' ? LAYER_CBS() : []),
   createElement: () => el(), createElementNS: () => el(), addEventListener() {}, removeEventListener() {}, dispatchEvent() {},
   body: el(), head: el(), documentElement: el(), hidden: false, readyState: 'complete', cookie: '',
 };

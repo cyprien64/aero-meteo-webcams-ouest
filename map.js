@@ -534,11 +534,11 @@
   document.querySelectorAll('input[data-layer]').forEach((cb) => {
     const k = cb.dataset.layer;
     if (k in layerState) cb.checked = layerState[k];
-    const apply = () => {
+    const apply = (ev) => {   // ev absent : appel de démarrage, avant la déclaration de NOTAM (chargés ensuite par loadNotamSup)
       if (cb.checked) layers[k].addTo(map); else map.removeLayer(layers[k]);
       drawHalos();
       if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers().catch(() => {});
-      if (cb.checked && k === 'notam' && NOTAM.partial) loadNotamFull().catch((e) => console.warn('notam', e));
+      if (ev && cb.checked && k === 'notam' && NOTAM.partial) loadNotamFull().catch((e) => console.warn('notam', e));
       layerState[k] = cb.checked; store.set('layers', layerState);
       if (k === 'foudre') setFoudre(cb.checked);
       if (k === 'vig' && cb.checked) drawVig();

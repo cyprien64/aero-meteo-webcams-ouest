@@ -124,6 +124,36 @@ def collect_metar_taf():
         except Exception as e:  # noqa: BLE001
             print(f'  {kind} : échec', e)
             fallback(f'{kind}.json')
+    try:
+        save('sigmet.json', {'generated': NOW.isoformat(), 'source': 'aviationweather.gov (SIGMET internationaux)',
+                             'data': sigmet_pack(json.loads(get('https://aviationweather.gov/api/data/isigmet?format=json')))})
+    except Exception as e:  # noqa: BLE001
+        print('  sigmet : échec', e)
+        fallback('sigmet.json')
+
+
+def sigmet_pack(raw):
+    """SIGMET des FIR françaises ou dont une zone touche la France élargie de 2° : zones [[lat, lon]…], niveaux en ft, heures en s."""
+    la0, lo0, la1, lo1 = map(float, BBOX.split(','))
+    out = []
+    for x in raw:
+        c = x.get('coords') or []
+        areas = c if c and isinstance(c[0], list) else [c]
+        polys = [[[round(p['lat'], 3), round(p['lon'], 3)] for p in a] for a in areas if len(a) >= 3]
+        near = any(la0 - 2 <= q[0] <= la1 + 2 and lo0 - 2 <= q[1] <= lo1 + 2 for pl in polys for q in pl)
+        if not (near or str(x.get('firId', '')).startswith('LF')):
+            continue
+        out.append({'fir': x.get('firId'), 'name': x.get('firName'), 'hz': x.get('hazard'), 'q': x.get('qualifier'),
+                    'base': x.get('base'), 'top': x.get('top'), 'from': x.get('validTimeFrom'), 'to': x.get('validTimeTo'),
+                    'polys': polys, 'raw': (x.get('rawSigmet') or '').strip()})
+    return out
+
+
+_t = sigmet_pack([{'firId': 'LFBB', 'hazard': 'TS', 'coords': [{'lat': 43, 'lon': -1}, {'lat': 44, 'lon': -1}, {'lat': 44, 'lon': 0}]},
+                  {'firId': 'SKED', 'coords': [{'lat': 2, 'lon': -76}, {'lat': 3, 'lon': -76}, {'lat': 3, 'lon': -75}]},
+                  {'firId': 'LIRR', 'coords': [[{'lat': 42, 'lon': 9}, {'lat': 43, 'lon': 9}, {'lat': 43, 'lon': 10}]]},
+                  {'firId': 'LFMM', 'coords': []}])
+assert [x['fir'] for x in _t] == ['LFBB', 'LIRR', 'LFMM'] and _t[1]['polys'] == [[[42, 9], [43, 9], [43, 10]]] and _t[2]['polys'] == []
 
 
 # ---------------------------------------------------------------- NOTAM (SOFIA)

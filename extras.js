@@ -446,7 +446,10 @@
   $('#btn-tour').addEventListener('click', showHelp);
 
   // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
-  const NEWS = { v: 61, items: [
+  const NEWS = { v: 62, items: [
+    'SIGMET (orages, givrage fort, turbulence forte) : alerte si l\'un d\'eux touche la route à l\'heure de passage et à l\'altitude prévue. Source aviationweather.gov, à confirmer sur aviation.meteo.fr.',
+    'Webcams de la route en images, dans l\'ordre du trajet avec l\'heure de passage (onglet Météo).',
+    'Fiche radio : même nombre de personnes à bord que le plan de vol, et lien vers le site de phraséologie pour s\'entraîner.',
     'Sauvegarder / restaurer mes données (carnet de vol, profils, bras de levier, notes) : bouton dans l\'aide « ? » et dans le carnet de vol. Safari efface ces données après 7 jours sans visite.',
     'Avertissement si l\'appareil n\'est pas à l\'heure de Paris (tablette en UTC) : les heures « locales » seraient décalées.',
     'Voyage : un tableau « jour par jour » donne la meilleure heure de départ de chaque étape sur les jours qui viennent.',

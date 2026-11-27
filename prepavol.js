@@ -39,6 +39,9 @@
   }
   let PROJ_LAT = 46;
   const P = (p) => [p[1] * 60 * Math.cos(rad(PROJ_LAT)), p[0] * 60];
+  // personnes à bord : pilote + passager avant + passagers arrière estimés à 75 kg chacun (même calcul que le plan de vol)
+  const pobOf = (f) => 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? Math.max(1, Math.round(f.m3 / 75)) : 0);
+  console.assert(pobOf({ m2: 0, m3: 0 }) === 1 && pobOf({ m2: 70, m3: 150 }) === 4 && pobOf({ m2: 0, m3: 30 }) === 2, 'pobOf');
   const UNP = (q) => [q[1] / 60, q[0] / (60 * Math.cos(rad(PROJ_LAT)))];
   function segDistXY(px, py, ax, ay, bx, by) {
     const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
@@ -326,7 +329,7 @@
   // plan de vol OACI pré-rempli (9) : cases à recopier dans SOFIA ; ce qui ne se déduit pas des données reste « à compléter »
   function fplFields(b) {
     const f = b.f, hm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}${String(Math.round(min % 60)).padStart(2, '0')}`;
-    const endu = Math.floor((b.loaded - TAXI_L) / f.ff * 60), pob = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? Math.max(1, Math.round(f.m3 / 75)) : 0);
+    const endu = Math.floor((b.loaded - TAXI_L) / f.ff * 60), pob = pobOf(f);
     const des = f.T.icao || null, z = new Date(b.depT), dof = z.toISOString().slice(2, 10).replace(/-/g, '');
     const lvl = `A${String(Math.round((b.legs[0].ft || f.ft) / 100)).padStart(3, '0')}`;
     const rte = icaoRoute(b).replace(/^N\d{4}VFR/, '').trim();
@@ -402,7 +405,7 @@
   const sunTimes = A.sunTimes;   // défini dans extras.js (carte jour / nuit au démarrage)
 
   // ================================================================== données
-  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null, ADWX = null;
+  let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null, ADWX = null, SIGMET = null;
   async function loadAip() {
     if (A.loadNotamFull) await A.loadNotamFull().catch((e) => console.warn('NOTAM complets', e));   // en route : absents du fichier léger d'ouverture
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
@@ -412,6 +415,7 @@
     if (!LANDM) LANDM = await A.getJSON('data/landmarks.json', 'default').catch(() => ({ towns: [], mw: {}, rv: {}, lk: [] }));
     if (!FIRES) FIRES = await A.getLive('fires.json').catch(() => ({ data: [] }));
     if (!ADWX) ADWX = await A.getLive('adwx.json').catch(() => ({ data: {} }));
+    SIGMET = await A.getLive('sigmet.json').catch(() => null);   // relu à chaque calcul : valables quelques heures
     await loadVfr();
   }
   // ---- Points de report VFR (export XML SIA) : "BP-N" = point N de LFBP
@@ -2694,6 +2698,7 @@
       if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : t.role === 'DÉGAGEMENT' ? 'dégagement éventuel' : 'arrivée'} ${utc(t.when)} ${oh.closed ? `: service ATS non assuré (${oh.win})` : `en dehors des horaires ATS publiés (${oh.win}${oh.wide ? ', fenêtre la plus large de la saison' : ''})`}, à vérifier sur la VAC${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
     al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b), ...safetyAlerts(b));
+    sigmetAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
     dayAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
     if (fuelLines(b).short) al.push(`Réserve finale ${b.f.res} min inférieure au minimum légal (${fuelLines(b).legal} min ${fuelLines(b).legal === 45 ? 'de nuit' : 'de jour'}).`);
     perfWorst(b).filter((x) => !x.ok).forEach((x) => al.push(`${x.t.id} : ${x.k === 'tod' ? 'décollage' : 'atterrissage'} au plus défavorable ${x.worst} m, ${x.need} m avec la marge recommandée, pour ${x.t.len} m de piste — vérifier les performances.`));
@@ -3269,8 +3274,11 @@
   }
   console.assert((() => { const v = vappOf({ f: { T: { mtow: 900, speeds: { VSO: 45, 'Vapp (1,45) volets 1': 75 } } }, landMass: 729, arrInfo: { wspd: 10, gust: 20 } }); return v.v === 68 + 5 && v.gust === 5; })(), 'vappOf');
   // ---------- webcams à moins de 5 NM de la route, dans l'ordre du passage (hors départ / arrivée, déjà proposées)
+  // image de la webcam : aperçu connu, sinon l'adresse elle-même si c'est une image ; rien si l'aperçu est trop vieux
+  const camImg = (s) => (s.oldPreview ? null : s.img || (/\.(jpe?g|png|webp)(\?|$)/i.test(s.u || '') ? s.u : null));
+  console.assert(camImg({ u: 'https://x/a.jpg?t=1' }) === 'https://x/a.jpg?t=1' && camImg({ u: 'https://x/live.php' }) === null && camImg({ img: 'i.jpg', u: 'p' }) === 'i.jpg' && camImg({ img: 'i.jpg', oldPreview: true }) === null, 'camImg');
   function routeCams(b) {
-    return (A.SOURCES || []).filter((s) => s.t === 'cam').map((s) => ({ s, r: routeDist([s.la, s.lo], b.pts) })).filter((x) => x.r.d <= 5 && x.r.along > 3 && x.r.along < b.totDist - 3)
+    return (A.SOURCES || []).filter((s) => s.t === 'cam' && !s.dead).map((s) => ({ s, r: routeDist([s.la, s.lo], b.pts) })).filter((x) => x.r.d <= 5 && x.r.along > 3 && x.r.along < b.totDist - 3)
       .sort((x, y) => x.r.along - y.r.along).slice(0, 30).map((x) => ({ ...x, at: routePosAt(b, x.r.along).at }));
   }
   // ---------- panne radio : espaces contrôlés traversés + consignes « panne radio » des VAC (départ, arrivée, dégagement)
@@ -3478,12 +3486,14 @@
     if (va) out.push(`🛬 Vitesse d'approche à ${esc(b.f.arr)} : <b>${va.v} kt</b> (${esc(va.src)} ${va.base} kt${va.mass ? `, corrigée pour ${va.mass} kg` : ''}${va.gust ? `, +${va.gust} kt de rafales` : ''}).`);
     return out.map((x) => `<p class="meta">${x}</p>`).join('');
   }
+  const routeCamsHtml = (b) => { const cams = routeCams(b); return `
+      ${cams.length ? `<h4 style="margin:8px 0 4px">📷 Webcams le long de la route <small class="meta">(${cams.length}, dans l'ordre du trajet, heure de passage prévue)</small></h4>
+        <div class="route-cams">${cams.map((x) => { const img = camImg(x.s); return `<a class="rcam" href="${esc(x.s.u)}" target="_blank" rel="noopener" title="${esc(x.s.n)}">${img ? `<img src="${esc(img)}" loading="lazy" alt="">` : '<div class="noimg">📷</div>'}<span><b>${utc(x.at)}</b> · ${x.s.frozen ? '⚠️ figée · ' : ''}${esc(x.s.n)}</span><small>${x.r.along.toFixed(0)} NM · à ${x.r.d.toFixed(1)} NM</small></a>`; }).join('')}</div>` : ''}`; };
   function moreHtml(b, sfx) {
-    const cams = routeCams(b), rf = radioFail(b);
+    const rf = radioFail(b);
     const aq = b.aq, hz = hazeLevel(aq);
     return `${hz === 1 ? `<p class="meta">🌫️ Légère brume sèche possible (épaisseur optique ${aq.aod.toFixed(2)}) : visibilité un peu réduite, horizon moins net.</p>` : ''}
       ${notamsHtml(b)}
-      ${cams.length ? `<details><summary><b>Webcams le long de la route</b> (${cams.length}, heure de passage prévue)</summary><p class="meta">${cams.map((x) => `${utc(x.at)} · <a href="${esc(x.s.u)}" target="_blank" rel="noopener">${esc(x.s.n)}</a> <small>(${x.r.d.toFixed(1)} NM, vers ${x.r.along.toFixed(0)} NM)</small>`).join('<br>')}</p></details>` : ''}
       <details><summary><b>Panne radio</b>${rf.ctl.length ? ` — ${rf.ctl.length} espace(s) contrôlé(s) traversé(s)` : ''}</summary><p class="meta">Transpondeur <b>7600</b>. En conditions VMC : rester VMC, atterrir sur l'aérodrome approprié le plus proche et prévenir l'organisme ATS de l'arrivée (SERA.14083). Continuer à émettre « en aveugle ». Feux de la tour : vert fixe = autorisé à atterrir, vert clignotant = revenir pour atterrir, rouge fixe = céder le passage et continuer à tourner, rouge clignotant = terrain dangereux, ne pas atterrir.</p>
         ${rf.ctl.length ? `<p class="meta">Espaces contrôlés traversés : ${esc(rf.ctl.join(', '))} — sans clairance, ne pas y entrer ; si déjà dedans, suivre la dernière clairance reçue et en sortir par le chemin le plus court prévu.</p>` : ''}
         ${rf.vac.map(([id, t]) => `<p class="meta"><b>${esc(id)}</b> (VAC) : ${esc(t)}</p>`).join('') || '<p class="meta">Pas de consigne « panne radio » trouvée dans les VAC des terrains : vérifier la carte.</p>'}</details>
@@ -3560,6 +3570,30 @@
     if (ic.length) al.push(`Givrage probable à ${b.f.ft} ft (nuage entre 0 et -15 °C) sur ${fmt(ic)} — descendre sous l'isotherme 0 °C (${Math.round(Math.min(...pts.map((p) => p.iso0 ?? 99999)) / 100) * 100} ft) ou reporter.`);
     if (cl.length) al.push(`Croisière à ${b.f.ft} ft dans les nuages prévus sur ${fmt(cl)} (couverture ≥ 50 % au niveau de vol) — VFR impossible à cette altitude.`);
     if (iso.length && !ic.length) al.push(`Croisière au-dessus de l'isotherme 0 °C sur ${iso.length} point(s) du GRAMET : risque de givrage en cas de nuage ou de précipitations.`);
+    return al;
+  }
+
+  // ---------- SIGMET (orages, givrage fort, turbulence forte…) touchant la route à l'heure de passage, entre leurs niveaux (marge 1000 ft, 30 min)
+  const HZ = { TS: 'orages', ICE: 'givrage fort', TURB: 'turbulence forte', MTW: 'ondes orographiques fortes', VA: 'cendres volcaniques', TC: 'cyclone', DS: 'tempête de poussière', SS: 'tempête de sable', RDOACT: 'nuage radioactif' };
+  // smp : [{ p, along, ft, t (s) }] ; renvoie la première rencontre de chaque SIGMET
+  function sigmetHits(list, smp) {
+    const out = [];
+    for (const s of list) {
+      const hit = smp.find((x) => (s.base == null || x.ft >= s.base - 1000) && (s.top == null || x.ft <= s.top + 1000)
+        && (!s.from || x.t >= s.from - 1800) && (!s.to || x.t <= s.to + 1800) && s.polys.some((pl) => inPoly(x.p, pl)));
+      if (hit) out.push({ s, along: hit.along, t: hit.t });
+    }
+    return out;
+  }
+  console.assert((() => { const sq = [[43, -1], [44, -1], [44, 0], [43, 0]], s = { polys: [sq], base: 0, top: 6000, from: 1000, to: 5000 }, at = (p, ft, t) => ({ p, along: 1, ft, t });
+    return sigmetHits([s], [at([43.5, -0.5], 3000, 2000)]).length === 1 && !sigmetHits([s], [at([43.5, -0.5], 8000, 2000)]).length
+      && !sigmetHits([s], [at([43.5, -0.5], 3000, 9000)]).length && !sigmetHits([s], [at([45, -0.5], 3000, 2000)]).length; })(), 'sigmetHits');
+  function sigmetAlerts(b) {
+    if (!SIGMET || !SIGMET.data) return ['SIGMET non disponibles sur le site : les lire sur aviation.meteo.fr avant le vol.'];
+    const smp = routeSamples(b, 2).map((x) => ({ ...x, ft: x.lg.ft || b.f.ft, t: routePosAt(b, x.along).at / 1e3 })), t0 = b.depT / 1e3, t1 = b.eta / 1e3;
+    const lvl = (s) => `${s.base ? `de ${s.base} ft` : 'du sol'} à ${s.top ? `${s.top} ft` : 'un niveau non précisé'}`, what = (s) => `${HZ[s.hz] || s.hz}${s.q ? ` (${s.q})` : ''}`;
+    const al = sigmetHits(SIGMET.data.filter((s) => s.polys.length), smp).map((h) => `⛔ SIGMET ${h.s.fir} : ${what(h.s)} ${lvl(h.s)}, sur la route vers ${h.along.toFixed(0)} NM (passage ${utc(new Date(h.t * 1e3))}, valable jusqu'à ${utc(new Date(h.s.to * 1e3))}) — reporter ou changer de route. ${h.s.raw.replace(/\s+/g, ' ').slice(0, 220)}`);
+    SIGMET.data.filter((s) => !s.polys.length && /^LF/.test(s.fir || '') && s.from <= t1 && s.to >= t0).forEach((s) => al.push(`SIGMET ${s.fir} sans zone lisible : ${what(s)} — lire le texte. ${s.raw.replace(/\s+/g, ' ').slice(0, 220)}`));
     return al;
   }
 
@@ -3993,7 +4027,7 @@
   // ---------- check-list avant départ (mémorisée sur l'appareil, imprimée dans le PDF)
   const CHECK_ITEMS = ['Documents avion : CEN / CDN, certificat d\'immatriculation, assurance, licence station, carnet de route, manuel de vol',
     'Documents pilote : licence et qualification valides, certificat médical, pièce d\'identité', 'Avion réservé, potentiel et carnet de route vérifiés',
-    'Météo consultée (TEMSI, WINTEM, METAR / TAF, aviation.meteo.fr)', 'NOTAM, SUP AIP et AZBA consultés (SOFIA)', 'Carburant vérifié (quantité, purge) et huile',
+    'Météo consultée (TEMSI, WINTEM, SIGMET, METAR / TAF, aviation.meteo.fr)', 'NOTAM, SUP AIP et AZBA consultés (SOFIA)', 'Carburant vérifié (quantité, purge) et huile',
     'Masse et centrage vérifiés', 'Terrains : VAC à jour, PPR / horaires, carburant disponible', 'Plan de vol déposé (si requis) ou prévenu quelqu\'un', 'Visite pré-vol faite'];
   const checkKey = (b) => { const b0 = (b.trip || [b])[0]; return `check.${b0.f.ac.reg}.${b0.f.dep}.${b0.depT.toISOString().slice(0, 10)}`; };
   // ---------- règles du voyage, d'après la route de toutes les étapes (rappels : la référence fait foi, à vérifier)
@@ -4093,7 +4127,7 @@
       .map((sg) => { const entry = Math.max(0, sg.from - pad); return { sg, entry, nm: Math.max(0, entry - 5), at: routePosAt(b, Math.max(0, entry - 5)).at }; });
   }
   function radioCard(b) {
-    const f = b.f, reg = f.ac.reg, typ = f.T.label.replace(/^Robin /, '').split(/[ /]/)[0], pob = 1 + (f.m2 > 0 ? 1 : 0) + (f.m3 > 0 ? 2 : 0);
+    const f = b.f, reg = f.ac.reg, typ = f.T.label.replace(/^Robin /, '').split(/[ /]/)[0], pob = pobOf(f);
     const svc = (id) => { const l = ((vacAt(id) || {}).freqs || []).join(' | '), fr = (re) => { const m = l.match(re); return m ? m[1] : ''; };
       return { twr: fr(/TWR[^|]*?(\d{3}\.\d{2,3})/), gnd: fr(/(?:GND|SOL)[^|]*?(\d{3}\.\d{2,3})/), afis: fr(/AFIS[^|]*?(\d{3}\.\d{2,3})/), aa: fr(/A\/A[^|]*?(\d{3}\.\d{2,3})/) || '123.500', atis: /ATIS/.test(l) }; };
     const d = svc(f.dep), a = svc(f.arr), cd = cityOf(f.dep), ca = cityOf(f.arr), l0 = b.legs[0], lN = b.legs[b.legs.length - 1];
@@ -4121,7 +4155,7 @@
     return rows.sort((x, y) => x.nm - y.nm).map((x) => x.r);   // tri stable : à NM égal, l'ordre d'ajout reste
   }
   const radioHtml = (b) => `<details><summary><b>Fiche radio de l'étape</b> (messages types, à adapter aux consignes de la VAC)</summary>
-      <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table></details>`;
+      <table class="legs"><tr><th>Phase</th><th>Fréq.</th><th>Message</th></tr>${radioCard(b).map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td style="text-align:left">${esc(r[2])}</td></tr>`).join('')}</table><p class="meta">S'entraîner à ces messages : <a href="https://cyprien64.github.io/phraseo/" target="_blank" rel="noopener">site de phraséologie</a>.</p></details>`;
 
   // ---------- meilleur créneau de départ (même nav, départ de 7 h à 17 h locales)
   // créneaux de départ 7 h - 17 h locales, pour le jour du vol et les jours suivants (une requête ; AZBA connue pour le jour du vol seulement)
@@ -4493,6 +4527,7 @@
       <h4>Météo le long de la route (prévision à l'heure de passage)</h4>
       ${b.wxRoute && b.wxRoute.pts ? `<div class="wxbar">${b.wxRoute.pts.map((p) => `<span style="background:${WXCOL[p.level]}" title="${esc(utc(p.at))} · ${esc(WXTXT[p.level])}${p.why.length ? ' : ' + esc(p.why.join(', ')) : ''} · nuages bas ${p.low ?? '?'} % · base ~${p.baseAgl ?? '?'} ft sol · visi ${p.vis != null ? Math.round(p.vis / 1000) + ' km' : '?'}"></span>`).join('')}</div>
         <p class="meta">${WXTXT[b.wxRoute.worst]} sur l'ensemble du trajet${b.wxRoute.worst ? ' — ' + esc([...new Set(b.wxRoute.pts.flatMap((p) => p.why))].slice(0, 5).join(', ')) : ''}. Survole les pastilles pour le détail.</p>` : `<p class="meta">Indisponible (${esc((b.wxRoute && b.wxRoute.err) || '?')}).</p>`}
+      ${routeCamsHtml(b)}
       ${ensHtml(b)}
       ${confHtml(b)}
       <h4>GRAMET — coupe météo de la route</h4>

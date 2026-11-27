@@ -8,7 +8,7 @@ const SHELL = [
   'icons/icon48.png', 'icons/icon192.png', 'icons/signature.jpg',
 ];
 // vac.json (2 Mo) n'est pas préchargé : mis en cache à la première préparation de vol
-const LIVE = ['metar.json', 'taf.json', 'notam.json', 'notam_ad.json', 'supaip.json', 'zones.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'pratique_club.json', 'osm_near.json', 'vigilance.json', 'special.json'].map((f) => `data/live/${f}`);
+const LIVE = ['metar.json', 'taf.json', 'notam.json', 'notam_ad.json', 'supaip.json', 'zones.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'pratique_club.json', 'osm_near.json', 'vigilance.json', 'special.json', 'sigmet.json'].map((f) => `data/live/${f}`);
 
 // cache: 'reload' : sinon le cache HTTP (10 min sur GitHub Pages) remplit la nouvelle version avec d'anciens fichiers
 const fresh = (u) => new Request(u, { cache: 'reload' });

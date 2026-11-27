@@ -1441,10 +1441,12 @@ assert parse_firms('latitude,longitude,frp,acq_date,acq_time,confidence\n43.3,-0
 
 # ---------------------------------------------------------------- prévision des terrains (Open-Meteo), une fois pour tous les visiteurs
 ADWX_VARS = ['temperature_2m', 'dew_point_2m', 'cloud_cover_low', 'visibility', 'precipitation', 'weather_code',
-             'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'wind_speed_180m', 'wind_direction_180m', 'cape']
+             'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'wind_speed_180m', 'wind_direction_180m', 'cape',
+             # vent en altitude : secours de la préparation de vol quand Open-Meteo refuse la connexion du visiteur
+             'wind_speed_925hPa', 'wind_direction_925hPa', 'wind_speed_850hPa', 'wind_direction_850hPa', 'wind_speed_700hPa', 'wind_direction_700hPa']
 # fichier allégé (~20 % une fois compressé) : visibilité en hectomètres (nom « visibility_hm », remis en m par la page), direction du vent à 10° près comme un METAR
 ADWX_OUT = ['visibility_hm' if v == 'visibility' else v for v in ADWX_VARS]
-ADWX_EVERY_H = 3   # ~530 appels par mise à jour (439 terrains, 12 variables) : 8 par jour restent sous la limite quotidienne
+ADWX_EVERY_H = 3   # ~790 appels par mise à jour (439 terrains, 18 variables = 1,8 appel chacun) : 8 par jour (~6 300) restent sous la limite de 10 000
 
 
 def adwx_pack(blocks):
@@ -1463,7 +1465,7 @@ def adwx_pack(blocks):
     return start, {icao: [[rnd(v, x) for x in h[v]] for v in ADWX_VARS] for icao, h in blocks if h['time'][0] == start}
 
 
-assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [1.26] for v in ADWX_VARS}})]) == ('2026-11-26T00:00', {'LFBP': [[1.3], [1.3], [1], [0], [1.3], [1], [1], [360], [1], [1], [360], [1]]})
+assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [1.26] for v in ADWX_VARS}})]) == ('2026-11-26T00:00', {'LFBP': [[1.3], [1.3], [1], [0], [1.3], [1], [1], [360], [1], [1], [360], [1], [1], [360], [1], [360], [1], [360]]})
 assert adwx_pack([('LFBP', {'time': ['2026-11-26T00:00'], **{v: [9540 if v == 'visibility' else 264 if 'direction' in v else 2.0] for v in ADWX_VARS}})])[1]['LFBP'][3:8] == [[95], [2.0], [2], [2], [260]]
 
 

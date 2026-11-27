@@ -325,12 +325,14 @@
   const omCache = new Map(), OM_TTL = 30 * 60e3;
   const omLimit = (reason) => (/daily/i.test(reason || '') ? 'jour' : /hourly/i.test(reason || '') ? 'heure' : /minutely/i.test(reason || '') ? 'minute' : null);
   console.assert(omLimit('Daily API request limit exceeded. Please try again tomorrow.') === 'jour' && omLimit('Hourly API request limit exceeded') === 'heure' && omLimit('') === null, 'omLimit');
+  let omPause = 0, omPauseMsg = '';   // après un refus « limite heure / jour » : plus d'appel pendant 30 min (secours tout de suite)
   async function omFetch(url) {
     if (omCache.has(url)) return omCache.get(url);
     const store = window.caches ? await caches.open('aww-om').catch(() => null) : null;
     const hit = store ? await store.match(url).catch(() => null) : null;
     const hitT = hit ? +(hit.headers.get('x-aww-t') || 0) : 0;
     if (hit && Date.now() - hitT < OM_TTL) { const j = await hit.json(); omCache.set(url, j); return j; }
+    if (Date.now() < omPause) { if (hit) { const j = await hit.json(); omCache.set(url, j); return j; } throw new Error(omPauseMsg); }
     let r, lim = null;
     for (const wait of [0, 6000, 20000]) {
       if (wait) { const p = document.getElementById('pf-prog'); if (p && !/patiente/.test(p.textContent)) p.textContent += ' (serveur météo saturé, patiente…)'; await new Promise((ok) => setTimeout(ok, wait)); }
@@ -341,6 +343,7 @@
       if (lim === 'jour' || lim === 'heure') break;
     }
     if (!r.ok) {
+      if (lim === 'jour' || lim === 'heure') { omPause = Date.now() + 30 * 60e3; omPauseMsg = `limite ${lim === 'jour' ? 'quotidienne' : 'horaire'} du service météo (Open-Meteo) atteinte pour cette connexion`; }
       if (hit) { console.warn('Open-Meteo', r.status, ': copie locale du', new Date(hitT).toLocaleTimeString('fr-FR')); const j = await hit.json(); omCache.set(url, j); return j; }
       throw new Error(lim === 'jour' ? 'limite quotidienne du service météo (Open-Meteo) atteinte pour cette connexion : réessayer demain, ou depuis une autre connexion (4G du téléphone)'
         : lim === 'heure' ? 'limite horaire du service météo (Open-Meteo) atteinte pour cette connexion : réessayer dans une heure, ou depuis une autre connexion'
@@ -365,6 +368,38 @@
   console.assert((() => { const h = adwxHourly({ start: '2026-11-26T00:00', vars: ['temperature_2m', 'cape'], data: { LFBP: [[5, 6], [0, 10]] } }, 'LFBP'); return h.time[1] === '2026-11-26T01:00' && h.cape[1] === 10 && h.temperature_2m[0] === 5; })(), 'adwxHourly');
   // série du terrain si elle couvre toutes les heures demandées (sinon null : Open-Meteo)
   const adH = (id, ...ts) => { const h = adwxHourly(ADWX, id); return h && ts.every((t) => h.time.includes(roundHour(new Date(t)))) ? h : null; };
+  // ---------- météo de secours quand Open-Meteo refuse cette connexion (limite atteinte, panne) : prévision des terrains publiée
+  // par la collecte GitHub (adwx.json, autre connexion), terrain le plus proche du point ; vent en altitude approché par niveaux standard
+  let omFallback = null;   // heure de la prévision de secours utilisée pendant le dernier calcul (affichée dans les alertes)
+  const adNear = (p, t, max = 25) => {
+    let best = null, bd = max;
+    for (const a of A.APTS) { if (!ADWX || !ADWX.data || !ADWX.data[a.icao]) continue; const d = distNm(p, [+a.la, +a.lo]); if (d < bd) { const h = adH(a.icao, t); if (h) { bd = d; best = { a, h, k: h.time.indexOf(roundHour(new Date(t))), elevFt: +a.elev || 0 }; } } }
+    if (best) omFallback = ADWX.generated || '?';
+    return best;
+  };
+  // vent (kt) à ft d'après les niveaux publiés : 180 m sol, 925 / 850 / 700 hPa en atmosphère standard (2500 / 4800 / 9900 ft)
+  function adwxWindAt(h, k, elevFt, ft) {
+    const lv = [[elevFt + 590, 'wind_speed_180m', 'wind_direction_180m'], [2500, 'wind_speed_925hPa', 'wind_direction_925hPa'], [4800, 'wind_speed_850hPa', 'wind_direction_850hPa'], [9900, 'wind_speed_700hPa', 'wind_direction_700hPa']]
+      .filter(([z, s, d]) => h[s] && h[s][k] != null && h[d][k] != null && z >= elevFt + 590).map(([z, s, d]) => ({ z, s: h[s][k], dir: h[d][k] }));
+    if (!lv.length) return null;
+    let a = lv[0], b = lv[lv.length - 1];
+    for (let i = 0; i < lv.length - 1; i++) if (lv[i].z <= ft && lv[i + 1].z >= ft) { a = lv[i]; b = lv[i + 1]; break; }
+    const q = b.z === a.z ? 0 : Math.max(0, Math.min(1, (ft - a.z) / (b.z - a.z)));
+    const uv = (v) => [-v.s * Math.sin(rad(v.dir)), -v.s * Math.cos(rad(v.dir))];
+    const [ua, va] = uv(a), [ub, vb] = uv(b), u = ua + (ub - ua) * q, v = va + (vb - va) * q;
+    return { dir: (deg(Math.atan2(-u, -v)) + 360) % 360, spd: Math.hypot(u, v) };
+  }
+  console.assert((() => { const h = { wind_speed_180m: [10], wind_direction_180m: [270], wind_speed_925hPa: [20], wind_direction_925hPa: [270], wind_speed_850hPa: [30], wind_direction_850hPa: [290] };
+    const w1 = adwxWindAt(h, 0, 0, 2500), w2 = adwxWindAt(h, 0, 0, 3650), w3 = adwxWindAt(h, 0, 0, 20000), w0 = adwxWindAt({ wind_speed_180m: [8], wind_direction_180m: [90] }, 0, 0, 4000);
+    return Math.round(w1.spd) === 20 && Math.round(w1.dir) === 270 && w2.spd > 24 && w2.spd < 26 && w2.dir > 275 && w2.dir < 285 && Math.round(w3.spd) === 30 && Math.round(w0.dir) === 90 && w0.spd === 8; })(), 'adwxWindAt');
+  function adwxWinds(points, ft, times) {
+    return points.map((p, i) => {
+      const n = adNear(p, times[i], 40), w = n && adwxWindAt(n.h, n.k, n.elevFt, ft);
+      if (!w) return { dir: 0, spd: null, at: times[i] };
+      const T2 = n.h.temperature_2m[n.k];   // température : -2 °C par 1000 ft ; isotherme 0 °C estimée de même
+      return { ...w, t: T2 == null ? null : T2 - 1.98 * (ft - n.elevFt) / 1000, iso: T2 == null ? null : Math.max(0, (n.elevFt + Math.max(0, T2) / 1.98 * 1000) / 3.281), lv: 'secours', at: times[i] };
+    });
+  }
   const WLV = [1000, 975, 950, 925, 900, 850, 800, 700, 600];
   const roundHour = (d) => new Date(Math.round(d.getTime() / 36e5) * 36e5).toISOString().slice(0, 13) + ':00';
   // Vent à l'altitude exacte (interpolé entre les niveaux de pression encadrants, via leur géopotentiel)
@@ -375,7 +410,13 @@
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${points.map((p) => p[0].toFixed(3)).join(',')}`
       + `&longitude=${points.map((p) => p[1].toFixed(3)).join(',')}`
       + `&hourly=${vars.join(',')},freezing_level_height&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`;
-    let d = await omFetch(url); if (!Array.isArray(d)) d = [d];
+    let d;
+    try { d = await omFetch(url); } catch (e) {
+      const w = adwxWinds(points, ft, times);
+      if (w.some((x) => x.spd != null)) return w.map((x) => (x.spd == null ? { ...x, spd: 0 } : x));
+      throw e;
+    }
+    if (!Array.isArray(d)) d = [d];
     return d.map((x, i) => {
       const h = x.hourly, idx = Math.max(0, h.time.indexOf(roundHour(times[i])));
       const lv = WLV.map((l) => ({ l, z: h[`geopotential_height_${l}hPa`][idx] * 3.281, s: h[`wind_speed_${l}hPa`][idx], dir: h[`wind_direction_${l}hPa`][idx], t: h[`temperature_${l}hPa`][idx] }))
@@ -1595,6 +1636,7 @@
     PROJ_LAT = userPts.reduce((s, p) => s + p[0], 0) / userPts.length;
     const depT = new Date(f.time);
     if (isNaN(depT)) throw new Error('Heure de départ invalide.');
+    if (!f._valley) omFallback = null;
     const vacOf = (id) => (VAC && VAC.data && VAC.data[id]) || null;
     const N = A.NOTAM || { fir: [], ad: {} };
     const horizon = (depT - Date.now()) / 864e5;
@@ -1831,7 +1873,7 @@
 
     const res = {
       f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
-      sun, sunDep, varDeg, winds, windErr, elevErr, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
+      sun, sunDep, varDeg, winds, windErr, elevErr, wxFallback: omFallback, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
       profile, mids, depElev: elevOf(f.dep), wxRoute, conf, ens, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
@@ -1886,7 +1928,15 @@
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${samp.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${samp.map((x) => x.p[1].toFixed(3)).join(',')}`
       + '&hourly=temperature_2m,dew_point_2m,cloud_cover_low,cloud_cover_mid,visibility,precipitation,weather_code,wind_gusts_10m'
       + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`;
-    let d = await omFetch(url); if (!Array.isArray(d)) d = [d];
+    let d;
+    try { d = await omFetch(url); } catch (e) {
+      // secours : terrain publié le plus proche (25 NM) ; points sans terrain proche laissés de côté
+      const pts2 = samp.map((x) => { const n = adNear(x.p, x.at); if (!n) return null; const g = (v) => n.h[v][n.k];
+        return { ...x, ...wxLevel({ T: g('temperature_2m'), Td: g('dew_point_2m'), low: g('cloud_cover_low'), vis: g('visibility'), rr: g('precipitation'), wc: g('weather_code'), gust: g('wind_gusts_10m'), elevFt: n.elevFt }, cruiseFt), near: n.a.icao }; }).filter(Boolean);
+      if (!pts2.length) throw e;
+      return { pts: pts2, worst: Math.max(0, ...pts2.map((x) => x.level)), fallback: true };
+    }
+    if (!Array.isArray(d)) d = [d];
     const pts2 = samp.map((x, i) => {
       const h = d[i].hourly, idx = h.time.indexOf(x.at.toISOString().slice(0, 13) + ':00');
       const g = (k) => (idx >= 0 ? h[k][idx] : null);
@@ -2475,6 +2525,7 @@
       else if (dv && dv - b.depT < 30 * 864e5) al.push(`${lbl} de ${b.f.pil || 'pilote'} valable jusqu'au ${b.f[k].split('-').reverse().join('/')} : à renouveler.`);
     }
     if (b.windErr) al.push(b.windErr + ' Temps calculés sans vent.');
+    if (b.wxFallback) al.push(`Service météo Open-Meteo indisponible depuis cette connexion : vent et météo de route pris dans la prévision des terrains publiée par le site (${b.wxFallback === '?' ? 'heure inconnue' : 'calculée à ' + utc(new Date(b.wxFallback))}), terrain le plus proche de chaque point, vent en altitude approché. Vérifier avec aviation.meteo.fr (TEMSI, WINTEM).`);
     if (b.elevErr) al.push(b.elevErr);
     if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => (d.name ? `${d.id} ${d.name}` : d.id)).join(', ')}).`);
     if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
@@ -3378,7 +3429,9 @@
     for (let i = 0; i < rest.length; i += 100) {
       const ch = rest.slice(i, i + 100).map((k) => pts[k]);
       let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${ch.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${ch.map((x) => x.p[1].toFixed(3)).join(',')}`
-        + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+        + `&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_gusts_10m&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`).catch(() => null);
+      // secours : terrain publié le plus proche (40 NM), sinon « météo inconnue » comptée comme marginale
+      if (!d) { ch.forEach((x, j) => { const n = adNear(x.p, x.at, 40); W[rest[i + j]] = n ? lvl(n.h, n.k, n.elevFt) : { level: 1, why: ['météo inconnue (service météo indisponible)'] }; }); continue; }
       if (!Array.isArray(d)) d = [d];
       ch.forEach((x, j) => { const h = d[j].hourly; W[rest[i + j]] = lvl(h, h.time.indexOf(roundHour(x.at)), Math.round((d[j].elevation || 0) * 3.281)); });
     }
@@ -3991,7 +4044,8 @@
     if (!Q.length) return { pts: P };
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${Q.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${Q.map((x) => x.p[1].toFixed(3)).join(',')}`
       + '&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_180m,wind_direction_180m,cape'
-      + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`);
+      + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`).catch(() => null);
+    if (!d) { Q.forEach((x) => { const n = adNear(x.p, b0.depT); if (n) { x.h = n.h; x.elev = n.elevFt; } }); return { pts: P, fallback: true }; }   // secours : terrain publié le plus proche
     if (!Array.isArray(d)) d = [d];
     Q.forEach((x, i) => { x.h = d[i].hourly; x.elev = (d[i].elevation || 0) * 3.281; });
     return { pts: P };
@@ -4027,6 +4081,7 @@
       return `<td title="${esc(hLoc(t))} : ${esc(WXTXT[lv])}${why.length ? ' — ' + esc(why.join(', ')) : ''}" style="background:${WXCOL[lv]};color:#000;min-width:20px">${mark}</td>`; };
     return `<h4>Fenêtre météo du jour (heure locale)</h4><div style="overflow-x:auto"><table class="legs" style="font-size:11px"><tr><th></th>${hours.map((t) => `<th>${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', timeZone: 'Europe/Paris' }).replace(/\D.*$/, '')}</th>`).join('')}</tr>
       ${rows.filter((r) => r[1].length).map(([l, ps]) => `<tr><td style="text-align:left;white-space:nowrap">${esc(l)}</td>${hours.map((t) => cell(ps, t)).join('')}</tr>`).join('')}</table></div>
+      ${W.fallback ? '<p class="warn">Service Open-Meteo indisponible : ligne « Route » d\'après le terrain publié le plus proche de chaque point.</p>' : ''}
       <p class="meta">Vert : VFR favorable · orange : marginal · rouge : défavorable (visibilité, plafond, brouillard, orage, pluie, rafales). 🛫 départ prévu, 🛬 arrivée. Survole une case pour le détail. Modèle Open-Meteo : confirmer avec TAF et TEMSI.</p>`;
   }
   // alertes de la journée pour une étape : brouillard / stratus (12), orages (13), cisaillement et turbulence (11)

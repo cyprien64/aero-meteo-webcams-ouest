@@ -46,6 +46,10 @@
   }, true));
   let reopen = null; try { reopen = sessionStorage.getItem('aww.reopen'); sessionStorage.removeItem('aww.reopen'); } catch { /* ignore */ }
   if (reopen === '#btn-prep' || reopen === '#btn-hist') loadPrep().then(() => $(reopen).click(), () => {});
+  else if (location.hash === '#prep') {   // raccourci « Préparer un vol » de l'application installée
+    history.replaceState(null, '', location.pathname + location.search);
+    loadPrep().then(() => $('#btn-prep').click(), () => {});
+  }
   else if (location.hash.startsWith('#vol=')) loadPrep().catch(() => {});   // lien de vol partagé
   else {   // nav enregistrée qui part dans les 36 h : la préparation se charge en arrière-plan pour le contrôle du jour J (nouveaux NOTAM, TAF)
     let soon = false;
@@ -433,6 +437,7 @@
       <p>Carnet de vol, profils pilotes, bras de levier, notes et taxes saisies restent <b>seulement sur cet appareil</b>. Safari (iPhone, iPad) les efface après 7 jours sans visite, sauf si le site est ajouté à l'écran d'accueil.</p>
       <div class="row"><button class="btn" id="help-backup">Sauvegarder mes données</button> <button class="btn" id="help-restore">Restaurer une sauvegarde</button></div>
       <p class="meta">${(() => { const t = +localStorage.getItem('aww.lastBackup') || 0; return t ? `Dernière sauvegarde : ${new Date(t).toLocaleDateString('fr-FR')}.` : 'Aucune sauvegarde faite sur cet appareil.'; })()}</p>
+      ${installHtml() ? `<h4>7. Installer l'application</h4><p>Une icône sur l'écran d'accueil, le site en plein écran, utilisable sans réseau ; sur iPhone, les données ne sont plus effacées après 7 jours.</p>${installHtml()}` : ''}
       <h4>Bon à savoir</h4>
       <p>${icon('#btn-measure')} <b>Mesurer</b> : distance, cap et temps de vol entre des points cliqués. <b>Clic droit</b> (ou appui long) sur la carte : les espaces aériens au-dessus.</p>
       <p class="meta">${esc(window.AWW_LOG.omText())}</p>
@@ -442,11 +447,30 @@
     $('#help-news').addEventListener('click', () => showNews());
     $('#help-backup').addEventListener('click', () => window.AWW_backup());
     $('#help-restore').addEventListener('click', () => window.AWW_restore());
+    const ib = $('#help-install');
+    if (ib) ib.addEventListener('click', async () => {
+      const ev = installEvt; if (!ev) return; installEvt = null; ev.prompt();
+      const r = await ev.userChoice.catch(() => ({}));
+      ib.closest('.row').outerHTML = `<p class="meta">${r.outcome === 'accepted' ? '✔ Installation en cours.' : 'Installation annulée : possible plus tard depuis le menu du navigateur.'}</p>`;
+    });
   }
   $('#btn-tour').addEventListener('click', showHelp);
 
+  // ---------- installation comme application (PWA) : invite du navigateur (Android, ordinateur), explications sur iPhone / iPad
+  let installEvt = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+  addEventListener('appinstalled', () => { installEvt = null; });
+  function installHtml() {
+    if (location.protocol === 'chrome-extension:') return '';
+    if (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) return '<p class="meta">✔ Application installée sur cet appareil.</p>';
+    if (installEvt) return '<div class="row"><button class="btn primary" id="help-install">Installer l\'application</button></div>';
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return '<p>iPhone, iPad (Safari) : bouton <b>Partager</b> puis <b>« Sur l\'écran d\'accueil »</b>.</p>';
+    return '<p>Menu du navigateur (⋮) puis <b>« Installer l\'application »</b> ou <b>« Installer Aéro Météo »</b> (Chrome, Edge, Safari sur Mac). Firefox ne sait pas installer un site.</p>';
+  }
+
   // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
-  const NEWS = { v: 62, items: [
+  const NEWS = { v: 63, items: [
+    'Installer le site comme une application : aide « ? », rubrique 7 (bouton sur Android et ordinateur, explications sur iPhone). Appui long sur l\'icône : « Préparer un vol ».',
     'SIGMET (orages, givrage fort, turbulence forte) : alerte si l\'un d\'eux touche la route à l\'heure de passage et à l\'altitude prévue. Source aviationweather.gov, à confirmer sur aviation.meteo.fr.',
     'Webcams de la route en images, dans l\'ordre du trajet avec l\'heure de passage (onglet Météo).',
     'Fiche radio : même nombre de personnes à bord que le plan de vol, et lien vers le site de phraséologie pour s\'entraîner.',

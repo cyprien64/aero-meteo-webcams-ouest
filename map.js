@@ -825,7 +825,7 @@
   setCollapsed(store.get('collapsed', false));
 
   // ---------- NOTAM (SOFIA) et SUP AIP (SIA) ----------
-  let NOTAM = { fir: [], ad: {} }, SUP = [];
+  let NOTAM = { fir: [], ad: {} }, SUP = [], SUPGEN = null;
   const fmtT = (s) => {
     if (!s) return 'PERM';
     const d = new Date(s);
@@ -1168,7 +1168,7 @@
       st.push(`${NOTAM.fir.length + nAd} NOTAM${newCount ? ` dont ${newCount} nouveaux depuis ta dernière visite` : ''}`);
     } catch (e) { console.warn('notam', e); st.push('NOTAM indisponibles'); }
     try {
-      SUP = (await getLive('supaip.json')).data || [];
+      { const sj = await getLive('supaip.json'); SUP = sj.data || []; SUPGEN = sj.generated || null; }
       drawSup();
       drawAirLayers();
       st.push(`${SUP.length} SUP AIP`);
@@ -1452,7 +1452,7 @@
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor, altFt,
     metars, tafs, aptByIcao, APTS, SOURCES,
     showStack: (la, lo, t) => showStack(la, lo, t),
-    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, escaleOf, feeFor, pprText,
+    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, get SUPGEN() { return SUPGEN; }, escaleOf, feeFor, pprText,
     showPanel(title, html) { showList(title, html); },
     detailBody, detail, store, highlight,
     setPickOff(v) { pickOff = v; },

@@ -603,3 +603,7 @@ details.ad-sec[open] { padding-bottom: 10px; }
 .sign { margin: 14px auto 4px; text-align: center; }
 .sign img { display: block; width: 150px; height: auto; margin: 0 auto; border-radius: 14px; }
 .sign figcaption { margin-top: 6px; font-size: 11px; color: var(--muted); }
+
+/* âge des données du briefing : en orange si ancien ou si météo de secours */
+.data-age .old { color: #ff9f0a; font-weight: 600; }
+:root[data-theme="light"] .data-age .old { color: #b35c00; }

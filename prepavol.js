@@ -172,7 +172,7 @@
     if (!blk || /\bH\s?24\b/.test(blk)) return null;
     return { blk, shift: /HOR ETE : -1HR/.test(txt), ppr: /PPR/.test(blk) };
   }
-  function outsideHours(v, when) {
+  function outsideHoursWide(v, when) {   // ancien calcul (plage la plus large de la saison) : secours si le texte n'est pas compris par jour
     const h = atsHours(v); if (!h) return null;
     const summer = isSummer(when), lines = h.blk.split('\n').filter((l) => !/^MIL\b/.test(l.trim()));
     const seasonal = lines.some((l) => /^(ETE|HIV)\b/.test(l.trim()));
@@ -181,8 +181,123 @@
     if (!rg.length) return null;
     const off = !seasonal && h.shift && summer ? -60 : 0, lo = Math.min(...rg.map((r) => r[0])) + off, hi = Math.max(...rg.map((r) => r[1])) + off;
     const t = when.getUTCHours() * 60 + when.getUTCMinutes(), hm = (x) => `${pad(Math.floor(x / 60))}${pad(x % 60)}`;
-    return t < lo || t > hi ? { win: `${hm(lo)}-${hm(hi)} UTC`, ppr: h.ppr } : null;
+    return t < lo || t > hi ? { win: `${hm(lo)}-${hm(hi)} UTC`, ppr: h.ppr, wide: true } : null;
   }
+
+  // ---------- horaires selon le jour : LUN-VEN / SAM, DIM et JF / sauf JF / non assuré / du 15/04 au 15/09 / 01/01 et 25/12 fermé
+  // jours fériés français (fixes + Pâques, Ascension, Pentecôte) -> Set de 'MM-DD'
+  function frHolidays(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30,
+      i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451), mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1;
+    const easter = Date.UTC(y, mo - 1, da), md = (t) => new Date(t).toISOString().slice(5, 10);
+    return new Set(['01-01', '05-01', '05-08', '07-14', '08-15', '11-01', '11-11', '12-25', md(easter + 864e5), md(easter + 39 * 864e5), md(easter + 50 * 864e5)]);
+  }
+  console.assert(frHolidays(2026).has('04-06') && frHolidays(2026).has('05-14') && frHolidays(2026).has('05-25') && frHolidays(2027).has('03-29') && !frHolidays(2026).has('04-05'), 'frHolidays (Pâques 2026 = 5 avril, 2027 = 28 mars)');
+  const DAY_RE = /\b(LUN|MAR|MER|JEU|VEN|SAM|DIM|MON|TUE|WED|THU|FRI|SAT|SUN)\b(?:\s*-\s*\b(LUN|MAR|MER|JEU|VEN|SAM|DIM|MON|TUE|WED|THU|FRI|SAT|SUN)\b)?/g;
+  const dayIdx = (t) => { const i = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'].indexOf(t); return i >= 0 ? i : ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].indexOf(t); };
+  function daysIn(txt) {   // 0 = lundi … 6 = dimanche, 7 = jour férié
+    const out = new Set(), core = txt.replace(/(sauf|except)\s+(public\s+)?(JF|HOL)\b/gi, '');
+    for (const m of core.matchAll(DAY_RE)) { const a = dayIdx(m[1]), b = m[2] ? dayIdx(m[2]) : a; for (let k = a; ; k = (k + 1) % 7) { out.add(k); if (k === b) break; } }
+    if (/\b(JF|HOL)\b/.test(core)) out.add(7);
+    return out;
+  }
+  console.assert([...daysIn('SAM, DIM et JF / SAT, SUN and HOL')].sort().join() === '5,6,7' && [...daysIn('LUN-VEN sauf JF')].sort().join() === '0,1,2,3,4' && [...daysIn('VEN-LUN')].sort().join() === '0,4,5,6', 'daysIn');
+  // texte ATS -> { R: {jour: [[début, fin] min UTC]}, C: {jour: 'fermé' | 'PPR'}, shut: Set 'MM-DD', any } pour la date « when »
+  function hoursByDay(blk, when) {
+    const R = {}, C = {}, shut = new Set(), md = when.toISOString().slice(5, 10), mdv = (x) => x.slice(3, 5) + '-' + x.slice(0, 2);
+    const closedRe = /non assuré|not provided|fermé|closed/i, SEG = /(?<=\d{4}\s*)[,;.]?\s*(?=(?:LUN|MAR|MER|JEU|VEN|SAM|DIM|MON|TUE|WED|THU|FRI|SAT|SUN)\b)/;
+    let inPeriod = true, any = false;
+    for (const raw of blk.split('\n')) {
+      const line = raw.trim(); if (!line || /^MIL\b|\b(TEL|FAX|E-?mail)\b|bureau|office hours/i.test(line)) continue;
+      const per = line.match(/du (\d\d\/\d\d) au (\d\d\/\d\d)/);
+      if (per) { const a = mdv(per[1]), b = mdv(per[2]); inPeriod = a <= b ? md >= a && md <= b : md >= a || md <= b; }
+      if (!inPeriod) continue;
+      const paren = [...line.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+      let lastDays = new Set();
+      // « LUN-VEN : 0700-1700, SAM-DIM et JF : 0800-1100 » : un segment par groupe de jours placé après des heures
+      for (const seg of line.replace(/\([^)]*\)/g, ' ').split(SEG)) {
+        const times = [...seg.matchAll(/\b([0-2]\d)([0-5]\d)\s*-\s*([0-2]\d)([0-5]\d)\b/g)].map((m) => [+m[1] * 60 + +m[2], +m[3] * 60 + +m[4]]);
+        const dates = [...seg.matchAll(/\b(\d\d)\/(\d\d)\b/g)];
+        if (!times.length && dates.length && closedRe.test(seg) && !per) { dates.forEach((m) => shut.add(`${m[2]}-${m[1]}`)); any = true; continue; }
+        let days = daysIn(per ? seg.split(':').slice(1).join(':') : seg);
+        if (!days.size && times.length) days = new Set([0, 1, 2, 3, 4, 5, 6, 7]);
+        if (!days.size) continue;
+        any = true; lastDays = days;
+        if (times.length) days.forEach((d) => { if (!C[d]) (R[d] = R[d] || []).push(...times); });
+        else if (closedRe.test(seg)) days.forEach((d) => { C[d] = 'fermé'; delete R[d]; });
+        else if (/PPR|sur demande|on request|O\/R/i.test(seg)) days.forEach((d) => { if (!R[d]) C[d] = 'sur PPR'; });
+      }
+      // « (HIV / WIN , JF / public HOL : non assuré) » : jours entre parenthèses fermés ; HIV en hiver -> les jours de la ligne aussi
+      for (const p of paren) if (closedRe.test(p)) {
+        const pd = daysIn(p); if (/\b(HIV|WIN)\b/.test(p) && !isSummer(when)) lastDays.forEach((d) => pd.add(d));
+        pd.forEach((d) => { C[d] = 'fermé'; delete R[d]; });
+      }
+    }
+    return { R, C, shut, any };
+  }
+  const LBL_DAY = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche', 'jour férié'];
+  // texte d'horaires -> null si « when » est dedans, sinon { win, ppr, day, closed } ; undefined si le texte n'est pas compris par jour
+  function hoursCheck(blk, shift, when, ppr = false) {
+    const P = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', weekday: 'short', month: '2-digit', day: '2-digit' }).formatToParts(when), get = (t) => (P.find((x) => x.type === t) || {}).value;
+    const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday')), mdd = `${get('month')}-${get('day')}`, hol = frHolidays(when.getUTCFullYear()).has(mdd);
+    const D = hoursByDay(blk, when); if (!D.any) return undefined;
+    const cls = hol && (D.R[7] || D.C[7]) ? 7 : wd, label = hol ? `${LBL_DAY[7]} (${LBL_DAY[wd]})` : LBL_DAY[wd];
+    if (D.shut.has(mdd)) return { win: `fermé le ${mdd.slice(3)}/${mdd.slice(0, 2)}`, ppr: false, day: label, closed: true };
+    if (D.C[cls]) return { win: `${D.C[cls]} le ${label}`, ppr: D.C[cls] === 'sur PPR', day: label, closed: D.C[cls] === 'fermé' };
+    const rg = D.R[cls] || (cls === 7 ? D.R[wd] : null);
+    if (!rg) return undefined;
+    const off = shift && isSummer(when) ? -60 : 0, t = when.getUTCHours() * 60 + when.getUTCMinutes(), hm = (x) => `${pad(Math.floor(((x % 1440) + 1440) % 1440 / 60))}${pad(((x % 60) + 60) % 60)}`;
+    const inside = rg.some(([a, b]) => (b >= a ? t >= a + off && t <= b + off : t >= a + off || t <= b + off));
+    return inside ? null : { win: `${rg.map(([a, b]) => `${hm(a + off)}-${hm(b + off)}`).join(', ')} UTC le ${label}`, ppr, day: label };
+  }
+  function outsideHours(v, when) {
+    const h = atsHours(v); if (!h) return null;
+    if (/^\s*(ETE|HIV)\b/m.test(h.blk)) return outsideHoursWide(v, when);   // saisons ETE / HIV : ancien calcul
+    if (/^\s*HX\b/.test(h.blk)) return { win: 'horaires irréguliers (HX), se renseigner', ppr: true, day: '' };
+    const r = hoursCheck(h.blk, h.shift, when, h.ppr);
+    return r === undefined ? outsideHoursWide(v, when) : r;
+  }
+  console.assert((() => {
+    const V = (blk) => ({ infos: `Location :1 -\n${blk}\nATS :2 -` }), at = (iso) => new Date(iso);
+    const ba = V('LUN-VEN : 0700-1700, SAM-DIM et JF : 0800-1100 1215-1700.\nMON-FRI : 0700-1700, SAT-SUN and public HOL: 0800-1100 1215-1700.');
+    const ci = V('LUN-JEU / MON-THU : 0700-1700.\nVEN / FRI : 0700-1100, 1300-1700.\nSAM et DIM / SAT and SUN : 1300-1700 (HIV / WIN , JF / public HOL : non assuré / not provided).');
+    const dh = V('AFIS - LUN-VEN / MON-FRI : 0830-1100, 1300-1630 sauf JF / except public HOL.\nSAM, DIM et JF : assuré uniquement avec PPR le jour ouvrable précédent avant 1500.');
+    const ch = V('AFIS du 15/04 au 15/09 / from 15 APR to 15 SEP : LUN-DIM / MON-SUN : 0800-1800,\ndu 16/09 au 14/04 / from 16 SEP to 14 APR : LUN-VEN / MON-FRI : 0800-1100, 1315-1600,\nSAM, DIM et JF / SAT, SUN and HOL : 0800-1130, 1245-1600.\n01/01 et 25/12 AFIS fermé / 01 JAN and 25 DEC AFIS closed.');
+    return !outsideHours(ba, at('2026-11-25T07:30Z')) && outsideHours(ba, at('2026-11-29T07:30Z'))   // mercredi 0730 ouvert, dimanche 0730 fermé
+      && outsideHours(ba, at('2026-11-29T11:30Z')) && !outsideHours(ba, at('2026-11-29T13:00Z'))   // pause de midi le dimanche
+      && outsideHours(ci, at('2026-11-28T14:00Z')).closed && !outsideHours(ci, at('2026-06-27T14:00Z'))   // samedi : fermé l'hiver, ouvert l'été
+      && outsideHours(ci, at('2026-07-14T09:00Z')).closed && !outsideHours(ci, at('2026-07-15T09:00Z'))   // 14 juillet (mardi) fermé, lendemain ouvert
+      && outsideHours(dh, at('2026-11-28T10:00Z')).ppr && !outsideHours(dh, at('2026-11-27T10:00Z')) && outsideHours(dh, at('2026-11-11T10:00Z')).ppr   // samedi et 11 novembre : PPR
+      && !outsideHours(ch, at('2026-07-05T17:00Z')) && outsideHours(ch, at('2026-11-29T12:00Z')) && !outsideHours(ch, at('2026-11-29T13:00Z')) && outsideHours(ch, at('2026-12-25T10:00Z')).closed;
+  })(), 'outsideHours par jour (LFBA, LFCI, LFDH, LFCH)');
+  // ---------- carburant à une heure donnée (rubrique « Carburant / Fuel » de la VAC) : automate, horaires par jour / saison, O/R
+  const MON = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+  function fuelSection(v) { const m = /Carburants? \/ Fuel([\s\S]*?)(?:AVT :10|RFFS :11|$)/.exec((v && v.infos) || ''); return m ? m[1] : ''; }
+  function fuelAt(v, when) {   // -> null (pas de rubrique) | { auto, open: true / false / null (inconnu), txt }
+    const sec = fuelSection(v); if (!sec) return null;
+    const auto = /automate|automatic|distributeur automatique|libre[- ]service|self[- ]service/i.test(sec), autoH24 = auto && /automate H24|H24/i.test(sec);
+    const summer = isSummer(when);
+    const blk = sec.split('\n').filter((l) => !/^(SUM|WIN)\b|Paiement|Payment|Lubrifiant|Lubricant|\b(TEL|FAX)\b/i.test(l.trim()))
+      .map((l) => l.replace(/(\d\d) (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC) ?- ?(\d\d) (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/, (m, d1, m1, d2, m2) => `du ${d1}/${MON[m1]} au ${d2}/${MON[m2]}`)
+        .replace(/\((?:ETE|SUM)[^)]*-1 ?HR\)/i, ''))
+      .map((l) => { const e = l.search(/\b(ETE|SUM)\b/), h = l.search(/\b(HIV|WIN)\b/); if (e < 0 || h < 0) return l.replace(/^\s*(ETE|HIV)\b[^:]*:/, (m) => (/(ETE)/.test(m) === summer ? '' : '#')); return summer ? l.slice(e, h) : l.slice(h); })
+      .filter((l) => !l.startsWith('#')).map((l) => l.replace(/^\s*(ETE|SUM|HIV|WIN)\b[^:]*:\s*/, '')).join('\n');
+    const shift = /\((?:ETE|SUM)[^)]*-1 ?HR\)/i.test(sec);
+    const r = /\d{4}\s*-\s*\d{4}|O\/R/.test(blk) ? hoursCheck(blk, shift, when) : undefined;
+    const open = r === null ? true : r === undefined ? null : r.ppr ? null : false;
+    const txt = r && !r.ppr && autoH24 ? `pompe avec personnel fermée (${r.win}), automate H24` : r === null ? 'pompe ouverte à cette heure' : r === undefined ? 'horaires de la pompe non précisés dans la VAC' : r.ppr ? `pompe ${r.win} (sur demande)` : `pompe fermée à cette heure (${r.win})`;
+    return { auto, open: open === false && autoH24 ? true : open, txt: txt + (auto && !(r && !r.ppr && autoH24) ? ` · automate${autoH24 ? ' H24' : ''} (carte, voir VAC)` : '') };
+  }
+  console.assert((() => {
+    const V = (sec) => ({ infos: `Carburant / Fuel ${sec}\nAVT :10 -` }), at = (iso) => new Date(iso);
+    const bf = V(': Jet A1 : LUN-VEN / MON-FRI : 0700-1630, SAM-DIM-JF / SAT-SUN-HOL : O/R');
+    const be = V(': 100 LL : automate H24 - JET A1 (CIV-MIL) :\nETE / SUM : 0700-1600, HIV / WIN : 0800-1600.\nTEL : 05 53 22 25 23');
+    const ch = V(': UL AERO SUPER+, 100LL.\nNon porteurs de carte, contacter la TWR :\n15 APR - 15 SEP : 0830-1045, 1300-1700\n16 SEP - 14 APR : 0800-1045, 1315-1530.');
+    return fuelAt(bf, at('2026-12-02T10:00Z')).open === true && fuelAt(bf, at('2026-12-02T17:00Z')).open === false && fuelAt(bf, at('2026-12-05T10:00Z')).open === null
+      && fuelAt(be, at('2026-12-02T07:30Z')).open === true && /automate H24/.test(fuelAt(be, at('2026-12-02T07:30Z')).txt)
+      && fuelAt(ch, at('2026-07-01T12:00Z')).open === false && fuelAt(ch, at('2026-07-01T13:30Z')).open === true && fuelAt(ch, at('2026-12-02T16:00Z')).open === false && fuelAt(ch, at('2026-12-02T15:00Z')).open === true
+      && fuelAt({ infos: 'rien' }, at('2026-12-02T10:00Z')) === null;
+  })(), 'fuelAt (LFBF, LFBE, LFCH)');
 
   // ---------- route au format plan de vol OACI (case 15) : coordonnées des points tournants
   const icaoCoord = ([la, lo]) => {
@@ -399,6 +514,36 @@
       const T2 = n.h.temperature_2m[n.k];   // température : -2 °C par 1000 ft ; isotherme 0 °C estimée de même
       return { ...w, t: T2 == null ? null : T2 - 1.98 * (ft - n.elevFt) / 1000, iso: T2 == null ? null : Math.max(0, (n.elevFt + Math.max(0, T2) / 1.98 * 1000) / 3.281), lv: 'secours', at: times[i] };
     });
+  }
+  // ---------- 2e secours, indépendant d'Open-Meteo : MET Norway (api.met.no, gratuit, sans clé, autorise les pages web).
+  // Au sol seulement (pas de visibilité ni de vent en altitude) ; utilisé si la prévision publiée ne couvre pas l'heure du vol.
+  let metnoUsed = false;
+  const metnoP = new Map();
+  const metnoCode = (sym) => (/thunder/.test(sym) ? 95 : /fog/.test(sym) ? 45 : /heavysnow|heavysleet/.test(sym) ? 75 : /snow|sleet/.test(sym) ? 71 : /heavyrain/.test(sym) ? 65 : /lightrain/.test(sym) ? 61 : /rain/.test(sym) ? 63 : /cloudy/.test(sym) ? 3 : /partlycloudy|fair/.test(sym) ? 2 : sym ? 1 : null);
+  console.assert(metnoCode('rainshowersandthunder_day') === 95 && metnoCode('fog') === 45 && metnoCode('lightrain') === 61 && metnoCode('cloudy') === 3 && metnoCode('clearsky_day') === 1, 'metnoCode');
+  // réponse MET Norway -> séries horaires au format Open-Meteo (vent en kt)
+  function metnoHourly(j) {
+    const ts = ((j.properties || {}).timeseries || []).filter((x, i, a) => !i || Date.parse(x.time) - Date.parse(a[i - 1].time) === 36e5 || i === 0);
+    const h = { time: [], temperature_2m: [], dew_point_2m: [], cloud_cover_low: [], visibility: [], precipitation: [], weather_code: [], wind_speed_10m: [], wind_direction_10m: [], wind_gusts_10m: [] };
+    for (const x of ts) {
+      const d = x.data.instant.details, n1 = x.data.next_1_hours || {}, kt = (v) => (v == null ? null : Math.round(v * 1.94384));
+      h.time.push(x.time.slice(0, 13) + ':00'); h.temperature_2m.push(d.air_temperature ?? null); h.dew_point_2m.push(d.dew_point_temperature ?? null);
+      h.cloud_cover_low.push(d.cloud_area_fraction_low ?? null); h.visibility.push(d.fog_area_fraction >= 50 ? 800 : null);
+      h.precipitation.push((n1.details || {}).precipitation_amount ?? null); h.weather_code.push(metnoCode((n1.summary || {}).symbol_code || ''));
+      h.wind_speed_10m.push(kt(d.wind_speed)); h.wind_direction_10m.push(d.wind_from_direction ?? null); h.wind_gusts_10m.push(kt(d.wind_speed_of_gust));
+    }
+    ['wind_speed_180m', 'wind_direction_180m', 'cape'].forEach((v) => { h[v] = h.time.map(() => null); });   // absents de MET Norway (lus par wxAt)
+    return h;
+  }
+  console.assert((() => { const h = metnoHourly({ properties: { timeseries: [{ time: '2026-11-27T13:00:00Z', data: { instant: { details: { air_temperature: 12.7, dew_point_temperature: 5.2, cloud_area_fraction_low: 0, fog_area_fraction: 60, wind_from_direction: 300, wind_speed: 5 } }, next_1_hours: { summary: { symbol_code: 'fog' }, details: { precipitation_amount: 0 } } } }] } });
+    return h.time[0] === '2026-11-27T13:00' && h.wind_speed_10m[0] === 10 && h.visibility[0] === 800 && h.weather_code[0] === 45 && h.wind_gusts_10m[0] === null && h.cape.length === 1; })(), 'metnoHourly');
+  function metnoAt(p, t) {
+    const k = `${p[0].toFixed(2)},${p[1].toFixed(2)}`;
+    if (!metnoP.has(k)) metnoP.set(k, fetch(`https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=${p[0].toFixed(2)}&lon=${p[1].toFixed(2)}`)
+      .then((r) => { if (!r.ok) throw new Error('MET Norway ' + r.status); return r.json(); })
+      .then((j) => ({ h: metnoHourly(j), elevFt: Math.round((((j.geometry || {}).coordinates || [])[2] || 0) * 3.281) }))
+      .catch((e) => { metnoP.delete(k); console.warn(e); return null; }));
+    return metnoP.get(k).then((x) => { if (!x) return null; const i = x.h.time.indexOf(roundHour(new Date(t))); if (i < 0) return null; metnoUsed = true; return { h: x.h, k: i, elevFt: x.elevFt, a: { icao: 'MET Norway' } }; });
   }
   const WLV = [1000, 975, 950, 925, 900, 850, 800, 700, 600];
   const roundHour = (d) => new Date(Math.round(d.getTime() / 36e5) * 36e5).toISOString().slice(0, 13) + ':00';
@@ -1099,7 +1244,7 @@
         if (window.AWW_setFlightTimes) window.AWW_setFlightTimes(trip[0].depT, trip[trip.length - 1].eta);
       } catch (e) { console.warn(e); }
       // vol simple : météo du jour, créneaux, coût et liste de contrôle rangés dans les onglets ; voyage : au-dessus des étapes
-      const top = { wx: wxStripHtml(trip) + slotsHtml(trip) + climHtml(trip), res: costHtml(trip) + checkHtml(trip[0], '') };
+      const top = { wx: wxStripHtml(trip) + slotsHtml(trip) + planBHtml(trip) + climHtml(trip), res: costHtml(trip) + rulesHtml(trip) + checkHtml(trip[0], '') };
       out.innerHTML = verdictHtml(trip) + (trip.length > 1
         ? top.wx + tripHtml(trip) + refuelHtml(trip) + top.res + trip.map((b, i) => `<details class="stage" ${i === 0 ? 'open' : ''}><summary>Étape ${b.stage} : ${esc(b.f.dep)} → ${esc(b.f.arr)} · ${utc(b.depT)} → ${utc(b.eta)}</summary>${summaryHtml(b, '-' + i)}</details>`).join('')
         : summaryHtml(trip[0], '-0', top));
@@ -1164,10 +1309,22 @@
       : `✔ Carte OACI du trajet gardée sur cet appareil (${ok} morceaux, environ ${Math.max(1, Math.round(ok * 0.025))} Mo). Sans réseau, choisis le fond « Carte OACI-VFR ».`);
   }
   // ---------------------------------------------------------------- écran « Bon vol ! » : l'essentiel en gros caractères, écran gardé allumé
-  function goFreqs(b) {   // fréquences dans l'ordre du vol, sans doublon
-    const seen = new Set();
-    return radioCard(b).filter((r) => /\d{3}\.\d/.test(r[1]) && !seen.has(r[1]) && seen.add(r[1])).map((r) => [r[0].replace(/ · .*$/, ''), r[1]]);
+  // même fréquence radio ? canal 8,33 kHz « 124.155 » = 124,150 MHz, « 124.160 » = 124,158 MHz… (VAC en canaux, OpenAir parfois en MHz)
+  const freqKey = (f) => { const k = Math.round(parseFloat(f) * 1000), base = Math.floor(k / 25) * 25, r = k - base; return base * 3 + ({ 0: 0, 5: 0, 10: 1, 15: 2 }[r] ?? 9); };
+  console.assert(freqKey('124.155') === freqKey('124.150') && freqKey('124.160') !== freqKey('124.150') && freqKey('121.755') === freqKey('121.750') && freqKey('118.105') === freqKey('118.100') && freqKey('118.110') !== freqKey('118.100'), 'freqKey 8,33');
+  const is833 = (f) => Math.round(parseFloat(f) * 1000) % 25 !== 0;
+  function goFreqs(b) {   // fréquences dans l'ordre du vol, sans doublon ; deux écritures d'une même fréquence -> le canal 8,33 (celui de la VAC)
+    return mergeFreqs(radioCard(b).map((r) => ({ k: r[0].replace(/ · .*$/, ''), f: (String(r[1]).match(/\d{3}\.\d{2,3}/) || [])[0] })).filter((r) => r.f));
   }
+  function mergeFreqs(rows) {
+    const pref = new Map();
+    rows.forEach((r) => { const key = freqKey(r.f), cur = pref.get(key); if (!cur || (!is833(cur) && is833(r.f))) pref.set(key, r.f); });
+    const out = new Map();
+    rows.forEach((r) => { const key = freqKey(r.f); if (out.has(key)) { const o = out.get(key); if (!o[0].includes(r.k)) o[0] += ' / ' + r.k; } else out.set(key, [r.k, pref.get(key)]); });
+    return [...out.values()];
+  }
+  console.assert(JSON.stringify(mergeFreqs([{ k: 'CTR PAU', f: '124.150' }, { k: 'SOL Pau', f: '121.755' }, { k: 'TWR Pau', f: '124.155' }, { k: 'Pyrénées Info', f: '124.160' }]))
+    === JSON.stringify([['CTR PAU / TWR Pau', '124.155'], ['SOL Pau', '121.755'], ['Pyrénées Info', '124.160']]), 'mergeFreqs Pau');
   async function goCard(b) {
     const f = b.f, F = fuelLines(b), loc = (d) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     const rw = (i) => (i && i.rw ? rwyNum(i.rw.best.qfu) : '—'), qnh = (A.metars[f.dep] || {}).altim;
@@ -1467,7 +1624,10 @@
       const s = list[list.length - 1], dep = Date.parse(s.dep);
       if (!s.tafs || !s.form || !(dep > Date.now() && dep - Date.now() < 36 * 3600e3)) continue;
       const ch = [];
-      for (const id of s.ids) if ((A.tafs[id] || {}).rawTAF && (A.tafs[id] || {}).rawTAF !== s.tafs[id]) ch.push(`TAF ${id} ${s.tafs[id] ? 'modifié' : 'publié'}`);
+      for (const id of s.ids) if ((A.tafs[id] || {}).rawTAF && (A.tafs[id] || {}).rawTAF !== s.tafs[id]) {
+        const bad = (tafAt(A.tafs[id], new Date(dep)) || {}).bad || [];   // heure de départ : approximation pour l'arrivée (même demi-journée)
+        ch.push(`TAF ${id} ${s.tafs[id] ? 'modifié' : 'publié'}${bad.length ? ` — défavorable : ${bad.slice(0, 2).join(', ')}` : ''}`);
+      }
       const adn = new Set(s.adn), nAd = s.ids.flatMap((id) => (N.ad[id] || []).map((n) => n.ref)).filter((r) => !adn.has(r));
       if (nAd.length) ch.push(`${nAd.length} nouveau(x) NOTAM aux terrains (${nAd.slice(0, 3).join(', ')})`);
       const rt = new Set(s.rtban), nRt = (N.fir || []).filter((n) => /RTBA/.test(n.e || '') && !rt.has(n.ref));
@@ -1636,7 +1796,7 @@
     PROJ_LAT = userPts.reduce((s, p) => s + p[0], 0) / userPts.length;
     const depT = new Date(f.time);
     if (isNaN(depT)) throw new Error('Heure de départ invalide.');
-    if (!f._valley) omFallback = null;
+    if (!f._valley) { omFallback = null; metnoUsed = false; }
     const vacOf = (id) => (VAC && VAC.data && VAC.data[id]) || null;
     const N = A.NOTAM || { fir: [], ad: {} };
     const horizon = (depT - Date.now()) / 864e5;
@@ -1873,7 +2033,9 @@
 
     const res = {
       f, userIds, userPts, ids, pts, detours: routed.detours, obstacles, legs, climb, totDist, totMin, totFuel, eta, depT, altLeg, resFuel, reqFuel, loaded,
-      sun, sunDep, varDeg, winds, windErr, elevErr, wxFallback: omFallback, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
+      sun, sunDep, varDeg, winds, windErr, elevErr, wxFallback: omFallback, wxMetno: metnoUsed,
+      dataAt: { metar: ((A.metars[f.dep] || {}).obsTime || 0) * 1000, metarId: f.dep, taf: Date.parse((A.tafs[f.arr] || {}).issueTime || '') || 0, tafId: f.arr,
+        notam: Date.parse((A.NOTAM || {}).generated || '') || 0, sup: Date.parse(A.SUPGEN || '') || 0, calc: Date.now() }, wx, wxNear, adNotams, enroute, general, obst, sups, zones, rtba, azbaKnown,
       mb, landMass, depInfo, arrInfo, altInfo, cams: { dep: cams(f.dep), arr: cams(f.arr) },
       profile, mids, depElev: elevOf(f.dep), wxRoute, conf, ens, aq, wxRes, directNm, avoided: [...new Set(routed.detours.map((d) => d.around))], crossedOk: kept,
       vprofile: verticalProfile(profile, (ASP && ASP.data) || [], zones, f.ft),
@@ -1931,7 +2093,8 @@
     let d;
     try { d = await omFetch(url); } catch (e) {
       // secours : terrain publié le plus proche (25 NM) ; points sans terrain proche laissés de côté
-      const pts2 = samp.map((x) => { const n = adNear(x.p, x.at); if (!n) return null; const g = (v) => n.h[v][n.k];
+      const near = await Promise.all(samp.map((x) => adNear(x.p, x.at) || metnoAt(x.p, x.at)));
+      const pts2 = samp.map((x, i) => { const n = near[i]; if (!n) return null; const g = (v) => n.h[v][n.k];
         return { ...x, ...wxLevel({ T: g('temperature_2m'), Td: g('dew_point_2m'), low: g('cloud_cover_low'), vis: g('visibility'), rr: g('precipitation'), wc: g('weather_code'), gust: g('wind_gusts_10m'), elevFt: n.elevFt }, cruiseFt), near: n.a.icao }; }).filter(Boolean);
       if (!pts2.length) throw e;
       return { pts: pts2, worst: Math.max(0, ...pts2.map((x) => x.level)), fallback: true };
@@ -2507,8 +2670,9 @@
       t.notams.filter((n) => isClosure(n) && notamAt(n, t.when)).forEach((n) => al.unshift(`⛔ NOTAM ${n.ref} ${t.id} : ${/^MR/.test(n.q || '') ? 'piste fermée' : /^FA/.test(n.q || '') ? 'terrain fermé' : 'fermeture'} à l'heure ${t.role === 'DÉPART' ? 'du départ' : "d'arrivée"} (${utc(t.when)})${n.d ? `, créneaux ${n.d}` : ''} — ${(n.efr || n.e || '').slice(0, 140)}`));
       const tf = tafAt(A.tafs[t.id], t.when);
       if (tf && tf.bad && tf.bad.length) al.push(`TAF ${t.id} vers ${utc(t.when)} : ${tf.bad.join(' ; ')}.`);
-      const oh = outsideHours(t.v, t.when);
-      if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : t.role === 'DÉGAGEMENT' ? 'dégagement éventuel' : 'arrivée'} ${utc(t.when)} en dehors des horaires ATS publiés (${oh.win}, fenêtre la plus large de la saison, à vérifier sur la VAC)${oh.ppr ? ' — PPR mentionné' : ''}.`);
+      const oh = outsideHours(t.v, t.when), fa = t.role === 'ARRIVÉE' && (b.f.refuel || b.f.rt || b.f.stages) ? fuelAt(t.v, t.when) : null;
+      if (fa && fa.open === false) al.push(`${t.id} : carburant — ${fa.txt} à l'arrivée ${utc(t.when)}. Prévoir un autre terrain pour l'avitaillement ou appeler.`);
+      if (oh) al.push(`${t.id} : ${t.role === 'DÉPART' ? 'départ' : t.role === 'DÉGAGEMENT' ? 'dégagement éventuel' : 'arrivée'} ${utc(t.when)} ${oh.closed ? `: service ATS non assuré (${oh.win})` : `en dehors des horaires ATS publiés (${oh.win}${oh.wide ? ', fenêtre la plus large de la saison' : ''})`}, à vérifier sur la VAC${oh.ppr ? ' — PPR mentionné' : ''}.`);
     }
     al.push(...vfrMinima(b), ...icingAlerts(b), ...specialZones(b), ...borderAlerts(b), ...nightAlerts(b), ...safetyAlerts(b));
     dayAlerts(b).forEach((x) => (x.startsWith('⛔') ? al.unshift(x) : al.push(x)));
@@ -2526,6 +2690,7 @@
     }
     if (b.windErr) al.push(b.windErr + ' Temps calculés sans vent.');
     if (b.wxFallback) al.push(`Service météo Open-Meteo indisponible depuis cette connexion : vent et météo de route pris dans la prévision des terrains publiée par le site (${b.wxFallback === '?' ? 'heure inconnue' : 'calculée à ' + utc(new Date(b.wxFallback))}), terrain le plus proche de chaque point, vent en altitude approché. Vérifier avec aviation.meteo.fr (TEMSI, WINTEM).`);
+    if (b.wxMetno) al.push('Météo de route complétée par MET Norway (institut météorologique norvégien) : pas de visibilité ni de vent en altitude dans cette source, plafond estimé d\'après la température et le point de rosée.');
     if (b.elevErr) al.push(b.elevErr);
     if (b.detours.length) al.push(`Route modifiée pour contourner : ${[...new Set(b.detours.map((d) => d.around))].join(', ')} (points ${b.detours.map((d) => (d.name ? `${d.id} ${d.name}` : d.id)).join(', ')}).`);
     if (b.sun && b.eta > new Date(b.sun.set.getTime() + 30 * 6e4)) al.push(`Arrivée après la nuit aéronautique (coucher ${utc(b.sun.set)} + 30 min).`);
@@ -2641,6 +2806,7 @@
     const pr = e.pratique || {}, c = (e.contacts || []).find((x) => x.m === e.mail_escale) || {};
     const rows = [
       ['Horaires', h ? (oh ? `⚠️ arrivée ${utc(b.eta)} hors horaires (${oh.win})` : `arrivée ${utc(b.eta)} dans les horaires publiés`) + (h.ppr ? ' · PPR mentionné' : '') : 'H24 ou non précisé dans la VAC'],
+      ...(fuelAt(v, b.eta) ? [['Carburant à l\'arrivée', `${fuelAt(v, b.eta).open === false ? '⚠️ ' : ''}${fuelAt(v, b.eta).txt} (arrivée ${utc(b.eta)}, à confirmer par téléphone)`]] : []),
       ['PPR / stationnement', (e.ppr || []).slice(0, 2).join(' — ') || 'pas de consigne relevée'],
       ['Carburant', e.none ? 'aucun' : (e.fuel || []).join(', ') || 'voir VAC'], ['Paiement', (e.pay || []).join(', ') || 'non précisé'],
       ['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' — ' + fee.note : ''}` : 'non renseignée'],
@@ -2964,7 +3130,7 @@
   function borderInfo(b) {
     if (!window.FRANCE) return null;
     const ids = [b.f.dep, b.f.arr, b.f.alt].filter(Boolean), foreignAd = ids.filter((id) => !id.startsWith('LF'));
-    const out = routeSamples(b, 3).filter((x) => x.p[0] < 43.5 && !inFrance(x.p) && !(x.p[0] > 43.35 && x.p[1] > -1.79));   // seules frontières : Espagne et Andorre ; la mer devant la côte basque (à l'est de la Bidassoa) reste française
+    const out = routeSamples(b, 3).filter((x) => x.p[0] < 43.5 && x.p[1] < 3.35 && !inFrance(x.p) && !(x.p[0] > 43.35 && x.p[1] > -1.79));   // à l'est de 3,35° E (cap de Creus) : la Méditerranée, pas l'Espagne   // seules frontières : Espagne et Andorre ; la mer devant la côte basque (à l'est de la Bidassoa) reste française
     if (!out.length && !foreignAd.length) return null;
     const andorra = out.some((x) => x.p[0] > 42.42 && x.p[0] < 42.66 && x.p[1] > 1.4 && x.p[1] < 1.79);
     const customs = ids.filter((id) => id.startsWith('LF')).map((id) => { const t = (vacAt(id) || {}).infos || '', m = t.split(/MET :8 -/)[1]; return m ? [id, m.split(/Douanes, Police/)[0].replace(/\s+/g, ' ').trim().slice(0, 220)] : null; }).filter(Boolean);
@@ -3001,7 +3167,8 @@
   function waterOf(b) {
     if (!window.FRANCE) return null;
     const fin = b.f.T.glide || 9, land = window.FRANCE.flat();
-    const sea = routeSamples(b, 1).filter((x) => x.p[0] >= 43.4 && !inFrance(x.p))   // au sud de 43,4° : Espagne (terre), pas la mer
+    // hors de France = mer, sauf terre étrangère voisine : Espagne (sud de 43,4° et ouest de 3,2° E) et Italie (nord de 43,75° et est de 7,5° E)
+    const sea = routeSamples(b, 1).filter((x) => !inFrance(x.p) && !(x.p[0] < 43.4 && x.p[1] < 3.2) && !(x.p[0] > 43.75 && x.p[1] > 7.5))
       .map((x) => { const ft = x.lg.ft || b.f.ft; return { ...x, ft, d: Math.min(...land.map((q) => distNm(x.p, q))), glide: ft * fin / 6076 }; });
     if (!sea.length) return null;
     const worst = sea.reduce((m, x) => (x.d - x.glide > m.d - m.glide ? x : m));
@@ -3809,6 +3976,34 @@
     'Météo consultée (TEMSI, WINTEM, METAR / TAF, aviation.meteo.fr)', 'NOTAM, SUP AIP et AZBA consultés (SOFIA)', 'Carburant vérifié (quantité, purge) et huile',
     'Masse et centrage vérifiés', 'Terrains : VAC à jour, PPR / horaires, carburant disponible', 'Plan de vol déposé (si requis) ou prévenu quelqu\'un', 'Visite pré-vol faite'];
   const checkKey = (b) => { const b0 = (b.trip || [b])[0]; return `check.${b0.f.ac.reg}.${b0.f.dep}.${b0.depT.toISOString().slice(0, 10)}`; };
+  // ---------- règles du voyage, d'après la route de toutes les étapes (rappels : la référence fait foi, à vérifier)
+  const PARIS = [48.857, 2.352];
+  function travelRules(trip) {
+    const R = [], add = (k, txt) => R.push({ k, txt });
+    const ids = [...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr, b.f.alt]).filter(Boolean))];
+    const border = trip.map(borderInfo).find(Boolean), water = trip.map(waterOf).filter(Boolean), night = trip.some((b) => b.night && (b.night.late || b.night.firstDark || b.night.early));
+    const corse = ids.filter((id) => /^LFK/.test(id)), paris = trip.some((b) => routeSamples(b, 5).some((x) => distNm(x.p, PARIS) < 40)), mount = trip.some((b) => b.mountain);
+    if (border) add('Plan de vol', `obligatoire : la route franchit une frontière (${border.andorra ? 'Andorre / Espagne' : 'Espagne'}) — SERA.4001, dépôt sur SOFIA.`);
+    else if (night || corse.length || water.some((w) => w.beyond.length)) add('Plan de vol', `conseillé, peut être obligatoire : ${[night && 'vol de nuit', corse.length && 'traversée vers la Corse', water.some((w) => w.beyond.length) && 'survol maritime'].filter(Boolean).join(', ')} — vérifier l'AIP ENR 1.10.`);
+    else add('Plan de vol', 'pas d\'obligation détectée sur cette route (ni frontière, ni nuit, ni mer) — prévenir quelqu\'un de l\'heure d\'arrivée prévue ; vérifier l\'AIP ENR 1.10 en cas de doute.');
+    const sea = water.flatMap((w) => w.beyond);
+    if (sea.length) add('Gilets', `un gilet de sauvetage porté ou accessible par occupant : ${Math.round(Math.max(...sea.map((x) => x.d)))} NM de la côte au plus loin, au-delà de la distance de plané (NCO.IDE.A.175) ; plus loin, canot et moyens de signalisation selon la distance (même règle, à vérifier).`);
+    if (corse.length) add('Corse', `traversée maritime vers ${corse.join(', ')} : gilets, route la plus courte au-dessus de l'eau, altitude permettant de garder le contact radio (SIV / information de vol), plan de vol fortement conseillé (AIP ENR 1.10 et VAC).`);
+    if (paris) add('Région parisienne', 'espaces très denses (CTR / TMA, zones P et R dont la zone interdite de Paris) : carte VFR région parisienne, SUP AIP et NOTAM du jour, AIP ENR 5.1 ; transpondeur exigé dans certains espaces (à vérifier).');
+    if (night) add('Nuit', 'qualification de vol de nuit, réserve finale 45 min (NCO.OP.125), équipement et éclairage de l\'avion, terrains balisés et ouverts de nuit (VAC).');
+    if (mount) add('Montagne', 'voir « Vol en montagne » : marges sur les crêtes, échappatoires ; vol en montagne hors pratique habituelle : formation conseillée.');
+    if (trip.some((b) => b.f.arr !== trip[0].f.dep) || trip.length > 1) add('Documents à bord', 'certificat d\'immatriculation, CEN / CDN, assurance, licence de station radio, carnet de route, manuel de vol, devis de masse et centrage ; licence, certificat médical et pièce d\'identité du pilote (NCO.GEN.135).');
+    return R;
+  }
+  if (window.FRANCE) console.assert((() => {
+    const b = { f: { dep: 'LFMN', arr: 'LFKJ', alt: null, T: { glide: 9 }, ft: 5500 }, legs: [{ a: [43.66, 7.21], b: [41.92, 8.8], tc: 145, dist: 120, ft: 5500 }], night: null };
+    const r = travelRules([b]), k = r.map((x) => x.k);
+    return !borderInfo(b) && k.includes('Corse') && k.includes('Gilets') && /conseillé/.test(r.find((x) => x.k === 'Plan de vol').txt) && !k.includes('Région parisienne') && k.includes('Documents à bord');
+  })(), 'travelRules Nice → Ajaccio');
+  function rulesHtml(trip) {
+    const R = travelRules(trip); if (!R.length) return '';
+    return `<details open class="ad-sec"><summary><b>Règles du voyage</b> (d'après la route ; la réglementation publiée fait foi)</summary><ul class="rules">${R.map((r) => `<li><b>${esc(r.k)}</b> : ${esc(r.txt)}</li>`).join('')}</ul></details>`;
+  }
   function checkHtml(b, sfx) {
     const st = store.get(checkKey(b), []);
     return `<h4>Check-list avant départ</h4><div class="checklist" id="pf-check${sfx}">${CHECK_ITEMS.map((t, i) => `<label style="display:block;margin:2px 0"><input type="checkbox" data-i="${i}" ${st[i] ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</div>`;
@@ -3911,13 +4106,32 @@
   // ---------- meilleur créneau de départ (même nav, départ de 7 h à 17 h locales)
   // créneaux de départ 7 h - 17 h locales, pour le jour du vol et les jours suivants (une requête ; AZBA connue pour le jour du vol seulement)
   async function departureSlots(trip) {
-    const b0 = trip[0], bN = trip[trip.length - 1], dur = bN.eta - b0.depT, dep = A.aptByIcao[b0.f.dep], arr = A.aptByIcao[bN.f.arr];
+    const b0 = trip[0], bN = trip[trip.length - 1];
     const horizon = (b0.depT - Date.now()) / 864e5, nd = Math.max(1, Math.min(7, Math.floor(15 - horizon)));
     const day = b0.depT.toISOString().slice(0, 10), last = new Date(b0.depT.getTime() + nd * 864e5).toISOString().slice(0, 10);
-    let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+dep.la).toFixed(3)},${(+arr.la).toFixed(3)}&longitude=${(+dep.lo).toFixed(3)},${(+arr.lo).toFixed(3)}`
-      + `&hourly=temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,precipitation&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${last}`);
-    if (!Array.isArray(d)) d = [d];
-    const at = (i, t) => { const h = d[i].hourly, k = h.time.indexOf(roundHour(t)); return k < 0 ? null : { t: h.temperature_2m[k], td: h.dew_point_2m[k], ws: h.wind_speed_10m[k], wd: h.wind_direction_10m[k], g: h.wind_gusts_10m[k], vis: h.visibility[k], rr: h.precipitation[k] }; };
+    // séries horaires aux terrains de départ / arrivée de chaque étape : Open-Meteo, sinon prévision publiée des terrains (3 jours)
+    const ids = [...new Set(trip.flatMap((b) => [b.f.dep, b.f.arr]))].filter((id) => A.aptByIcao[id]), aps = ids.map((id) => A.aptByIcao[id]);
+    let H;
+    try {
+      let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${aps.map((x) => (+x.la).toFixed(3)).join(',')}&longitude=${aps.map((x) => (+x.lo).toFixed(3)).join(',')}`
+        + `&hourly=temperature_2m,dew_point_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility,precipitation&wind_speed_unit=kn&timezone=UTC&start_date=${day}&end_date=${last}`);
+      if (!Array.isArray(d)) d = [d];
+      H = Object.fromEntries(ids.map((id, i) => [id, d[i].hourly]));
+    } catch (e) {
+      H = Object.fromEntries(ids.map((id) => [id, adwxHourly(ADWX, id)]));
+      if (!ids.every((id) => H[id])) throw e;
+      H._fallback = true;
+    }
+    const week = slotWeek(b0, bN, H, nd, trip, true);
+    if (!week.length) return null;
+    const d0 = week.find((w) => w.day.toDateString() === b0.depT.toDateString()) || { slots: [], best: null };   // jour du vol
+    const stages = trip.length > 1 ? trip.map((b) => ({ b, week: slotWeek(b, b, H, nd, [b], false) })) : null;
+    return { slots: d0.slots, best: d0.best, week, bestDay: week.slice().sort((x, y) => x.best.score - y.best.score)[0], stages, fallback: !!H._fallback };
+  }
+  // créneaux 7 h - 17 h locales sur nd jours pour un trajet b0 (départ) -> bN (arrivée) ; AZBA comptée seulement le jour prévu
+  function slotWeek(b0, bN, H, nd, trip, azba) {
+    const dur = bN.eta - b0.depT, dep = A.aptByIcao[b0.f.dep], arr = A.aptByIcao[bN.f.arr];
+    const at = (id, t) => { const h = H[id], k = h ? h.time.indexOf(roundHour(t)) : -1; return k < 0 ? null : { t: h.temperature_2m[k], td: h.dew_point_2m[k], ws: h.wind_speed_10m[k], wd: h.wind_direction_10m[k], g: h.wind_gusts_10m[k], vis: h.visibility[k], rr: h.precipitation[k] }; };
     const vw = (b0.f.T.speeds || {})['Vw 90° max'] || 20, dayStart = Date.UTC(b0.depT.getUTCFullYear(), b0.depT.getUTCMonth(), b0.depT.getUTCDate());
     const cross = (x, id) => { const rw = runwayFor(vacAt(id), x.wd, x.ws); return rw ? Math.round(rw.best.cross) : null; };
     const week = [];
@@ -3925,7 +4139,7 @@
       const loc = new Date(b0.depT.getTime() + off * 864e5), slots = [];
       for (let h = 7; h <= 17; h++) {
         loc.setHours(h, 0, 0, 0); const t0 = new Date(loc), t1 = new Date(t0.getTime() + dur);
-        const p = at(0, t0), q = at(1, t1); if (!p || !q) continue;
+        const p = at(b0.f.dep, t0), q = at(bN.f.arr, t1); if (!p || !q) continue;
         const why = [];
         for (const [x, id, lbl] of [[p, b0.f.dep, 'au départ'], [q, bN.f.arr, 'à l\'arrivée']]) {
           const c = cross(x, id), base = Math.round((x.t - x.td) * 400 / 100) * 100;
@@ -3938,14 +4152,13 @@
         const sd = sunTimes(t0, +dep.la, +dep.lo), sa = sunTimes(t1, +arr.la, +arr.lo);   // nuit aéronautique : coucher + 30 min, lever - 30 min
         if (sd && t0 < sd.rise.getTime() - 18e5) why.push('avant le jour aéronautique');
         if (sa && t1 > sa.set.getTime() + 18e5) why.push('arrivée de nuit');
-        if (!off && trip.some((b) => b.rtba.some((r) => r.crossed && r.below && r.slots.some((s) => slotOverlap(s, dayStart, t0.getTime(), t1.getTime()))))) why.push('AZBA active sur la route');
+        if (azba && !off && trip.some((b) => b.rtba.some((r) => r.crossed && r.below && r.slots.some((s) => slotOverlap(s, dayStart, t0.getTime(), t1.getTime()))))) why.push('AZBA active sur la route');
+        const oh = outsideHours(vacAt(bN.f.arr), t1); if (oh && (oh.closed || !oh.ppr)) why.push(`${bN.f.arr} ${oh.closed ? 'fermé' : 'hors horaires'} (${oh.day || 'horaires'})`);
         slots.push({ t0, h, p, q, why, score: why.length * 100 + Math.max(p.ws, q.ws) });
       }
       if (slots.length) week.push({ day: new Date(loc), slots, best: slots.slice().sort((x, y) => x.score - y.score)[0] });
     }
-    if (!week.length) return null;
-    const d0 = week.find((w) => w.day.toDateString() === b0.depT.toDateString()) || { slots: [], best: null };   // jour du vol
-    return { slots: d0.slots, best: d0.best, week, bestDay: week.slice().sort((x, y) => x.best.score - y.best.score)[0] };
+    return week;
   }
   // climatologie (vol au-delà des prévisions) : jours « VFR possible » à ± 7 jours de la date, sur 10 ans, au départ, au milieu et à l'arrivée
   // code météo journalier = phénomène le plus fort de la journée : estimation prudente
@@ -3977,7 +4190,47 @@
       ${s.week.length > 1 ? `<h4>Meilleur jour (${s.week.length} jours)</h4><table class="legs trip"><tr><th>Jour</th><th>Meilleur départ</th><th>Contraintes</th></tr>
         ${s.week.map((w) => `<tr${w === s.bestDay ? ' style="font-weight:bold"' : ''}><td>${w.day.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}${w === s.bestDay ? ' ⭐' : ''}</td><td>${hl(w.best)}</td><td style="text-align:left">${w.best.why.length ? esc(w.best.why.join(', ')) : '✅'}</td></tr>`).join('')}</table>
         <p class="meta">AZBA : publiée la veille, comptée pour le jour du vol seulement.</p>` : ''}
-      <p class="meta">Prévision Open-Meteo au départ et à l'arrivée (base estimée par l'écart température / point de rosée). Indicatif : confirmer avec TAF, TEMSI et AZBA du jour.</p>`;
+      ${stagesWeekHtml(s)}
+      <p class="meta">Prévision ${s.fallback ? 'publiée des terrains (secours : Open-Meteo indisponible, 3 jours au plus)' : 'Open-Meteo'} au départ et à l'arrivée (base estimée par l'écart température / point de rosée). Indicatif : confirmer avec TAF, TEMSI et AZBA du jour.</p>`;
+  }
+  // ---------- plan B à chaque escale : où dormir, terrains voisins ouverts avec carburant à l'heure prévue, prochain jour favorable pour repartir
+  function planB(trip) {
+    const st = (trip[0].slots || {}).stages;
+    return trip.map((b, k) => {
+      const id = b.f.arr, ap = A.aptByIcao[id], e = (A.escaleOf && A.escaleOf(id)) || {}, pr = e.pratique || {};
+      const sleep = [pr.hotel, pr.situation || pr.ville].filter(Boolean).join(' · ');
+      const near = !ap ? [] : A.APTS.filter((a) => a.icao !== id && /^LF/.test(a.icao)).map((a) => ({ a, d: distNm([+ap.la, +ap.lo], [+a.la, +a.lo]) })).filter((x) => x.d <= 30)
+        .map((x) => { const es = (A.escaleOf && A.escaleOf(x.a.icao)) || {}, v = vacAt(x.a.icao), when = new Date(b.eta.getTime() + x.d / b.f.tas * 36e5), oh = outsideHours(v, when), fa = fuelAt(v, when);
+          return { ...x, fuel: !es.none && (es.fuel || []).length ? es.fuel : null, open: !oh || (oh.ppr && !oh.closed), fa }; })
+        .filter((x) => x.fuel && x.open && (!x.fa || x.fa.open !== false)).sort((x, y) => x.d - y.d).slice(0, 3);
+      let next = null;
+      if (st && st[k + 1]) {
+        const plan = trip[k + 1].depT.toDateString(), w = st[k + 1].week, i0 = w.findIndex((x) => x.day.toDateString() === plan);
+        const ok = w.slice(Math.max(0, i0)).find((x) => !x.best.why.length);
+        const d0 = (d) => new Date(d.toDateString()).getTime();   // minuit local : écart en jours entiers
+        next = { leg: `${trip[k + 1].f.dep} → ${trip[k + 1].f.arr}`, ok, wait: ok ? Math.round((d0(ok.day) - d0(trip[k + 1].depT)) / 864e5) : null, days: w.length - Math.max(0, i0) };
+      }
+      return { b, id, sleep, near, next };
+    });
+  }
+  function planBHtml(trip) {
+    const P = planB(trip); if (!P.length) return '';
+    const day = (d) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+    return `<details class="ad-sec"><summary><b>Plan B aux escales</b> (si la météo se dégrade)</summary>${P.map((x) => `<p class="meta" style="margin:4px 0"><b>${esc(x.id)}</b> ${esc((A.aptByIcao[x.id] || {}).name || '')}<br>
+      Dormir : ${esc(x.sleep || 'pas d\'information relevée (voir « Vie pratique » sur la fiche du terrain)')}<br>
+      Terrains à 30 NM ouverts avec carburant à l'heure prévue : ${x.near.length ? x.near.map((n) => `${esc(n.a.icao)} ${esc(n.a.name)} (${n.d.toFixed(0)} NM, ${esc(n.fuel.join('/'))}${n.fa && n.fa.open === true ? ', pompe ouverte' : ''})`).join(' · ') : 'aucun trouvé (horaires ou carburant inconnus : appeler)'}
+      ${x.next ? `<br>Repartir (${esc(x.next.leg)}) : ${x.next.ok ? (x.next.wait > 0 ? `prochain jour sans contrainte : <b>${day(x.next.ok.day)}</b> (${x.next.wait} jour${x.next.wait > 1 ? 's' : ''} d'attente), départ vers ${String(x.next.ok.best.h).padStart(2, '0')} h` : `le jour prévu convient (départ vers ${String(x.next.ok.best.h).padStart(2, '0')} h)`) : `aucun jour sans contrainte sur les ${x.next.days} jours de prévision`}` : ''}</p>`).join('')}
+      <p class="meta">Carburant et horaires relevés automatiquement dans les VAC : appeler le terrain pour confirmer.</p></details>`;
+  }
+  // voyage : chaque étape, chaque jour -> meilleure heure de départ (vert : rien de signalé, orange : 1 contrainte, rouge : plus)
+  function stagesWeekHtml(s) {
+    if (!s.stages || !s.stages.length) return '';
+    const days = [...new Map(s.stages.flatMap((x) => x.week.map((w) => [w.day.toDateString(), w.day]))).values()].sort((x, y) => x - y);
+    const col = (n) => (n === 0 ? '#2ecc40' : n === 1 ? '#ff9f0a' : '#ff3b30');
+    return `<h4>Voyage jour par jour</h4><div style="overflow-x:auto"><table class="legs trip"><tr><th>Étape</th>${days.map((d) => `<th>${d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })}</th>`).join('')}</tr>
+      ${s.stages.map(({ b, week }) => `<tr><td style="text-align:left;white-space:nowrap">${esc(b.f.dep)} → ${esc(b.f.arr)}</td>${days.map((d) => { const w = week.find((x) => x.day.toDateString() === d.toDateString());
+        return w ? `<td title="${esc(w.best.why.join(', ') || 'rien de signalé')}" style="background:${col(w.best.why.length)};color:#000">${String(w.best.h).padStart(2, '0')} h</td>` : '<td>—</td>'; }).join('')}</tr>`).join('')}</table></div>
+      <p class="meta">Meilleure heure de départ (locale) de chaque étape pour chaque jour, étudiée seule ; survole une case pour les contraintes (vent de travers, rafales, visibilité, base, pluie, nuit, terrain fermé).</p>`;
   }
 
   // ================================================================== météo de la journée (une requête Open-Meteo : départ, route, arrivée, déroutements)
@@ -4045,7 +4298,11 @@
     let d = await omFetch(`https://api.open-meteo.com/v1/forecast?latitude=${Q.map((x) => x.p[0].toFixed(3)).join(',')}&longitude=${Q.map((x) => x.p[1].toFixed(3)).join(',')}`
       + '&hourly=temperature_2m,dew_point_2m,cloud_cover_low,visibility,precipitation,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_180m,wind_direction_180m,cape'
       + `&wind_speed_unit=kn&timezone=UTC&start_date=${days[0]}&end_date=${days[days.length - 1]}`).catch(() => null);
-    if (!d) { Q.forEach((x) => { const n = adNear(x.p, b0.depT); if (n) { x.h = n.h; x.elev = n.elevFt; } }); return { pts: P, fallback: true }; }   // secours : terrain publié le plus proche
+    if (!d) {   // secours : terrain publié le plus proche, sinon MET Norway
+      const near = await Promise.all(Q.map((x) => adNear(x.p, b0.depT) || metnoAt(x.p, b0.depT)));
+      Q.forEach((x, i) => { if (near[i]) { x.h = near[i].h; x.elev = near[i].elevFt; } });
+      return { pts: P, fallback: true };
+    }
     if (!Array.isArray(d)) d = [d];
     Q.forEach((x, i) => { x.h = d[i].hourly; x.elev = (d[i].elevation || 0) * 3.281; });
     return { pts: P };
@@ -4081,7 +4338,7 @@
       return `<td title="${esc(hLoc(t))} : ${esc(WXTXT[lv])}${why.length ? ' — ' + esc(why.join(', ')) : ''}" style="background:${WXCOL[lv]};color:#000;min-width:20px">${mark}</td>`; };
     return `<h4>Fenêtre météo du jour (heure locale)</h4><div style="overflow-x:auto"><table class="legs" style="font-size:11px"><tr><th></th>${hours.map((t) => `<th>${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', timeZone: 'Europe/Paris' }).replace(/\D.*$/, '')}</th>`).join('')}</tr>
       ${rows.filter((r) => r[1].length).map(([l, ps]) => `<tr><td style="text-align:left;white-space:nowrap">${esc(l)}</td>${hours.map((t) => cell(ps, t)).join('')}</tr>`).join('')}</table></div>
-      ${W.fallback ? '<p class="warn">Service Open-Meteo indisponible : ligne « Route » d\'après le terrain publié le plus proche de chaque point.</p>' : ''}
+      ${W.fallback ? '<p class="warn">Service Open-Meteo indisponible : ligne « Route » d\'après le terrain publié le plus proche de chaque point (ou MET Norway).</p>' : ''}
       <p class="meta">Vert : VFR favorable · orange : marginal · rouge : défavorable (visibilité, plafond, brouillard, orage, pluie, rafales). 🛫 départ prévu, 🛬 arrivée. Survole une case pour le détail. Modèle Open-Meteo : confirmer avec TAF et TEMSI.</p>`;
   }
   // alertes de la journée pour une étape : brouillard / stratus (12), orages (13), cisaillement et turbulence (11)
@@ -4176,6 +4433,18 @@
     w.querySelectorAll(':scope > .tabs .tab').forEach((x) => { x.classList.toggle('on', x === t); x.setAttribute('aria-selected', x === t); x.tabIndex = x === t ? 0 : -1; });
     w.querySelectorAll(':scope > .tabp').forEach((x) => x.classList.toggle('on', x.dataset.tabp === t.dataset.tab));
   });
+  // ---------- âge des données du briefing (au moment où on le lit) : en orange au-delà d'une limite raisonnable
+  const agoTxt = (ms) => { const m = Math.max(0, Math.round(ms / 6e4)); return m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.floor(m / 60)} h${m % 60 ? pad(m % 60) : ''}` : `${Math.round(m / 1440)} j`; };
+  console.assert(agoTxt(5 * 6e4) === '5 min' && agoTxt(125 * 6e4) === '2 h05' && agoTxt(180 * 6e4) === '3 h' && agoTxt(3 * 864e5) === '3 j', 'agoTxt');
+  function dataAge(d, src, now = Date.now()) {   // src : null = Open-Meteo, sinon texte du secours utilisé
+    if (!d) return [];
+    const it = (t, label, limMin) => (t ? { txt: `${label} il y a ${agoTxt(now - t)}`, old: now - t > limMin * 6e4 } : { txt: `${label} : absent`, old: true });
+    return [it(d.metar, `METAR ${d.metarId}`, 90), it(d.taf, `TAF ${d.tafId} émis`, 9 * 60), it(d.notam, 'NOTAM collectés', 120), it(d.sup, 'SUP AIP', 48 * 60),
+      { ...it(d.calc, `vent et météo de route (${src || 'Open-Meteo'}) calculés`, 180), fallback: !!src }];
+  }
+  console.assert((() => { const now = Date.parse('2026-11-27T12:00:00Z'), r = dataAge({ metar: now - 20 * 6e4, metarId: 'LFBP', taf: now - 10 * 36e5, tafId: 'LFBZ', notam: 0, sup: now - 36e5, calc: now - 6e4 }, null, now);
+    return r[0].txt === 'METAR LFBP il y a 20 min' && !r[0].old && r[1].old && r[2].old && /absent/.test(r[2].txt) && !r[3].old && !r[4].old; })(), 'dataAge');
+  const dataAgeHtml = (b) => { const r = dataAge(b.dataAt, b.wxFallback ? 'secours : prévision des terrains publiée' : b.wxMetno ? `secours : MET Norway${b.windErr ? ', sans vent en altitude' : ''}` : b.windErr ? 'Open-Meteo, sans vent en altitude' : null); return r.length ? `<p class="meta data-age">Données : ${r.map((x) => `<span${x.old || x.fallback ? ' class="old"' : ''}>${esc(x.txt)}</span>`).join(' · ')}</p>` : ''; };
   function summaryHtml(b, sfx = '', top = {}) {
     const al = alertsOf(b);
     const nt = b.night;
@@ -4186,6 +4455,7 @@
       <div class="row" style="margin:6px 0"><button class="btn" id="pf-update${sfx}">Mettre à jour (mêmes paramètres)</button><button class="btn" id="pf-ics${sfx}">Rappels J-1 / J</button><button class="btn" id="pf-gps${sfx}">Mode en vol (GPS)</button><button class="btn" id="pf-knee${sfx}">Fiche de genou A5</button>${!b.stage || b.stage === 1 ? `<button class="btn" id="pf-routes${sfx}">Comparer 3 routes</button>` : ''}${(!b.stage || b.stage === 1) && b.depT > Date.now() && b.depT - Date.now() < 48 * 3600e3 ? `<button class="btn" id="pf-watch${sfx}" title="Recalcule la nav toutes les 30 min tant que la page est ouverte et prévient si la météo se dégrade">${watch ? '🔕 Arrêter la surveillance' : '🔔 Surveiller jusqu\'au départ'}</button>` : ''}<button class="btn" id="pf-share${sfx}">Partager</button>${b.f.pil && (!b.stage || b.stage === 1) ? `<button class="btn" id="pf-logit${sfx}">Vol effectué : ajouter au carnet</button>` : ''}</div>
       <h4>Route ${b.ids.join(' → ')}</h4>
       <p class="meta">${esc(b.f.ac.reg)} ${esc(b.f.T.label)} · ${esc(b.f.rg.name)} (${b.f.tas} kt, ${b.f.ff} L/h) · ${b.f.ft} ft</p>
+      ${dataAgeHtml(b)}
       <table class="legs"><tr><th>Branche</th><th>Alt.</th><th>Alt. séc.</th><th>Rm</th><th>Dist</th><th>Vent</th><th>Cm</th><th>Tps</th><th>Carb.</th></tr>
       ${b.legs.map((l) => `<tr><td>${l.from}→${l.to}</td><td>${l.ft || b.f.ft}</td><td>${l.safe ? l.safe.alt : '–'}</td><td>${r3(l.tm)}°</td><td>${l.dist.toFixed(0)}</td>
         <td>${l.wind ? `${r3(l.wind.dir)}/${Math.round(l.wind.spd)}` : '–'}</td><td>${r3(l.hm)}°</td><td>${l.min}'</td><td>${l.fuel} L</td></tr>`).join('')}

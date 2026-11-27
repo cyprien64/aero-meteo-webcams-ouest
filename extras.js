@@ -47,6 +47,11 @@
   let reopen = null; try { reopen = sessionStorage.getItem('aww.reopen'); sessionStorage.removeItem('aww.reopen'); } catch { /* ignore */ }
   if (reopen === '#btn-prep' || reopen === '#btn-hist') loadPrep().then(() => $(reopen).click(), () => {});
   else if (location.hash.startsWith('#vol=')) loadPrep().catch(() => {});   // lien de vol partagé
+  else {   // nav enregistrée qui part dans les 36 h : la préparation se charge en arrière-plan pour le contrôle du jour J (nouveaux NOTAM, TAF)
+    let soon = false;
+    try { soon = Object.values(JSON.parse(localStorage.getItem('aww.prep2.snaps') || '{}')).some((l) => { const d = Date.parse((l[l.length - 1] || {}).dep); return d > Date.now() && d - Date.now() < 36 * 3600e3; }); } catch { /* ignore */ }
+    if (soon) setTimeout(() => loadPrep().catch(() => {}), 4000);
+  }
 
   // ================================================================ 📏 Mesure d'un trajet
   // distance (NM, formule de haversine) et route vraie entre deux points [lat, lon] ; partagées avec la préparation de vol
@@ -409,12 +414,13 @@
   $('#btn-tour').addEventListener('click', showHelp);
 
   // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
-  const NEWS = { v: 56, items: [
-    'Le briefing commence par une phrase qui résume le vol.',
-    'Fiches terrain plus claires : météo, piste conseillée et fréquences en haut, le reste dans des rubriques à déplier.',
-    'Curseur horaire : « Voir le vol » fait parcourir la route à l\'avion, avec l\'heure et la météo de passage.',
-    'Bouton « Bon vol ! » : heures, carburant, pistes et fréquences dans l\'ordre, en gros caractères, écran gardé allumé.',
-    'Nouvelle présentation, plus sobre et plus lisible sur la carte.',
+  const NEWS = { v: 60, items: [
+    'Voyage : un tableau « jour par jour » donne la meilleure heure de départ de chaque étape sur les jours qui viennent.',
+    'Horaires des terrains selon le jour : week-end, jours fériés (Pâques, 14 juillet…), pause de midi, « non assuré » ; et la pompe à carburant ouverte ou non à l\'heure d\'arrivée.',
+    'Plan B à chaque escale : où dormir, terrains voisins ouverts avec carburant, prochain jour favorable pour repartir.',
+    'Règles du voyage d\'après la route : plan de vol, gilets, Corse, région parisienne, nuit, documents à bord.',
+    'Si le service météo Open-Meteo est bloqué, la préparation continue avec les prévisions publiées par le site, puis MET Norway.',
+    'Le briefing indique l\'âge de chaque donnée (METAR, TAF, NOTAM, SUP AIP, météo de route), en orange si elle est ancienne.',
   ] };
   function showNews() {
     A.store.set('newsSeen', NEWS.v);

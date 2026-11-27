@@ -31,6 +31,20 @@ jobs:
       - name: Test de chargement du site
         run: node tests/test_site.js
 
+      - name: Syntaxe de tous les scripts (y compris sw.js, non chargé par le test)
+        run: for f in *.js data/*.js; do node --check "$f"; done
+
+      # nom inconnu (fonction renommée à moitié, faute de frappe) : bloque la publication
+      - name: Noms de variables et de fonctions
+        run: |
+          (cd tests && npm i --silent --no-save --no-package-lock eslint@9.39.5 globals@16.5.0)
+          tests/node_modules/.bin/eslint -c tests/eslint.config.mjs *.js data/*.js
+
+      # version du service worker = empreinte des fichiers du site dans git : change seulement quand le code change
+      - name: Version du site
+        id: ver
+        run: echo "v=$(git ls-files -s -- . ':!docs' ':!scripts' ':!tests' ':!.github' ':!README.md' ':!data/live' ':!data/vac' | sha1sum | cut -c1-10)" >> "$GITHUB_OUTPUT"
+
       - name: Dépendance (lecture des cartes VAC)
         run: python3 -m pip install --quiet pypdf
 
@@ -77,6 +91,8 @@ jobs:
         run: |
           mkdir _site
           cp -r index.html map.html *.js *.css *.json app.webmanifest icons lib data _site/
+          sed -i "s/^const VERSION = .*/const VERSION = 'aww-v${{ steps.ver.outputs.v }}';/" _site/sw.js
+          grep -q "aww-v${{ steps.ver.outputs.v }}'" _site/sw.js
           (cd _site && zip -qr ../site.zip . -x 'data/vac/*') && mv site.zip _site/
 
       - uses: actions/upload-pages-artifact@v5

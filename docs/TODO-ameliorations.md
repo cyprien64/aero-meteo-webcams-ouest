@@ -4,7 +4,7 @@ Demandées le 25/11/2026. Cocher `[x]` chaque point terminé, vérifié et publi
 Une session automatique reprend les points non cochés le jeudi 26/11/2026 à 3 h 20 (heure de Paris) si la session interactive n'a pas tout fini.
 
 Règles du projet (à respecter) :
-- code dans `prepavol.js` (une IIFE), `map.js`, `map.css`, `scripts/collect.py`, `sw.js` ; augmenter `VERSION` de `sw.js` à chaque publication ;
+- code dans `prepavol.js` (une IIFE), `map.js`, `map.css`, `scripts/collect.py`, `sw.js` ; `VERSION` de `sw.js` est calculée à la publication (ne plus la changer à la main) ;
 - un `console.assert` pour toute logique nouvelle non triviale ; **aucun assert au chargement ne doit utiliser une `const` définie plus bas** (TDZ : tout le module tombe) ;
 - ne pas committer `data/live/*` ni `data/template/log_nav_acb.xlsx` ;
 - commits signés `-c user.email=322521137+cyprien64@users.noreply.github.com -c user.name=cyprien64`, message terminé par `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` ;

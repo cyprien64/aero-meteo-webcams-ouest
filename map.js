@@ -87,22 +87,34 @@
     scanreg: L.tileLayer(GEOPF.scanreg, { maxNativeZoom: 12, maxZoom: 14, attribution: 'SCAN Régional © IGN' }),
   };
   let currentBase = null;
-  function setBase(k) {
+  function setBase(k, temp) {   // temp : repli automatique, non retenu pour la visite suivante
     if (!bases[k]) k = 'schema';
     if (currentBase) map.removeLayer(currentBase);
     currentBase = bases[k].addTo(map);
     $('#basemap').value = k;
-    store.set('base', k);
+    if (!temp) store.set('base', k);
   }
   $('#basemap').addEventListener('change', (e) => setBase(e.target.value));
+  // v1 du repli (nov. 2026) basculait à tort sur le SCAN 1000 et l'enregistrait : carte OACI rendue une fois
+  if (store.get('base') === 'scan1000' && !store.get('oaciBack')) store.set('base', 'oaci');
+  store.set('oaciBack', 1);
   setBase(store.get('base', 'schema'));
-  // carte OACI refusée en série (clé IGN changée ou bloquée) alors que le réseau marche : repli sur le SCAN 1000 (sans clé) et message
-  { let bad = 0, good = 0;
-    bases.oaci.on('tileload', () => { good++; }).on('tileerror', () => {
-      if (++bad < 8 || good || !navigator.onLine || currentBase !== bases.oaci) return;
-      setBase('scan1000');
-      const s = $('#status2'); if (s) { s.textContent = 'Carte OACI indisponible (tuiles refusées par l\'IGN) : carte IGN 1/1 000 000 affichée à la place. La carte gardée hors ligne et celle du PDF peuvent manquer aussi.'; s.style.color = 'var(--warn-text)'; }
-      console.warn('OACI : tuiles refusées, repli SCAN 1000');
+  // carte OACI refusée (clé IGN changée ou bloquée) : les tuiles hors couverture (mer, étranger) répondent aussi en erreur,
+  // donc on vérifie une tuile sur la France (Pau, niveau 8) avant de basculer sur le SCAN 1000 (sans clé)
+  { let probing = false, probed = false;
+    bases.oaci.on('tileerror', () => {
+      if (probing || probed || !navigator.onLine || currentBase !== bases.oaci) return;
+      probing = true;
+      const img = new Image();
+      img.onload = () => { probing = false; probed = true; };
+      img.onerror = () => {
+        probing = false; probed = true;
+        if (!navigator.onLine || currentBase !== bases.oaci) return;
+        setBase('scan1000', true);
+        const s = $('#status2'); if (s) { s.textContent = 'Carte OACI indisponible (tuiles refusées par l\'IGN) : carte IGN 1/1 000 000 affichée à la place. La carte gardée hors ligne et celle du PDF peuvent manquer aussi.'; s.style.color = 'var(--warn-text)'; }
+        console.warn('OACI : tuile de contrôle refusée, repli SCAN 1000');
+      };
+      img.src = GEOPF.oaci.replace('{z}', 8).replace('{y}', 93).replace('{x}', 127);
     }); }
 
   // ---------- Contour de la France, régions, masque hors France ----------
@@ -525,7 +537,7 @@
     const apply = () => {
       if (cb.checked) layers[k].addTo(map); else map.removeLayer(layers[k]);
       drawHalos();
-      if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers();
+      if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers().catch(() => {});
       if (cb.checked && k === 'notam' && NOTAM.partial) loadNotamFull().catch((e) => console.warn('notam', e));
       layerState[k] = cb.checked; store.set('layers', layerState);
       if (k === 'foudre') setFoudre(cb.checked);
@@ -1217,7 +1229,7 @@
       AIR = { asp: asp.data || [], zones: zones.data || [], vfr: vfr.data || {}, vfrDate: vfr.effDate };
       drawAirLayers();
       if (!AIR.asp.length && !AIR.zones.length) throw new Error('fichiers espaces / zones vides');
-    });
+    }).catch((e) => { airLoading = null; throw e; });   // échec (réseau) : nouvel essai à la prochaine coche
     return airLoading;
   }
   function rtbaToday() {

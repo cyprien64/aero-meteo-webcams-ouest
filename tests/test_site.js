@@ -78,6 +78,19 @@ setImmediate(() => setImmediate(() => {
     const fl = C.fuelLines({ night: null, climb, totFuel: p.totFuel, totDist: p.totDist, altLeg: p.altLeg, f, resFuel: p.resFuel, wxRes: null, reqFuel: p.totFuel + p.altLeg.fuel + p.resFuel, loaded: 80 });
     asserts++; if (!(fl.total === 33 && fl.margin === 47 && !fl.short)) failures.push(`vol Pau → Biarritz : carburant nécessaire 33 L, marge 47 L (obtenu ${fl.total} / ${fl.margin})`);
   } catch (e) { errors.push('vol de référence Pau → Biarritz : ' + e.message); }
+  // après la collecte (CHECK_LIVE=1) : lecture des horaires sur les vraies VAC — un changement d'écriture du SIA ne doit pas tout fermer ou tout ouvrir
+  const vacFile = path.join(ROOT, 'data/live/vac.json');
+  if (process.env.CHECK_LIVE && fs.existsSync(vacFile)) try {
+    const C = win.AWW.prepCalc, V = JSON.parse(fs.readFileSync(vacFile, 'utf8')).data || {}, wed = new Date('2026-12-02T10:00:00Z'), sun = new Date('2026-12-06T10:00:00Z');
+    const withHours = Object.values(V).filter((v) => /Location :1 -/.test(v.infos || ''));
+    const shutWed = Object.entries(V).filter(([, v]) => { const o = C.outsideHours(v, wed); return o && !o.ppr; }).map(([k]) => k);
+    const pumpShut = Object.entries(V).filter(([, v]) => { const r = C.fuelAt(v, wed); return r && r.open === false; }).map(([k]) => k);
+    const shutSun = Object.values(V).filter((v) => { const o = C.outsideHours(v, sun); return o && o.closed; }).length;
+    console.log(`VAC : ${withHours.length} avec horaires ATS ; hors horaires mercredi 10Z : ${shutWed.length} (${shutWed.join(', ')}) ; pompe fermée mercredi 10Z : ${pumpShut.length} ; fermés dimanche : ${shutSun}`);
+    if (withHours.length < 50) errors.push(`VAC : seulement ${withHours.length} fiches avec horaires ATS (format de la rubrique changé ?)`);
+    if (shutWed.length > 5) errors.push(`VAC : ${shutWed.length} terrains « hors horaires » un mercredi à 10Z — lecture des horaires à revoir (${shutWed.slice(0, 8).join(', ')})`);
+    if (pumpShut.length > 5) errors.push(`VAC : ${pumpShut.length} pompes « fermées » un mercredi à 10Z — lecture du carburant à revoir`);
+  } catch (e) { errors.push('contrôle des VAC : ' + e.message); }
   // sw.js : chaque fichier de SHELL doit exister, sinon l'installation hors ligne échoue entièrement
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), shell = ((sw.match(/const SHELL = \[([\s\S]*?)\];/) || [])[1] || '');
   [...shell.matchAll(/'([^']+)'/g)].map((m) => m[1]).filter((f) => f !== './').forEach((f) => { if (!fs.existsSync(path.join(ROOT, f))) errors.push(`sw.js : fichier ${f} de SHELL absent`); });

@@ -390,6 +390,32 @@
 
   // ================================================================ Aide : comment préparer une nav (bouton « ? »)
   const icon = (sel) => { const i = $(sel + ' .ico'); return i ? `<span class="help-ico">${i.outerHTML}</span>` : ''; };
+  // ---------- données du pilote (carnet de vol, profils, bras de levier, notes, taxes saisies) : seulement sur l'appareil.
+  // Safari efface ce stockage après 7 jours sans visite (sauf site ajouté à l'écran d'accueil) : fichier de sauvegarde + stockage persistant.
+  const SKIP_BACKUP = /^aww\.(prep2\.snaps|omcount|prep2\.remindSeen)$/;   // reconstruit tout seul, inutile dans la sauvegarde
+  const backupKeys = () => { const k = []; for (let i = 0; i < localStorage.length; i++) { const x = localStorage.key(i); if (/^aww\./.test(x) && !SKIP_BACKUP.test(x)) k.push(x); } return k; };
+  window.AWW_backup = () => {
+    try {
+      const data = Object.fromEntries(backupKeys().map((k) => [k, localStorage.getItem(k)]));
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'aero-meteo', v: 1, at: new Date().toISOString(), data })], { type: 'application/json' }));
+      a.download = `aero-meteo-mes-donnees-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      localStorage.setItem('aww.lastBackup', String(Date.now()));
+    } catch (e) { alert('Sauvegarde impossible : ' + e.message); }
+  };
+  window.AWW_restore = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
+    inp.onchange = () => inp.files[0] && inp.files[0].text().then((t) => {
+      const j = JSON.parse(t);
+      if (!j || j.app !== 'aero-meteo' || typeof j.data !== 'object') throw new Error('ce fichier n\'est pas une sauvegarde Aéro Météo');
+      const keys = Object.keys(j.data).filter((k) => /^aww\./.test(k) && typeof j.data[k] === 'string');
+      if (!confirm(`Restaurer ${keys.length} éléments du ${new Date(j.at).toLocaleDateString('fr-FR')} ? Les données actuelles du même nom seront remplacées.`)) return;
+      keys.forEach((k) => localStorage.setItem(k, j.data[k]));
+      alert('Données restaurées : la page va se recharger.'); location.reload();
+    }).catch((e) => alert('Restauration impossible : ' + e.message));
+    inp.click();
+  };
+  // stockage persistant : le navigateur ne l'efface plus pour faire de la place (accordé sans question par Chrome, Firefox demande)
+  if (navigator.storage && navigator.storage.persist && backupKeys().some((k) => /pilots|arms\.|note/.test(k))) navigator.storage.persisted().then((p) => p || navigator.storage.persist()).catch(() => {});
   function showHelp() {
     A.showPanel('Comment préparer une nav', `
       <div class="row"><button class="btn primary" id="help-tour">Visite guidée des boutons</button> <button class="btn" id="help-news">Nouveautés</button></div>
@@ -403,6 +429,10 @@
       <p><b>Briefing PDF + log Excel</b> : le dossier complet et le log de nav du club. <b>Préparer le retour</b> : la route inverse en un clic. <b>Partager</b> : un lien qui rouvre la même préparation.</p>
       <h4>5. Voler sans réseau</h4>
       <p><b>Garder la carte OACI du trajet</b> (dans le briefing) enregistre la carte autour de la route sur l'appareil. Le dernier briefing reste lisible dans ${icon('#btn-hist')} <b>Historique</b>. En vol, choisis le fond « Carte OACI-VFR ».</p>
+      <h4>6. Garder mes données</h4>
+      <p>Carnet de vol, profils pilotes, bras de levier, notes et taxes saisies restent <b>seulement sur cet appareil</b>. Safari (iPhone, iPad) les efface après 7 jours sans visite, sauf si le site est ajouté à l'écran d'accueil.</p>
+      <div class="row"><button class="btn" id="help-backup">Sauvegarder mes données</button> <button class="btn" id="help-restore">Restaurer une sauvegarde</button></div>
+      <p class="meta">${(() => { const t = +localStorage.getItem('aww.lastBackup') || 0; return t ? `Dernière sauvegarde : ${new Date(t).toLocaleDateString('fr-FR')}.` : 'Aucune sauvegarde faite sur cet appareil.'; })()}</p>
       <h4>Bon à savoir</h4>
       <p>${icon('#btn-measure')} <b>Mesurer</b> : distance, cap et temps de vol entre des points cliqués. <b>Clic droit</b> (ou appui long) sur la carte : les espaces aériens au-dessus.</p>
       <p class="meta">${esc(window.AWW_LOG.omText())}</p>
@@ -410,11 +440,15 @@
       <figure class="sign"><img src="icons/signature.jpg" width="200" height="135" alt="Insigne de Cyprien Agulhon"><figcaption>Conçu et réalisé par <b>Cyprien Agulhon</b></figcaption></figure>`);
     $('#help-tour').addEventListener('click', () => { $('#detail-close').click(); startTour(); });
     $('#help-news').addEventListener('click', () => showNews());
+    $('#help-backup').addEventListener('click', () => window.AWW_backup());
+    $('#help-restore').addEventListener('click', () => window.AWW_restore());
   }
   $('#btn-tour').addEventListener('click', showHelp);
 
   // ================================================================ Quoi de neuf (une fois après chaque mise à jour)
-  const NEWS = { v: 60, items: [
+  const NEWS = { v: 61, items: [
+    'Sauvegarder / restaurer mes données (carnet de vol, profils, bras de levier, notes) : bouton dans l\'aide « ? » et dans le carnet de vol. Safari efface ces données après 7 jours sans visite.',
+    'Avertissement si l\'appareil n\'est pas à l\'heure de Paris (tablette en UTC) : les heures « locales » seraient décalées.',
     'Voyage : un tableau « jour par jour » donne la meilleure heure de départ de chaque étape sur les jours qui viennent.',
     'Horaires des terrains selon le jour : week-end, jours fériés (Pâques, 14 juillet…), pause de midi, « non assuré » ; et la pompe à carburant ouverte ou non à l\'heure d\'arrivée.',
     'Plan B à chaque escale : où dormir, terrains voisins ouverts avec carburant, prochain jour favorable pour repartir.',

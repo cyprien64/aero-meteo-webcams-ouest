@@ -5,4 +5,7 @@ window.AWW_CONFIG = {
   // Adresse e-mail qui reçoit « Signaler un problème » et les propositions (taxes, vie pratique).
   // Vide : le bouton télécharge seulement le journal, à envoyer à la personne qui a partagé le site.
   contact: 'cyprien64@orange.fr',
+  // Clé Géoplateforme (IGN) pour la carte OACI-VFR : vide = clé publique des démonstrations IGN (peut changer sans prévenir).
+  // Clé gratuite propre au site : à demander sur le portail Géoplateforme de l'IGN (cartes.gouv.fr, à vérifier).
+  ignKey: '',
 };

@@ -237,8 +237,12 @@ def collect_notam():
         print(f'  Aérodromes avec NOTAM : {len(ad)} ({sum(len(v) for v in ad.values())} NOTAM)')
         if not fir_list or not ad:   # NOTAM d'aérodromes absents = fermetures de piste invisibles : on garde la version publiée
             raise RuntimeError(f'NOTAM incomplets (FIR : {len(fir_list)}, aérodromes : {len(ad)})')
+        fir_sorted = sorted(fir_list.values(), key=lambda x: x['from'] or '')
         save('notam.json', {'generated': NOW.isoformat(), 'horizon': horizon, 'source': 'SOFIA-Briefing (SIA/DGAC)',
-                            'fir': sorted(fir_list.values(), key=lambda x: x['from'] or ''), 'ad': ad, 'skip': skip})
+                            'fir': fir_sorted, 'ad': ad, 'skip': skip})
+        # ouverture de la carte : NOTAM d'aérodromes + activations RTBA seulement (-35 % à télécharger) ; le reste à la demande (couche NOTAM, préparation)
+        save('notam_ad.json', {'generated': NOW.isoformat(), 'horizon': horizon, 'source': 'SOFIA-Briefing (SIA/DGAC)', 'partial': True,
+                               'fir_count': len(fir_sorted), 'fir': [n for n in fir_sorted if 'RTBA' in (n.get('e') or '') + (n.get('efr') or '')], 'ad': ad})
     except Exception as e:  # noqa: BLE001
         print('  NOTAM : échec', e)
         fallback('notam.json')

@@ -54,9 +54,12 @@ jobs:
         run: echo "c=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import collect; print(collect.current_cycle()[1])' 2>/dev/null || echo inconnu)" >> "$GITHUB_OUTPUT"
 
       # collecte rapide (toutes les 15 min) : lit le cache des VAC sans jamais l'enregistrer (un dossier incomplet bloquerait la clé)
+      # rapide : lancements planifiés toutes les 15 min et lancements à distance (workflow_dispatch), sauf ceux de 3 h UTC (collecte complète de nuit)
       - name: Type de collecte
         id: mode
-        run: echo "fast=${{ github.event.schedule == '4,19,34,49 * * * *' }}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ "${{ github.event.schedule }}" = "4,19,34,49 * * * *" ] || { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$(date -u +%H)" != "03" ]; }; then f=true; else f=false; fi
+          echo "fast=$f" >> "$GITHUB_OUTPUT"
 
       - if: steps.mode.outputs.fast == 'true'
         uses: actions/cache/restore@v6
@@ -114,6 +117,10 @@ jobs:
       # Échoue si NOTAM / METAR ne se mettent plus à jour -> GitHub envoie un e-mail d'échec
       - name: Contrôle de fraîcheur des données
         run: python3 scripts/health.py
+
+      # après la mise en ligne (ne bloque pas) : horaires et carburant lus sur les vraies VAC ; échec -> e-mail de GitHub
+      - name: Contrôle de la lecture des VAC
+        run: CHECK_LIVE=1 node tests/test_site.js
 
   # GitHub suspend les tâches planifiées d'un dépôt public sans activité depuis 60 jours :
   # un commit vide est poussé si le dernier commit date de plus de 45 jours.

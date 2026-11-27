@@ -165,6 +165,11 @@
   const notamAt = (n, when) => { const a = Date.parse(n.from), z = Date.parse(n.to), t = when.getTime(); return !(a > t + 1800e3) && !(z < t - 1800e3); };
 
   // ---------- horaires ATS publiés (VAC, rubrique ATS) : fenêtre la plus large de la saison, ignorée si H24 ou introuvable
+  // fuseau de l'appareil différent de Paris (tablette en UTC, téléphone à l'étranger) : toutes les « heures locales » saisies seraient décalées
+  const parisOffset = (d) => { const m = /GMT([+-]\d+)(?::(\d+))?/.exec(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', timeZoneName: 'shortOffset' }).format(d)) || []; return -((+m[1] || 0) * 60 + Math.sign(+m[1] || 1) * (+m[2] || 0)); };
+  const tzMismatch = (d = new Date()) => d.getTimezoneOffset() !== parisOffset(d);
+  console.assert(parisOffset(new Date(Date.UTC(2026, 0, 15))) === -60 && parisOffset(new Date(Date.UTC(2026, 6, 15))) === -120, 'parisOffset');
+  const tzWarn = () => (tzMismatch() ? `L'appareil n'est pas à l'heure de Paris (fuseau UTC${-new Date().getTimezoneOffset() >= 0 ? '+' : ''}${-new Date().getTimezoneOffset() / 60}) : les heures « locales » saisies et affichées sont celles de l'appareil, pas celles de la France.` : '');
   const isSummer = (d) => /\+2/.test(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', timeZoneName: 'shortOffset' }).format(d));
   console.assert(isSummer(new Date(Date.UTC(2026, 6, 1))) && !isSummer(new Date(Date.UTC(2026, 0, 1))), 'isSummer');
   function atsHours(v) {
@@ -203,12 +208,21 @@
   }
   console.assert([...daysIn('SAM, DIM et JF / SAT, SUN and HOL')].sort().join() === '5,6,7' && [...daysIn('LUN-VEN sauf JF')].sort().join() === '0,1,2,3,4' && [...daysIn('VEN-LUN')].sort().join() === '0,4,5,6', 'daysIn');
   // texte ATS -> { R: {jour: [[début, fin] min UTC]}, C: {jour: 'fermé' | 'PPR'}, shut: Set 'MM-DD', any } pour la date « when »
+  // « ETE / SUM : … HIV / WIN : … » sur une ligne : ne garder que la saison de « when » (null = ligne de l'autre saison) ; « (ETE : -1 HR) » ignoré
+  function seasonPart(line, summer) {
+    const iE = line.search(/\b(?:ETE|SUM)\b[^:()]{0,8}:(?!\s*-\s*1)/), iH = line.search(/\b(?:HIV|WIN)\b[^:()]{0,8}:(?!\s*-\s*1)/);
+    if (iE < 0 && iH < 0) return line;
+    if (iE >= 0 && iH >= 0) return summer ? line.slice(iE, iH > iE ? iH : undefined) : line.slice(iH, iE > iH ? iE : undefined);
+    return iE >= 0 ? (summer ? line.slice(iE) : null) : (summer ? null : line.slice(iH));
+  }
+  console.assert(seasonPart('AFIS : ETE / SUM : VEN-DIM : 0800-1000', false) === null && seasonPart(' HIV / WIN : SAM-DIM : 1200-1530.', false).startsWith('HIV')
+    && seasonPart('ETE / SUM : 0700-1600, HIV / WIN : 0800-1600.', true) === 'ETE / SUM : 0700-1600, ' && seasonPart('HOR : 0400-2200 (ETE / SUM : -1 HR)', true) === 'HOR : 0400-2200 (ETE / SUM : -1 HR)', 'seasonPart');
   function hoursByDay(blk, when) {
     const R = {}, C = {}, shut = new Set(), md = when.toISOString().slice(5, 10), mdv = (x) => x.slice(3, 5) + '-' + x.slice(0, 2);
     const closedRe = /non assuré|not provided|fermé|closed/i, SEG = /(?<=\d{4}\s*)[,;.]?\s*(?=(?:LUN|MAR|MER|JEU|VEN|SAM|DIM|MON|TUE|WED|THU|FRI|SAT|SUN)\b)/;
     let inPeriod = true, any = false;
     for (const raw of blk.split('\n')) {
-      const line = raw.trim(); if (!line || /^MIL\b|\b(TEL|FAX|E-?mail)\b|bureau|office hours/i.test(line)) continue;
+      const line = (seasonPart(raw, isSummer(when)) || '').trim(); if (!line || /^MIL\b|\b(TEL|FAX|E-?mail)\b|bureau|office hours/i.test(line)) continue;
       const per = line.match(/du (\d\d\/\d\d) au (\d\d\/\d\d)/);
       if (per) { const a = mdv(per[1]), b = mdv(per[2]); inPeriod = a <= b ? md >= a && md <= b : md >= a || md <= b; }
       if (!inPeriod) continue;
@@ -252,7 +266,6 @@
   }
   function outsideHours(v, when) {
     const h = atsHours(v); if (!h) return null;
-    if (/^\s*(ETE|HIV)\b/m.test(h.blk)) return outsideHoursWide(v, when);   // saisons ETE / HIV : ancien calcul
     if (/^\s*HX\b/.test(h.blk)) return { win: 'horaires irréguliers (HX), se renseigner', ppr: true, day: '' };
     const r = hoursCheck(h.blk, h.shift, when, h.ppr);
     return r === undefined ? outsideHoursWide(v, when) : r;
@@ -268,6 +281,8 @@
       && outsideHours(ci, at('2026-11-28T14:00Z')).closed && !outsideHours(ci, at('2026-06-27T14:00Z'))   // samedi : fermé l'hiver, ouvert l'été
       && outsideHours(ci, at('2026-07-14T09:00Z')).closed && !outsideHours(ci, at('2026-07-15T09:00Z'))   // 14 juillet (mardi) fermé, lendemain ouvert
       && outsideHours(dh, at('2026-11-28T10:00Z')).ppr && !outsideHours(dh, at('2026-11-27T10:00Z')) && outsideHours(dh, at('2026-11-11T10:00Z')).ppr   // samedi et 11 novembre : PPR
+      && outsideHours(V(' AFIS : ETE / SUM : VEN-DIM/ FRI-SUN : 0800-1000 ; 1130-1630,\n HIV / WIN : SAM-DIM/ SAT-SUN : 1200-1530.'), at('2026-11-28T09:00Z'))   // LFNB : samedi d'hiver 9 h fermé
+      && !outsideHours(V(' AFIS : ETE / SUM : VEN-DIM/ FRI-SUN : 0800-1000 ; 1130-1630,\n HIV / WIN : SAM-DIM/ SAT-SUN : 1200-1530.'), at('2026-07-04T09:00Z'))   // samedi d'été 9 h ouvert
       && !outsideHours(ch, at('2026-07-05T17:00Z')) && outsideHours(ch, at('2026-11-29T12:00Z')) && !outsideHours(ch, at('2026-11-29T13:00Z')) && outsideHours(ch, at('2026-12-25T10:00Z')).closed;
   })(), 'outsideHours par jour (LFBA, LFCI, LFDH, LFCH)');
   // ---------- carburant à une heure donnée (rubrique « Carburant / Fuel » de la VAC) : automate, horaires par jour / saison, O/R
@@ -389,6 +404,7 @@
   // ================================================================== données
   let ZONES = null, VAC = null, ASP = null, SPECIAL = null, LANDM = null, FIRES = null, ADWX = null;
   async function loadAip() {
+    if (A.loadNotamFull) await A.loadNotamFull().catch((e) => console.warn('NOTAM complets', e));   // en route : absents du fichier léger d'ouverture
     if (!ZONES) ZONES = await A.getLive('zones.json').catch(() => ({ data: [] }));
     if (!VAC) VAC = await A.getLive('vac.json').catch(() => ({ data: {} }));
     if (!ASP) ASP = await A.getLive('airspaces.json').catch(() => ({ data: [] }));
@@ -856,7 +872,7 @@
         <label class="full">Points tournants (terrains OACI ou points VFR comme BP-N, optionnel) <button type="button" class="pick-btn" data-pick="pf-wps" title="Choisir sur la carte">📍</button> <span class="meta">📍 puis clic sur la carte pour ajouter un point</span><input id="pf-wps" value="${esc(f.wps || '')}" placeholder="LFBX BI-N"></label>
         <label>Point de sortie (départ)<select id="pf-exit"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
         <label>Point d'entrée (arrivée)<select id="pf-entry"><option value="auto">Auto (le plus direct)</option><option value="none">Aucun (direct)</option></select></label>
-        <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}"></label>
+        <label>Départ (heure locale)<input id="pf-time" type="datetime-local" value="${localInput(next)}">${tzWarn() ? `<span class="warn" style="display:block">${esc(tzWarn())}</span>` : ''}</label>
         <label>Dégagement (destination finale) <button type="button" class="pick-btn" data-pick="pf-alt" title="Choisir sur la carte">📍</button><input id="pf-alt" list="apt-list" value="${esc(f.alt || '')}" placeholder="LFRD" autocomplete="off"></label>
         <div class="full" id="pf-adcheck"></div>
         <label>Couloir (NM de part et d'autre)<input id="pf-cor" type="number" min="2" max="30" value="${esc(f.cor || 10)}"></label>
@@ -907,6 +923,7 @@
           <div id="pf-log"></div>
           <div class="row"><input id="pf-log-d" type="date"><input id="pf-log-n" type="number" min="1" max="20" value="1" style="width:60px" title="atterrissages"> atterrissage(s)
             <label><input id="pf-log-i" type="checkbox"> avec instructeur</label><button type="button" class="btn" id="pf-log-add">Ajouter</button></div>
+          <p class="meta">Gardé seulement sur cet appareil (Safari l'efface après 7 jours sans visite). <button type="button" class="btn" id="pf-backup">Sauvegarder mes données</button> <button type="button" class="btn" id="pf-restore">Restaurer</button></p>
         </details>
         <details class="full arms-box" id="pf-arms-box"><summary>Bras de levier et enveloppe de centrage (fiche de pesée)</summary>
           <p class="meta">Valeurs en mètres depuis la référence du manuel de vol. Vide = valeur par défaut (indiquée en grisé). Mémorisé pour chaque avion sur cet appareil.</p>
@@ -963,6 +980,8 @@
       }));
     };
     const loadPilot = () => { const pr = store.get('pilots', {})[$('#pf-pil').value.trim()]; showLog(); if (!pr) return; if (pr.m) $('#pf-m1').value = pr.m; $('#pf-lic').value = pr.lic || ''; $('#pf-med').value = pr.med || ''; $('#pf-nuit').checked = !!pr.nuit; };
+    $('#pf-backup').addEventListener('click', () => window.AWW_backup());
+    $('#pf-restore').addEventListener('click', () => window.AWW_restore());
     $('#pf-log-add').addEventListener('click', () => {
       const name = $('#pf-pil').value.trim(), d = $('#pf-log-d').value; if (!name || !d) return;
       addLog(name, { d, n: +$('#pf-log-n').value || 1, i: $('#pf-log-i').checked }); showLog();
@@ -1101,7 +1120,7 @@
     return { ...f, ac, T, rg, tas: rg.tas, ff: rg.ff };
   }
 
-  let routeLayer = null, lastBrief = null, lastTrip = null, lastForm = null;
+  let routeLayer = null, lastTrip = null, lastForm = null;
   // Points libres (déplacés sur la carte) : jeton "43.2050/-0.4570" -> PT1, PT2…
   let CUSTOM = {}, customN = 0;
   const tokenOf = (id) => (CUSTOM[id] ? CUSTOM[id].token : id);
@@ -1251,7 +1270,7 @@
       trip.forEach((b, i) => bindSummary(b, '-' + i));
       const csv = $('#pf-cost-csv'); if (csv) csv.addEventListener('click', () => download(new Blob(['\ufeff' + costCsv(trip)], { type: 'text/csv;charset=utf-8' }), `cout_${trip[0].f.dep}-${trip[trip.length - 1].f.arr}_${trip[0].depT.toISOString().slice(0, 10)}.csv`));
       const ck = $('#pf-check'); if (ck) ck.addEventListener('change', (e) => { const st = store.get(checkKey(trip[0]), []); st[+e.target.dataset.i] = e.target.checked; store.set(checkKey(trip[0]), st); });
-      lastBrief = trip[0]; lastTrip = trip; window.AWW_LASTTRIP = trip;
+      lastTrip = trip; window.AWW_LASTTRIP = trip;
       prog.textContent = '';
       const histId = makePdf ? Date.now() : null;
       if (makePdf) histStart(histId, trip);
@@ -1374,7 +1393,7 @@
       const st = $('#pf-fields-st' + sfx), out = $('#pf-obst-out' + sfx); st.textContent = 'Recherche des éoliennes et lignes HT…';
       try {
         const o = await osmObstacles(b); st.textContent = ''; b.osmObst = o;
-        const hi = o.turbines.filter((t) => t.top && t.top > (b.f.ft - 1000)), low = (b.legs[0].ft || b.f.ft);
+        const hi = o.turbines.filter((t) => t.top && t.top > (b.f.ft - 1000));
         out.innerHTML = `<p class="meta">⚡ <b>Éoliennes</b> à moins de 1,5 NM : ${o.turbines.length ? `${o.turbines.length}${o.turbines.some((t) => t.ft) ? `, jusqu'à ${Math.max(...o.turbines.map((t) => t.ft || 0))} ft de haut` : ''} (${[...new Set(o.turbines.map((t) => Math.round(t.along / 5) * 5))].map((a) => `vers ${a} NM`).join(', ')})` : 'aucune sur OpenStreetMap'}${hi.length ? ` — <b style="color:#ff6b6b">${hi.length} à moins de 1000 ft sous la croisière</b>` : ''} · <b>Lignes haute tension</b> croisées : ${o.lines.length ? o.lines.map((l) => `${l.along.toFixed(0)} NM${l.kv ? ` (${l.kv} kV)` : ''}`).join(', ') : 'aucune'}.</p>
           <p class="meta">Données OpenStreetMap incomplètes (hauteur des pylônes rarement connue) : compléter avec la carte OACI et les NOTAM d'obstacles. Turbulence de sillage derrière les éoliennes.</p>`;
         if (routeLayer) { o.turbines.forEach((t) => L.circleMarker(t.p, { radius: 3, color: '#fff', weight: 1, fillColor: '#00e5ff', fillOpacity: 1 }).bindTooltip(`Éolienne${t.ft ? ` ${t.ft} ft` : ''}`, { className: 'tip' }).addTo(routeLayer));
@@ -2688,6 +2707,7 @@
       if (dv && dv < b.eta) al.unshift(`⛔ ${lbl} de ${b.f.pil || 'pilote'} expiré(e) le ${b.f[k].split('-').reverse().join('/')}.`);
       else if (dv && dv - b.depT < 30 * 864e5) al.push(`${lbl} de ${b.f.pil || 'pilote'} valable jusqu'au ${b.f[k].split('-').reverse().join('/')} : à renouveler.`);
     }
+    if (tzMismatch(b.depT)) al.push(tzWarn() + ' Vérifier l\'heure de départ ; les heures UTC du briefing restent justes.');
     if (b.windErr) al.push(b.windErr + ' Temps calculés sans vent.');
     if (b.wxFallback) al.push(`Service météo Open-Meteo indisponible depuis cette connexion : vent et météo de route pris dans la prévision des terrains publiée par le site (${b.wxFallback === '?' ? 'heure inconnue' : 'calculée à ' + utc(new Date(b.wxFallback))}), terrain le plus proche de chaque point, vent en altitude approché. Vérifier avec aviation.meteo.fr (TEMSI, WINTEM).`);
     if (b.wxMetno) al.push('Météo de route complétée par MET Norway (institut météorologique norvégien) : pas de visibilité ni de vent en altitude dans cette source, plafond estimé d\'après la température et le point de rosée.');
@@ -2811,7 +2831,7 @@
       ['Carburant', e.none ? 'aucun' : (e.fuel || []).join(', ') || 'voir VAC'], ['Paiement', (e.pay || []).join(', ') || 'non précisé'],
       ['Taxe d\'atterrissage', fee ? `${fee.tarif}${fee.note ? ' — ' + fee.note : ''}` : 'non renseignée'],
       ['Contact', e.mail_escale ? `${e.mail_escale} (${c.r || 'VAC'})` : ''] , ['Téléphone', (e.tel_ad || []).join(' / ')],
-      ['Situation', [pr.situation, pr.transport, pr.restaurant, pr.hotel].filter(Boolean).join(' · ')],
+      ['Situation', pr.situation], ['Transports', pr.transports], ['Hôtels, restaurants', pr.hotels], ['Divers', pr.divers],   // noms de escale.json « pratique »
     ].filter((r) => r[1]);
     return `<details><summary><b>Fiche escale ${esc(id)}</b> ${esc((A.aptByIcao[id] || {}).name || '')}</summary><table class="legs">${rows.map((r) => `<tr><td style="text-align:left;white-space:nowrap">${esc(r[0])}</td><td style="text-align:left">${esc(r[1])}</td></tr>`).join('')}</table>
       <p class="meta">Relevé automatique de la VAC et des fiches du site : vérifier sur la VAC et auprès du terrain.
@@ -3848,7 +3868,7 @@
   // ---------- repères évidents le long de la route directe -> points tournants suggérés (22) ou itinéraire « élève » (6)
   // pas : un point tous les ~step NM, à moins de dev NM de la route ; priorité aux grandes villes, lacs, croisements d'autoroutes
   function landmarkRoute(b, step = 17, dev = 3) {
-    const D = LANDM || { towns: [] }, a = b.pts[0], z = b.pts[b.pts.length - 1], tot = distNm(a, z), tc = bearing(a, z);
+    const D = LANDM || { towns: [] }, a = b.pts[0], z = b.pts[b.pts.length - 1], tot = distNm(a, z);
     if (tot < step * 1.4) return [];
     const cands = [];
     for (const [n, la, lo, pop] of D.towns) { if (pop < 3000) continue; const r = routeDist([la, lo], [a, z]); if (r.d <= dev && r.along > 5 && r.along < tot - 5) cands.push({ n, p: [la, lo], along: r.along, d: r.d, w: Math.log10(pop) - r.d * .15 }); }
@@ -4198,7 +4218,7 @@
     const st = (trip[0].slots || {}).stages;
     return trip.map((b, k) => {
       const id = b.f.arr, ap = A.aptByIcao[id], e = (A.escaleOf && A.escaleOf(id)) || {}, pr = e.pratique || {};
-      const sleep = [pr.hotel, pr.situation || pr.ville].filter(Boolean).join(' · ');
+      const sleep = [pr.hotels, pr.situation || pr.ville].filter(Boolean).join(' · ');
       const near = !ap ? [] : A.APTS.filter((a) => a.icao !== id && /^LF/.test(a.icao)).map((a) => ({ a, d: distNm([+ap.la, +ap.lo], [+a.la, +a.lo]) })).filter((x) => x.d <= 30)
         .map((x) => { const es = (A.escaleOf && A.escaleOf(x.a.icao)) || {}, v = vacAt(x.a.icao), when = new Date(b.eta.getTime() + x.d / b.f.tas * 36e5), oh = outsideHours(v, when), fa = fuelAt(v, when);
           return { ...x, fuel: !es.none && (es.fuel || []).length ? es.fuel : null, open: !oh || (oh.ppr && !oh.closed), fa }; })
@@ -4729,7 +4749,8 @@
     if (navigator.share && /Mobi|iPad|Android/i.test(navigator.userAgent)) { try { await navigator.share({ title, url }); done = 'Lien partagé.'; } catch { /* annulé */ } }
     if (!done) { try { await navigator.clipboard.writeText(url); done = 'Lien copié : colle-le dans un message (WhatsApp, e-mail…).'; } catch { done = 'Copie le lien ci-dessous :'; } }
     const box = document.createElement('div'); box.className = 'okk';
-    box.innerHTML = `🔗 ${esc(done)}<input readonly value="${esc(url)}" style="width:100%;margin-top:4px" onclick="this.select()"><span class="meta">Le lien ouvre la même préparation (route, avion, heure, masses) et relance le calcul avec les données du moment. Le nom du pilote n'y figure pas.</span>`;
+    box.innerHTML = `🔗 ${esc(done)}<input readonly value="${esc(url)}" style="width:100%;margin-top:4px"><span class="meta">Le lien ouvre la même préparation (route, avion, heure, masses) et relance le calcul avec les données du moment. Le nom du pilote n'y figure pas.</span>`;
+    box.querySelector('input').addEventListener('click', (e) => e.target.select());   // pas de onclick en ligne : bloqué dans l'extension Chrome
     const btn = $('#pf-share' + sfx); btn.closest('.row').after(box);
   }
   // Ouverture d'un lien partagé : #vol=...
@@ -4753,7 +4774,7 @@
   }
   setTimeout(openShared, 300);
 
-  A.prepCalc = { legsPlan, climbExtra, massBalance, fuelLines };   // pour le vol de référence de tests/test_site.js
+  A.prepCalc = { legsPlan, climbExtra, massBalance, fuelLines, outsideHours, fuelAt };   // pour le vol de référence de tests/test_site.js
   // outils repris par prep-docs.js (chargé juste après) ; VAC est chargé plus tard, d'où une fonction
   Object.assign(PV, {
     $, CHECK_ITEMS, MODELS, MOUNTAIN_RULES, WXTXT, airfieldPhoto, alertsOf, checkKey, cutGeom, cutSvg, deadReckoning, destPt, diversions, download, drawGramet, esc, fuelLines, grametSummary, hhmm, histSave, icaoRoute, landmarksOf, latin, loadMargins, nightAlong, ogimetUrl, pnrEtp, r3, rad, radioCard, resolvePt, routeDist, routeMarks, semiCircular, store, tripCost, utc, verdict, vfrOf,

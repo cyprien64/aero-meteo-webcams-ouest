@@ -67,7 +67,7 @@
     style: (f) => schemaStyle(f.properties.k),
   });
   const tileOpt = { maxZoom: 15 };
-  const geopf = (layer, tms, style, priv) => `https://data.geopf.fr/${priv ? 'private/wmts?apikey=ign_scan_ws&' : 'wmts?'}SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&TILEMATRIXSET=${tms}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg`;
+  const geopf = (layer, tms, style, priv) => `https://data.geopf.fr/${priv ? `private/wmts?apikey=${encodeURIComponent((window.AWW_CONFIG || {}).ignKey || 'ign_scan_ws')}&` : 'wmts?'}SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&TILEMATRIXSET=${tms}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg`;
   const GEOPF = window.AWW_GEOPF = {
     oaci: geopf('GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-OACI', 'PM_6_11', 'normal', true),
     scan1000: geopf('IGNF_CARTES_SCAN-1000', 'PM_0_10', 'SCAN1000'),
@@ -96,6 +96,14 @@
   }
   $('#basemap').addEventListener('change', (e) => setBase(e.target.value));
   setBase(store.get('base', 'schema'));
+  // carte OACI refusée en série (clé IGN changée ou bloquée) alors que le réseau marche : repli sur le SCAN 1000 (sans clé) et message
+  { let bad = 0, good = 0;
+    bases.oaci.on('tileload', () => { good++; }).on('tileerror', () => {
+      if (++bad < 8 || good || !navigator.onLine || currentBase !== bases.oaci) return;
+      setBase('scan1000');
+      const s = $('#status2'); if (s) { s.textContent = 'Carte OACI indisponible (tuiles refusées par l\'IGN) : carte IGN 1/1 000 000 affichée à la place. La carte gardée hors ligne et celle du PDF peuvent manquer aussi.'; s.style.color = 'var(--warn-text)'; }
+      console.warn('OACI : tuiles refusées, repli SCAN 1000');
+    }); }
 
   // ---------- Contour de la France, régions, masque hors France ----------
   const frOutline = L.layerGroup();
@@ -390,13 +398,11 @@
         try {
           const ids = [...new Set([...Object.keys(metars), ...STATIONS])].filter((k) => /^(LF|LE)/.test(k));
           const live = await liveMetNo(ids);
-          let n = 0;
           for (const m of live.met) {
             const old = metars[m.icaoId], a = aptByIcao[m.icaoId];
             if (!old && !a) continue;
             if (old && old.obsTime >= m.obsTime) continue;
             metars[m.icaoId] = { ...(old || {}), lat: old ? old.lat : a.la, lon: old ? old.lon : a.lo, elev: old ? old.elev : Math.round((+a.elev || 0) / 3.281), name: old ? old.name : a.name, ...m };
-            n++;
           }
           for (const t of live.taf) if (!tafs[t.icaoId] || tafs[t.icaoId].issueTime < t.issueTime) tafs[t.icaoId] = { ...(tafs[t.icaoId] || {}), ...t };
           metarSrc = 'direct';   // source directe consultée (même si elle n'avait rien de plus récent que la collecte)
@@ -520,6 +526,7 @@
       if (cb.checked) layers[k].addTo(map); else map.removeLayer(layers[k]);
       drawHalos();
       if (cb.checked && ['asp', 'siv', 'zones', 'rtba', 'vfr'].includes(k)) loadAirLayers();
+      if (cb.checked && k === 'notam' && NOTAM.partial) loadNotamFull().catch((e) => console.warn('notam', e));
       layerState[k] = cb.checked; store.set('layers', layerState);
       if (k === 'foudre') setFoudre(cb.checked);
       if (k === 'vig' && cb.checked) drawVig();
@@ -875,7 +882,7 @@
       n.isNew = cur[n.ref] >= SESSION_START;   // 1re visite : tout est marqué « déjà vu » (1)
     }
     newCount = Object.values(cur).filter((ts) => ts >= SESSION_START).length;   // un NOTAM peut figurer en route et sur un terrain
-    store.set('notamSeen', cur);   // les NOTAM disparus sont oubliés
+    store.set('notamSeen', NOTAM.partial ? { ...seen, ...cur } : cur);   // les NOTAM disparus sont oubliés (seulement avec la liste complète)
   }
   function notamHtml(n, withA = false) {
     const txt = n.efr || n.e || '';
@@ -1158,14 +1165,21 @@
       <p class="meta small-print">Données SOFIA-Briefing (SIA/DGAC). Outil d'aide : faire un dossier de vol officiel sur SOFIA.</p>`);
   }
 
+  // NOTAM complets (en route) : couche NOTAM affichée ou préparation de vol
+  let notamFullP = null;
+  function loadNotamFull() {
+    if (!NOTAM.partial) return Promise.resolve(NOTAM);
+    return notamFullP || (notamFullP = getLive('notam.json').then((d) => { NOTAM = d; markNewNotams(); drawNotam(); drawAerodromes(); return d; }).catch((e) => { notamFullP = null; throw e; }));
+  }
   async function loadNotamSup() {
     const st = [];
     try {
-      NOTAM = await getLive('notam.json');
+      NOTAM = await getLive('notam_ad.json').catch(() => getLive('notam.json'));   // léger : NOTAM d'aérodromes + RTBA ; le reste à la demande
+      if (layerState.notam) loadNotamFull().catch(() => {});
       markNewNotams();
       drawNotam(); drawAerodromes();
       const nAd = Object.values(NOTAM.ad).reduce((s, l) => s + l.length, 0);
-      st.push(`${NOTAM.fir.length + nAd} NOTAM${newCount ? ` dont ${newCount} nouveaux depuis ta dernière visite` : ''}`);
+      st.push(`${(NOTAM.partial ? NOTAM.fir_count : NOTAM.fir.length) + nAd} NOTAM${newCount ? ` dont ${newCount} nouveaux depuis ta dernière visite` : ''}`);
     } catch (e) { console.warn('notam', e); st.push('NOTAM indisponibles'); }
     try {
       { const sj = await getLive('supaip.json'); SUP = sj.data || []; SUPGEN = sj.generated || null; }
@@ -1452,7 +1466,7 @@
     map, L, esc, openWin, getLive, getJSON, distKm, IS_EXT, fmtT, fl, isActive, notamColor, altFt,
     metars, tafs, aptByIcao, APTS, SOURCES,
     showStack: (la, lo, t) => showStack(la, lo, t),
-    get NOTAM() { return NOTAM; }, get SUP() { return SUP; }, get SUPGEN() { return SUPGEN; }, escaleOf, feeFor, pprText,
+    get NOTAM() { return NOTAM; }, loadNotamFull, get SUP() { return SUP; }, get SUPGEN() { return SUPGEN; }, escaleOf, feeFor, pprText,
     showPanel(title, html) { showList(title, html); },
     detailBody, detail, store, highlight,
     setPickOff(v) { pickOff = v; },

@@ -1,4 +1,4 @@
-// Seule règle : nom de variable ou de fonction inconnu (ex. une fonction renommée à moitié). Lancé avant publication.
+// Règles : nom inconnu (ex. une fonction renommée à moitié) et variable jamais utilisée. Lancé avant publication.
 import globals from 'globals';
 export default [{
   files: ['**/*.js'],
@@ -6,5 +6,5 @@ export default [{
     ecmaVersion: 'latest', sourceType: 'script',
     globals: { ...globals.browser, ...globals.serviceworker, chrome: 'readonly', L: 'readonly', jspdf: 'readonly', PDFLib: 'readonly', JSZip: 'readonly' },
   },
-  rules: { 'no-undef': 'error' },
+  rules: { 'no-undef': 'error', 'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }] },
 }];

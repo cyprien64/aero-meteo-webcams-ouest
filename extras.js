@@ -386,7 +386,8 @@
       <h4>Bon à savoir</h4>
       <p>${icon('#btn-measure')} <b>Mesurer</b> : distance, cap et temps de vol entre des points cliqués. <b>Clic droit</b> (ou appui long) sur la carte : les espaces aériens au-dessus.</p>
       <p class="meta">${esc(window.AWW_LOG.omText())}</p>
-      <div class="warn">Outil d'aide : la préparation réglementaire reste SOFIA-Briefing, le SIA et aviation.meteo.fr.</div>`);
+      <div class="warn">Outil d'aide : la préparation réglementaire reste SOFIA-Briefing, le SIA et aviation.meteo.fr.</div>
+      <figure class="sign"><img src="icons/signature.jpg" width="200" height="135" alt="Insigne de Cyprien Agulhon"><figcaption>Conçu et réalisé par <b>Cyprien Agulhon</b></figcaption></figure>`);
     $('#help-tour').addEventListener('click', () => { $('#detail-close').click(); startTour(); });
     $('#help-news').addEventListener('click', () => showNews());
   }

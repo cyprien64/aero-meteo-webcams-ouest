@@ -1,11 +1,11 @@
 /* Service worker : application utilisable hors ligne (tablette) + dernier briefing consultable sans réseau. */
-const VERSION = 'aww-v56';
+const VERSION = 'aww-v57';
 const SHELL = [
   './', 'map.html', 'map.css', 'map.js', 'prepavol.js', 'extras.js', 'theme.js', 'log.js', 'config.js', 'app.webmanifest',
   'lib/leaflet/leaflet.js', 'lib/leaflet/leaflet.css', 'lib/cluster/leaflet.markercluster.js', 'lib/cluster/leaflet.featuregroup.subgroup.js', 'lib/cluster/MarkerCluster.css', 'lib/pdf/jspdf.umd.min.js', 'lib/pdf/jspdf.plugin.autotable.min.js',
   'lib/pdf/pdf-lib.min.js', 'lib/pdf/jszip.min.js', 'data/basemap.js', 'data/sources.js', 'data/france.js', 'data/aircraft.js',
   'data/vfr_points.json', 'data/fees.json', 'data/landmarks.json', 'data/template/log_nav_acb.xlsx', 'data/template/log_meta.json',
-  'icons/icon48.png', 'icons/icon192.png',
+  'icons/icon48.png', 'icons/icon192.png', 'icons/signature.jpg',
 ];
 // vac.json (2 Mo) n'est pas préchargé : mis en cache à la première préparation de vol
 const LIVE = ['metar.json', 'taf.json', 'notam.json', 'supaip.json', 'zones.json', 'escale.json', 'vfr_points.json', 'airspaces.json', 'fees_club.json', 'pratique_club.json', 'osm_near.json', 'vigilance.json', 'special.json'].map((f) => `data/live/${f}`);

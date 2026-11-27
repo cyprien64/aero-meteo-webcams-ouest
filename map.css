@@ -620,3 +620,8 @@ details.pratique > summary { padding: 11px 0; font-weight: 600; }
 .go-freq b { margin-left: auto; font: 700 24px "SF Mono", Menlo, Consolas, monospace; }
 .go-note { color: var(--muted); font-size: 12.5px; margin-top: 16px; }
 .btn.primary { background: var(--blue); color: #fff; border-color: transparent; font-weight: 600; } .btn.primary:hover { background: var(--blue); filter: brightness(1.08); }
+
+/* signature de l'auteur, en bas du panneau et de l'aide */
+.sign { margin: 14px auto 4px; text-align: center; }
+.sign img { display: block; width: 150px; height: auto; margin: 0 auto; border-radius: 14px; }
+.sign figcaption { margin-top: 6px; font-size: 11px; color: var(--muted); }
